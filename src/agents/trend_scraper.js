@@ -11,6 +11,16 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
+// 카테고리 → 경제 직독직해 시리즈명 매핑
+const SERIES_MAP = {
+  finance:       '오늘의 경제 용어',
+  economy:       '오늘의 경제 용어',
+  realestate:    '부동산 한 줄',
+  health:        '건강 팩트체크',
+  entertainment: '오늘의 이슈',
+  social:        '오늘의 이슈',
+};
+
 const RSS_SOURCES = [
   {
     label: 'google_trends_kr',
@@ -168,6 +178,7 @@ export async function fetchTrends() {
           freshness_hours: item.freshness_hours ?? 0,
           niche_premium: item.niche_premium ?? 0,
         },
+        series: SERIES_MAP[item.category] ?? '오늘의 이슈',
         collected_at: new Date().toISOString(),
       }))
       .sort((a, b) => b.score - a.score)

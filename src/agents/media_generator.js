@@ -11,46 +11,54 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// 카테고리별 Pexels 검색 폴백 키워드 (한국 키워드로 결과가 없을 때 사용)
-const CATEGORY_FALLBACK_QUERY = {
-  economy: 'business finance money',
-  entertainment: 'music performance stage lights',
-  social: 'people city lifestyle urban',
+// 경제 직독직해 브랜드 컬러 (카테고리별 형광펜 색상)
+const BRAND_COLORS = {
+  finance:       '#FFD700', // 노란 형광펜 (재테크·금융)
+  economy:       '#FFD700',
+  realestate:    '#FFCBA4', // 피치 형광펜 (부동산)
+  health:        '#98FFD8', // 민트 형광펜 (건강)
+  entertainment: '#D4B4FF', // 라벤더 (연예)
+  social:        '#B4D4FF', // 스카이블루 (사회)
+};
+
+// 경제 직독직해 배경용 Pexels 고정 쿼리 (노트·공부 테마)
+const CATEGORY_BG_QUERY = {
+  finance:       'notebook paper grid desk study notes',
+  economy:       'notebook paper grid desk study notes',
+  realestate:    'notebook paper property real estate notes',
+  health:        'notebook paper health wellness clean desk',
+  entertainment: 'notebook paper grid desk pastel study',
+  social:        'notebook paper grid desk clean minimal',
 };
 
 /**
- * Pexels API로 키워드 관련 세로(portrait) 스톡 영상을 검색한다.
- * 결과 없으면 카테고리 폴백 → 그것도 없으면 null 반환.
+ * 경제 직독직해 브랜드 컨셉에 맞는 배경 영상을 Pexels에서 검색한다.
+ * 카테고리별 고정 쿼리로 노트·공부 테마 영상을 가져온다.
  * PEXELS_API_KEY 미설정 시 null 반환 (Shotstack이 단색 배경으로 폴백).
  */
 async function searchPexelsVideo(keyword, category) {
   const apiKey = config.pexels.apiKey;
   if (!apiKey) return null;
 
-  const trySearch = async (query) => {
-    try {
-      const res = await axios.get('https://api.pexels.com/videos/search', {
-        params: { query, per_page: 5, orientation: 'portrait' },
-        headers: { Authorization: apiKey },
-        timeout: 10000,
-      });
-      const videos = res.data.videos ?? [];
-      if (videos.length === 0) return null;
+  const query = CATEGORY_BG_QUERY[category] ?? 'notebook paper desk study minimal';
 
-      // HD 이하 파일 우선 (너무 크면 Shotstack 처리 느림)
-      const pick = videos[Math.floor(Math.random() * Math.min(videos.length, 3))];
-      const file =
-        pick.video_files.find((f) => f.quality === 'hd' && f.width <= 1080) ??
-        pick.video_files[0];
-      return file?.link ?? null;
-    } catch {
-      return null;
-    }
-  };
+  try {
+    const res = await axios.get('https://api.pexels.com/videos/search', {
+      params: { query, per_page: 5, orientation: 'portrait' },
+      headers: { Authorization: apiKey },
+      timeout: 10000,
+    });
+    const videos = res.data.videos ?? [];
+    if (videos.length === 0) return null;
 
-  const result = await trySearch(keyword);
-  if (result) return result;
-  return trySearch(CATEGORY_FALLBACK_QUERY[category] ?? 'trending news korea');
+    const pick = videos[Math.floor(Math.random() * Math.min(videos.length, 3))];
+    const file =
+      pick.video_files.find((f) => f.quality === 'hd' && f.width <= 1080) ??
+      pick.video_files[0];
+    return file?.link ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -108,13 +116,16 @@ async function generateAudio(text, outputPath) {
 }
 
 /**
- * Shotstack API로 9:16 숏폼 영상을 렌더링한다.
+ * Shotstack API로 9:16 숏폼 영상을 렌더링한다. (경제 직독직해 브랜드)
  *
  * 레이어 구조 (아래에서 위):
- *   1. Pexels 스톡 영상 배경 (없으면 단색 #1a1a2e)
- *   2. 반투명 다크 오버레이 → 자막 가독성 확보
- *   3. 자막 트랙 (6청크, 10초 단위)
+ *   1. Pexels 노트/공부 테마 영상 배경 (없으면 크림 단색 #FAFAF2)
+ *   2. 반투명 화이트 오버레이 (0.55) → 노트지 질감 표현
+ *   3. 시리즈명 레이블 (상단 고정, 카테고리 컬러 배경)
+ *   4. hook / body / cta 자막 (3구간 순차 표시, 카테고리 컬러 형광펜 스타일)
  *   사운드트랙: tmpfiles.org에 호스팅된 ElevenLabs 음성
+ *
+ * 타이밍: 총 20초 — hook(0~3s) / body(3~15s) / cta(15~20s)
  */
 async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const shotstackApiKey = process.env.SHOTSTACK_API_KEY;
@@ -124,47 +135,63 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   logger.info(`[media_generator] Uploading audio for Shotstack: ${content.keyword}`);
   const audioUrl = await uploadAudioForShotstack(audioPath);
 
-  // 2. Pexels 배경 영상 검색
+  // 2. Pexels 노트 테마 배경 검색
   const bgVideoUrl = await searchPexelsVideo(content.keyword, content.category);
-  logger.info(`[media_generator] Background video: ${bgVideoUrl ? 'Pexels' : 'solid color fallback'}`);
+  logger.info(`[media_generator] Background: ${bgVideoUrl ? 'Pexels notebook theme' : 'cream fallback'}`);
 
-  // 3. 자막 생성 (6청크)
-  const scriptText = [
-    content.shortform_script?.hook ?? '',
-    content.shortform_script?.body ?? '',
-    content.shortform_script?.cta ?? '',
-  ].join(' ');
-  const words = scriptText.split(' ').filter(Boolean);
-  const chunkSize = Math.ceil(words.length / 6);
+  const accentColor = BRAND_COLORS[content.category] ?? '#FFD700';
+  const seriesName = content.series_name ?? '경제 직독직해';
 
-  const subtitleClips = Array.from({ length: 6 }, (_, i) => {
-    const chunk = words.slice(i * chunkSize, (i + 1) * chunkSize).join(' ');
-    if (!chunk) return null;
-    return {
-      asset: {
-        type: 'html',
-        html: `<p style="font-family:sans-serif;font-size:52px;color:#ffffff;text-align:center;font-weight:800;line-height:1.3;text-shadow:2px 3px 6px rgba(0,0,0,0.9);padding:0 20px">${chunk}</p>`,
-        width: 1000,
-        height: 260,
-      },
-      start: i * 10,
-      length: 9.5,
-      position: 'bottom',
-      offset: { y: -0.08 },
-    };
-  }).filter(Boolean);
+  const hook = content.shortform_script?.hook ?? '';
+  const body = content.shortform_script?.body ?? '';
+  const cta  = content.shortform_script?.cta  ?? '';
 
-  // 4. 배경 트랙 (Pexels 영상 or 단색)
-  const bgClip = bgVideoUrl
-    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: 60, fit: 'crop' }
-    : { asset: { type: 'color', color: '#1a1a2e' }, start: 0, length: 60 };
+  // 3. 자막 클립 (hook / body / cta 3구간, 카테고리 형광펜 강조)
+  const makeSubtitle = (text, start, length, fontSize = 48) => ({
+    asset: {
+      type: 'html',
+      html: `<p style="font-family:'Noto Sans KR',sans-serif;font-size:${fontSize}px;color:#1a1a1a;text-align:center;font-weight:800;line-height:1.4;padding:12px 24px;background:${accentColor}cc;border-radius:8px;margin:0 16px">${text}</p>`,
+      width: 900,
+      height: 320,
+    },
+    start,
+    length,
+    position: 'center',
+    offset: { y: 0.05 },
+  });
 
-  // 5. 반투명 오버레이 (가독성)
-  const overlayClip = {
-    asset: { type: 'color', color: '#000000' },
+  // 시리즈명 레이블 (전체 구간 상단 고정)
+  const seriesLabel = {
+    asset: {
+      type: 'html',
+      html: `<p style="font-family:'Noto Sans KR',sans-serif;font-size:30px;color:#1a1a1a;text-align:center;font-weight:700;padding:8px 20px;background:${accentColor};border-radius:20px;letter-spacing:1px">${seriesName}</p>`,
+      width: 700,
+      height: 80,
+    },
     start: 0,
-    length: 60,
-    opacity: 0.45,
+    length: 20,
+    position: 'top',
+    offset: { y: -0.05 },
+  };
+
+  const subtitleClips = [
+    seriesLabel,
+    makeSubtitle(hook, 0, 3, 44),
+    makeSubtitle(body, 3, 12, 48),
+    makeSubtitle(cta, 15, 5, 36),
+  ];
+
+  // 4. 배경 트랙 (Pexels 영상 or 크림 단색)
+  const bgClip = bgVideoUrl
+    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: 20, fit: 'crop' }
+    : { asset: { type: 'color', color: '#FAFAF2' }, start: 0, length: 20 };
+
+  // 5. 화이트 오버레이 (노트지 질감, 다크 배경 대신 밝은 오버레이)
+  const overlayClip = {
+    asset: { type: 'color', color: '#FFFFFF' },
+    start: 0,
+    length: 20,
+    opacity: 0.55,
   };
 
   const timeline = {
@@ -188,7 +215,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const renderId = renderResponse.data.response.id;
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
-  // 6. 완료 대기 polling (최대 150초)
+  // 6. 완료 대기 polling (최대 150초, 20초 영상 기준)
   const pollUrl = `https://api.shotstack.io/stage/render/${renderId}`;
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 5000));

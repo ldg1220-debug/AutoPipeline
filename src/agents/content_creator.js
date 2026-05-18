@@ -39,21 +39,31 @@ const AFFILIATE_MAP = {
 
 async function generateContent(item) {
   const affiliateSuggestions = AFFILIATE_MAP[item.category] ?? AFFILIATE_MAP.social;
+  const seriesName = item.series ?? '오늘의 이슈';
 
-  const contentPrompt = `당신은 한국 SEO 블로그·SNS 콘텐츠 전문가입니다. 다음 키워드에 대해 콘텐츠를 JSON 형식으로만 생성하세요. 다른 텍스트는 포함하지 마세요.
+  const contentPrompt = `당신은 "경제 직독직해" 채널의 콘텐츠 전문가입니다. 이 채널은 노트 필기 스타일의 20초 숏폼과 SEO 블로그를 운영합니다. 다음 키워드에 대해 콘텐츠를 JSON 형식으로만 생성하세요. 다른 텍스트는 포함하지 마세요.
 
 키워드: ${item.keyword}
 카테고리: ${item.category}
+시리즈: ${seriesName}
 제휴 상품 후보: ${affiliateSuggestions.join(', ')}
+
+【숏폼 대본 제작 규칙】
+- 총 20초 분량 (한국어 기준 약 80~100자)
+- hook(0~3초): 핵심 개념을 숫자나 한 문장으로 압축. 예: "금리 인하, 그게 내 대출이자랑 무슨 관계냐고요?"
+- body(3~15초): 딱 하나의 핵심 인사이트만. 노트 필기처럼 간결하게. 복잡한 개념을 중학생도 이해하도록.
+- cta(15~20초): "자세한 내용은 블로그 링크에서 → 지금 [시리즈명] 더 보기"
+- 금지: 여러 정보 나열 / "구독과 좋아요" 문구 / 60초 분량 대본
 
 출력 JSON 형식:
 {
+  "series_name": "${seriesName}",
   "shortform_script": {
-    "hook": "3초 안에 시청자를 멈추게 하는 강렬한 첫 문장 (숫자·질문·충격 사실 활용)",
-    "body": "60초 이내 본문 (핵심 정보 3가지를 간결하게, 시청자 감정 자극)",
-    "cta": "구독·좋아요와 함께 블로그 링크 클릭을 유도하는 마무리 문장"
+    "hook": "0~3초. 핵심 질문이나 충격 사실 한 문장 (20자 이내)",
+    "body": "3~15초. 핵심 인사이트 하나만, 노트 필기처럼 간결하게 (50~70자)",
+    "cta": "15~20초. 블로그 링크 유도 (예: '자세한 내용은 링크에서 → ${seriesName} 더 보기')"
   },
-  "image_prompt": "Midjourney/DALL-E 호환 영어 프롬프트 (구체적 스타일·구도·색감 포함, 세로 9:16 비율)",
+  "image_prompt": "notebook paper background, handwritten Korean text style, 9:16 portrait, study desk aesthetic, ${item.category} theme, clean minimal layout",
   "blog_draft": {
     "title": "검색 의도에 맞는 SEO 최적화 제목 (키워드 포함, 30자 이내)",
     "meta_description": "검색 결과에 표시될 설명 (키워드 포함, 155자 이내, 클릭 유도 문구 포함)",
@@ -137,6 +147,7 @@ export async function createContents(trendData) {
       contents.push({
         keyword: item.keyword,
         category: item.category,
+        series_name: generated.series_name ?? item.series ?? '오늘의 이슈',
         shortform_script: generated.shortform_script ?? {},
         image_prompt: generated.image_prompt ?? '',
         blog_draft: generated.blog_draft ?? { title: '', meta_description: '', seo_keywords: [], sections: [], affiliate_hooks: [] },
@@ -159,12 +170,13 @@ function buildPlaceholder(item) {
   return {
     keyword: item.keyword,
     category: item.category,
+    series_name: item.series ?? '오늘의 이슈',
     shortform_script: {
-      hook: `[PLACEHOLDER] ${item.keyword} 관련 훅 문장`,
-      body: `[PLACEHOLDER] ${item.keyword} 관련 본문`,
-      cta: '[PLACEHOLDER] 구독과 좋아요 부탁드립니다!',
+      hook: `[PLACEHOLDER] ${item.keyword}?`,
+      body: `[PLACEHOLDER] ${item.keyword} 핵심 인사이트 한 줄 정리`,
+      cta: `[PLACEHOLDER] 자세한 내용은 링크에서 → ${item.series ?? '오늘의 이슈'} 더 보기`,
     },
-    image_prompt: `[PLACEHOLDER] A compelling image about ${item.keyword}, cinematic style, 4K`,
+    image_prompt: `notebook paper background, handwritten Korean text, ${item.keyword}, study desk aesthetic, 9:16 portrait`,
     blog_draft: {
       title: `[PLACEHOLDER] ${item.keyword} 완벽 정리`,
       sections: [
