@@ -31,16 +31,16 @@ const RSS_SOURCES = [
     url: 'https://www.yna.co.kr/rss/economy.xml',
   },
   {
-    label: 'mk_stock',                          // 매일경제 증권·재테크 (고CPM)
-    url: 'https://rss.mk.co.kr/2/3.xml',
+    label: 'mk_economy',                           // 매일경제 경제 (고CPM)
+    url: 'https://www.mk.co.kr/rss/30100041/',
   },
   {
-    label: 'mk_realestate',                     // 매일경제 부동산 (고CPM)
-    url: 'https://rss.mk.co.kr/2/1.xml',
+    label: 'mk_realestate',                        // 매일경제 부동산 (고CPM)
+    url: 'https://www.mk.co.kr/rss/30000041/',
   },
   {
-    label: 'health_chosun',                     // 헬스조선 건강 (고CPM)
-    url: 'https://health.chosun.com/rss/news.xml',
+    label: 'chosun_health',                        // 조선일보 건강 (고CPM)
+    url: 'https://www.chosun.com/arc/outboundfeeds/rss/category/life/health/?outputType=xml',
   },
   {
     label: 'yonhap_entertainment',
