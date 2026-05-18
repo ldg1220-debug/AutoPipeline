@@ -4,6 +4,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import { throttle } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,6 +96,7 @@ export async function createContents(trendData) {
         continue;
       }
 
+      await throttle(2000); // GPT-4o RPM 제한 보호
       const generated = await generateContent(item);
       contents.push({
         keyword: item.keyword,

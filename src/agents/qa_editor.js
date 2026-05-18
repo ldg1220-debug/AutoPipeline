@@ -5,6 +5,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import { throttle } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +51,7 @@ async function runLLMQA(content) {
 출력 형식 (JSON만):
 { "fact_check_score": 0, "grammar_check": "PASS", "issues": "발견된 문제 요약 (없으면 빈 문자열)" }`;
 
+  await throttle(2000); // GPT-4o RPM 제한 보호
   const response = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
