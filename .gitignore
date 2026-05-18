@@ -11,9 +11,6 @@ output/scripts/*
 output/qa_reports/*
 !output/qa_reports/.gitkeep
 
-# 미디어 파일 전체 제외 (용량·보안)
-output/media/
-
-# 바이너리
-*.mp4
-*.mp3
+# 미디어 파일 제외 (용량), 디렉터리 구조는 .gitkeep으로 유지
+output/media/*
+!output/media/.gitkeep

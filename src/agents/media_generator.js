@@ -204,7 +204,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   };
 
   const renderResponse = await axios.post(
-    'https://api.shotstack.io/stage/render',
+    `https://api.shotstack.io/${config.shotstack.env}/render`,
     { timeline, output: { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 } },
     {
       headers: { 'x-api-key': shotstackApiKey, 'Content-Type': 'application/json' },
@@ -216,7 +216,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
   // 6. 완료 대기 polling (최대 150초, 20초 영상 기준)
-  const pollUrl = `https://api.shotstack.io/stage/render/${renderId}`;
+  const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await axios.get(pollUrl, {

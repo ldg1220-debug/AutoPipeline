@@ -39,7 +39,10 @@ const CHECKS = [
     required: false,
     vars: [
       { key: 'ELEVENLABS_API_KEY', desc: 'TTS 음성 합성' },
+      { key: 'ELEVENLABS_VOICE_ID', desc: '보이스 ID (미설정 시 기본값 Rachel 사용)' },
       { key: 'SHOTSTACK_API_KEY', desc: '영상 자동 렌더링' },
+      { key: 'SHOTSTACK_ENV', desc: 'stage(무료·워터마크) 또는 production (미설정 시 stage)' },
+      { key: 'PEXELS_API_KEY', desc: '노트 테마 배경 영상 검색 (미설정 시 단색 배경 폴백)' },
     ],
   },
   {
@@ -68,7 +71,14 @@ const CHECKS = [
     ],
   },
   {
-    group: '📱 텔레그램 알림 (선택)',
+    group: '📱 TikTok 발행 (선택)',
+    required: false,
+    vars: [
+      { key: 'TIKTOK_ACCESS_TOKEN', desc: 'TikTok Content Posting API OAuth 토큰' },
+    ],
+  },
+  {
+    group: '📣 텔레그램 알림 (선택)',
     required: false,
     vars: [
       { key: 'TELEGRAM_BOT_TOKEN', desc: '@BotFather 에서 발급' },

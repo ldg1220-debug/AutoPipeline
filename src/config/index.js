@@ -40,6 +40,7 @@ export const config = {
   },
   shotstack: {
     apiKey: process.env.SHOTSTACK_API_KEY,
+    env: process.env.SHOTSTACK_ENV === 'production' ? 'v1' : 'stage',
   },
   youtube: {
     clientId: process.env.YOUTUBE_CLIENT_ID,
