@@ -17,17 +17,16 @@ const RSS_SOURCES = [
     url: 'https://trends.google.com/trending/rss?geo=KR',
   },
   {
-    label: 'naver_economy',
-    // 네이버 공식 RSS: 실제 서비스 여부에 따라 URL 변경 가능
-    url: 'https://rss.blog.naver.com/ArticleList.nhn?blogId=econohub&logNo=0&categoryNo=0&currentPage=1',
+    label: 'yonhap_economy',
+    url: 'https://www.yna.co.kr/rss/economy.xml',
   },
   {
-    label: 'naver_entertainment',
-    url: 'https://rss.blog.naver.com/ArticleList.nhn?blogId=entertainmenthub&logNo=0&categoryNo=0&currentPage=1',
+    label: 'yonhap_entertainment',
+    url: 'https://www.yna.co.kr/rss/entertainment.xml',
   },
   {
-    label: 'naver_social',
-    url: 'https://rss.blog.naver.com/ArticleList.nhn?blogId=socialhub&logNo=0&categoryNo=0&currentPage=1',
+    label: 'yonhap_society',
+    url: 'https://www.yna.co.kr/rss/society.xml',
   },
 ];
 

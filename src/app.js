@@ -126,8 +126,9 @@ async function runPipeline() {
     }
 
     approvedCount = qaData.reports.filter((r) => r.final_decision === 'APPROVED').length;
-    rejectedCount =
-      qaData.reports.filter((r) => r.final_decision === 'REJECTED').length - skippedCount;
+    rejectedCount = qaData.reports.filter(
+      (r) => r.final_decision === 'REJECTED' && r.revision_reason !== 'QA 처리 중 오류로 인한 스킵'
+    ).length;
 
     await writeJSON(
       path.resolve(__dirname, `../output/qa_reports/qa_${date}.json`),

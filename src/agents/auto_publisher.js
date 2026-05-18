@@ -28,11 +28,29 @@ async function refreshYouTubeAccessToken() {
 }
 
 /**
- * YouTube에 숏폼 대본을 description으로 삽입해 예약 업로드 메타데이터를 생성한다.
- * 실제 영상 파일 없이 메타데이터만 등록하는 방식 (영상 파일 생성은 별도 에이전트 담당).
+ * YouTube에 숏폼 영상을 예약 업로드한다.
+ * YouTube Data API는 실제 영상 바이너리가 없으면 업로드 자체가 불가능하다.
+ * 영상 파일 경로를 받아 multipart 업로드하며, 파일이 없으면 스킵한다.
  * publishAt은 현재 시각 + 2시간으로 설정한다.
  */
 async function publishToYouTube(content, accessToken) {
+  const fs = await import('fs/promises');
+
+  // 영상 파일 경로 규칙: output/media/<keyword>.mp4
+  const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  const videoPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    `../../output/media/${safeKeyword}.mp4`
+  );
+
+  try {
+    await fs.access(videoPath);
+  } catch {
+    // 영상 파일이 없으면 이 단계에서는 스킵 (영상 생성은 별도 Phase에서 추가)
+    logger.warn(`[auto_publisher] Video file not found, skipping YouTube upload: ${videoPath}`);
+    return { platform: 'youtube', status: 'skipped_no_video_file' };
+  }
+
   const publishAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
   const description = [
     content.shortform_script?.hook ?? '',
@@ -42,29 +60,40 @@ async function publishToYouTube(content, accessToken) {
     content.shortform_script?.cta ?? '',
   ].join('\n');
 
-  const metadata = {
+  const metadata = JSON.stringify({
     snippet: {
       title: content.blog_draft?.title ?? content.keyword,
       description,
       tags: [content.keyword, content.category, '숏폼', '트렌드'],
-      categoryId: '22', // People & Blogs
+      categoryId: '22',
     },
     status: {
       privacyStatus: 'private',
       publishAt,
       selfDeclaredMadeForKids: false,
     },
-  };
+  });
+
+  const videoBuffer = await fs.readFile(videoPath);
+  const boundary = 'frontier_boundary';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: video/mp4\r\n\r\n`
+    ),
+    videoBuffer,
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
 
   const response = await axios.post(
-    'https://www.googleapis.com/youtube/v3/videos?part=snippet,status',
-    metadata,
+    'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status',
+    body,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': body.length,
       },
-      timeout: 30000,
+      timeout: 120000,
     }
   );
 

@@ -163,41 +163,15 @@ async function judgeContent(content, index) {
  */
 export async function runQA(contentData) {
   const contents = contentData?.contents ?? [];
-  const maxRetry = config.runtime.maxRetry;
   const reports = [];
 
   for (let i = 0; i < contents.length; i++) {
     const content = contents[i];
     logger.info(`[qa_editor] Running QA for: ${content.keyword}`);
 
-    let attempt = 0;
-    let result = null;
-
-    while (attempt <= maxRetry) {
-      try {
-        result = await judgeContent(content, i);
-        break;
-      } catch (err) {
-        attempt++;
-        logger.warn(`[qa_editor] QA attempt ${attempt} failed for: ${content.keyword}`, {
-          message: err.message,
-        });
-
-        if (attempt > maxRetry) {
-          logger.error(`[qa_editor] Max retry exceeded. Skipping: ${content.keyword}`);
-          result = {
-            content_id: `${content.keyword}_${i}`,
-            fact_check_score: 0,
-            grammar_check: 'FAIL',
-            banned_words_detected: false,
-            video_layout_check: 'FAIL',
-            audio_sync_check: 'FAIL',
-            final_decision: 'REJECTED',
-            revision_reason: 'QA 처리 중 오류로 인한 스킵',
-          };
-        }
-      }
-    }
+    // judgeContent는 내부에서 모든 예외를 처리하므로 항상 결과를 반환한다.
+    // REJECTED 항목의 재생성·재검수는 app.js 오케스트레이터가 담당한다.
+    const result = await judgeContent(content, i);
 
     reports.push({ ...result, keyword: content.keyword, category: content.category });
     logger.info(`[qa_editor] ${content.keyword} → ${result.final_decision}`);
