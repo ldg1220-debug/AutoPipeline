@@ -7,23 +7,33 @@ import { startScheduler } from './utils/scheduler.js';
 import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
+import { runTextQA, runVisionQA } from './agents/qa_editor.js';
 import { generateAllMedia } from './agents/media_generator.js';
-import { runQA } from './agents/qa_editor.js';
 import { publishContents } from './agents/auto_publisher.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * 파이프라인 1회 실행 함수.
- * Agent 1 → 2 → 3 → 4 순서로 실행하며 각 단계 실패는 기록 후 중단한다.
- * REJECTED 항목은 MAX_RETRY 횟수만큼 재생성을 시도한다.
+ *
+ * 올바른 실행 순서:
+ *   Agent 1  → 트렌드 수집
+ *   Agent 2  → 콘텐츠(텍스트) 작성
+ *   Agent 3a → 텍스트 QA (탈락 시 1회 재작성 후 재검수)
+ *   Agent 2.5→ 텍스트 통과 항목만 미디어(영상) 제작
+ *   Agent 3b → 영상 Vision QA (탈락 시 스킵, 재제작 없음)
+ *   Agent 4  → 최종 APPROVED 항목 발행
+ *
+ * 이 순서를 통해 텍스트 탈락 콘텐츠에 ElevenLabs·Shotstack 비용이
+ * 낭비되지 않는다.
  */
 async function runPipeline() {
   const startTime = Date.now();
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
   let totalCount = 0;
-  let approvedCount = 0;
+  let textApprovedCount = 0;
+  let finalApprovedCount = 0;
   let rejectedCount = 0;
   let skippedCount = 0;
 
@@ -33,15 +43,11 @@ async function runPipeline() {
   let trendData;
   try {
     trendData = await fetchTrends();
-    await writeJSON(
-      path.resolve(__dirname, `../output/scripts/trend_${date}.json`),
-      trendData
-    );
+    await writeJSON(path.resolve(__dirname, `../output/scripts/trend_${date}.json`), trendData);
     logger.info(`[app] Agent 1 complete. Items: ${trendData.selected_items?.length ?? 0}`);
   } catch (err) {
-    logger.error('[app] Agent 1 (trend_scraper) failed. Aborting pipeline.', {
-      message: err.message,
-    });
+    logger.error('[app] Agent 1 (trend_scraper) failed. Aborting.', { message: err.message });
+    await sendErrorAlert('trend_scraper', err.message);
     return;
   }
 
@@ -49,123 +55,125 @@ async function runPipeline() {
   let contentData;
   try {
     contentData = await createContents(trendData);
-    await writeJSON(
-      path.resolve(__dirname, `../output/scripts/content_${date}.json`),
-      contentData
-    );
+    await writeJSON(path.resolve(__dirname, `../output/scripts/content_${date}.json`), contentData);
     totalCount = contentData.contents?.length ?? 0;
     logger.info(`[app] Agent 2 complete. Contents generated: ${totalCount}`);
   } catch (err) {
-    logger.error('[app] Agent 2 (content_creator) failed. Aborting pipeline.', {
-      message: err.message,
-    });
+    logger.error('[app] Agent 2 (content_creator) failed. Aborting.', { message: err.message });
+    await sendErrorAlert('content_creator', err.message);
     return;
   }
 
-  // ── Agent 2.5: Media Generator (TTS + 영상 렌더링) ────────────────────
+  // ── Agent 3a: 텍스트 QA ─────────────────────────────────────────────────
+  // 영상 제작 전에 텍스트만 검수. REJECTED 항목은 1회 재생성 후 재검수한다.
+  let textQaData;
   try {
-    const mediaResult = await generateAllMedia(contentData);
-    await writeJSON(
-      path.resolve(__dirname, `../output/scripts/media_${date}.json`),
-      mediaResult
-    );
-    logger.info(`[app] Agent 2.5 complete. Media generated: ${mediaResult.results?.length ?? 0}`);
+    textQaData = await runTextQA(contentData);
+
+    const textRejected = textQaData.reports.filter((r) => r.final_decision === 'REJECTED');
+
+    if (textRejected.length > 0 && config.runtime.maxRetry > 0) {
+      logger.info(`[app] Text QA: retrying ${textRejected.length} REJECTED items...`);
+
+      const retryTrendData = {
+        selected_items: trendData.selected_items.filter((item) =>
+          textRejected.some((r) => r.keyword === item.keyword)
+        ),
+      };
+
+      try {
+        const retryContent = await createContents(retryTrendData);
+        const retryQA = await runTextQA(retryContent);
+
+        for (const retryReport of retryQA.reports) {
+          const idx = textQaData.reports.findIndex((r) => r.keyword === retryReport.keyword);
+          if (idx !== -1) {
+            textQaData.reports[idx] = retryReport;
+            if (retryReport.final_decision === 'REJECTED') {
+              skippedCount++;
+              logger.warn(`[app] Skipping "${retryReport.keyword}" after 2 text QA failures.`);
+            } else {
+              // 재생성된 콘텐츠를 contentData에 반영
+              const cIdx = contentData.contents.findIndex((c) => c.keyword === retryReport.keyword);
+              if (cIdx !== -1) {
+                const updated = retryContent.contents.find((c) => c.keyword === retryReport.keyword);
+                if (updated) contentData.contents[cIdx] = updated;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.error('[app] Text QA retry failed.', { message: err.message });
+        skippedCount += textRejected.length;
+      }
+    }
+
+    textApprovedCount = textQaData.reports.filter((r) => r.final_decision === 'APPROVED').length;
+    await writeJSON(path.resolve(__dirname, `../output/qa_reports/qa_text_${date}.json`), textQaData);
+    logger.info(`[app] Agent 3a (text QA) complete. Passed: ${textApprovedCount}/${totalCount}`);
   } catch (err) {
-    // 미디어 생성 실패는 치명적이지 않음 — QA에서 영상 없는 항목은 PASS 처리됨
+    logger.error('[app] Agent 3a (text QA) failed. Aborting.', { message: err.message });
+    await sendErrorAlert('qa_editor_text', err.message);
+    return;
+  }
+
+  // ── Agent 2.5: Media Generator — 텍스트 통과 항목만 제작 ──────────────
+  // 텍스트 QA 탈락 항목에 TTS·영상 렌더링 비용을 쓰지 않는다.
+  const approvedKeywords = new Set(
+    textQaData.reports.filter((r) => r.final_decision === 'APPROVED').map((r) => r.keyword)
+  );
+  const approvedContentData = {
+    ...contentData,
+    contents: contentData.contents.filter((c) => approvedKeywords.has(c.keyword)),
+  };
+
+  try {
+    if (approvedContentData.contents.length === 0) {
+      logger.warn('[app] Agent 2.5 skipped — no text-approved items to produce.');
+    } else {
+      const mediaResult = await generateAllMedia(approvedContentData);
+      await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
+      logger.info(`[app] Agent 2.5 complete. Media produced: ${mediaResult.results?.length ?? 0}`);
+    }
+  } catch (err) {
     logger.warn('[app] Agent 2.5 (media_generator) failed. Continuing without media.', {
       message: err.message,
     });
     await sendErrorAlert('media_generator', err.message);
   }
 
-  // ── Agent 3: QA Editor (REJECTED 항목 재시도 포함) ──────────────────────
-  let qaData;
+  // ── Agent 3b: 영상 Vision QA ────────────────────────────────────────────
+  // 텍스트 통과 항목의 영상 파일을 Gemini Vision으로 검수한다.
+  // 영상 탈락 시 재제작 없이 스킵. 영상 파일 없는 항목은 자동 PASS.
+  let finalQaData;
   try {
-    qaData = await runQA(contentData);
+    finalQaData = await runVisionQA(textQaData);
 
-    const rejectedItems = qaData.reports.filter((r) => r.final_decision === 'REJECTED');
-
-    // REJECTED 항목 재생성 후 재검수 (MAX_RETRY 기반)
-    if (rejectedItems.length > 0 && config.runtime.maxRetry > 0) {
-      logger.info(`[app] Retrying ${rejectedItems.length} REJECTED items...`);
-
-      const retryTrendData = {
-        selected_items: trendData.selected_items.filter((item) =>
-          rejectedItems.some((r) => r.keyword === item.keyword)
-        ),
-      };
-
-      let retryContentData;
-      try {
-        retryContentData = await createContents(retryTrendData);
-      } catch (err) {
-        logger.error('[app] Retry content generation failed.', { message: err.message });
-        skippedCount += rejectedItems.length;
-        retryContentData = null;
-      }
-
-      if (retryContentData) {
-        let retryQA;
-        try {
-          retryQA = await runQA(retryContentData);
-        } catch (err) {
-          logger.error('[app] Retry QA failed.', { message: err.message });
-          skippedCount += rejectedItems.length;
-          retryQA = null;
-        }
-
-        if (retryQA) {
-          // 원본 QA 결과에서 REJECTED 항목을 재시도 결과로 교체
-          for (const retryReport of retryQA.reports) {
-            const idx = qaData.reports.findIndex((r) => r.keyword === retryReport.keyword);
-            if (idx !== -1) {
-              qaData.reports[idx] = retryReport;
-              // 2회 연속 REJECTED이면 스킵 처리
-              if (retryReport.final_decision === 'REJECTED') {
-                skippedCount++;
-                logger.warn(
-                  `[app] Skipping "${retryReport.keyword}" after 2 REJECTED attempts.`
-                );
-              }
-            }
-          }
-
-          // 재생성된 APPROVED 콘텐츠를 contentData에 병합
-          for (const retryContent of retryContentData.contents) {
-            const idx = contentData.contents.findIndex(
-              (c) => c.keyword === retryContent.keyword
-            );
-            if (idx !== -1) {
-              contentData.contents[idx] = retryContent;
-            }
-          }
-        }
-      }
+    const visionRejected = finalQaData.reports.filter(
+      (r) => r.final_decision === 'REJECTED' && r.video_layout_check !== 'PENDING'
+    );
+    if (visionRejected.length > 0) {
+      skippedCount += visionRejected.length;
+      visionRejected.forEach((r) =>
+        logger.warn(`[app] Vision QA REJECTED (skip): ${r.keyword}`)
+      );
     }
 
-    approvedCount = qaData.reports.filter((r) => r.final_decision === 'APPROVED').length;
-    rejectedCount = qaData.reports.filter(
-      (r) => r.final_decision === 'REJECTED' && r.revision_reason !== 'QA 처리 중 오류로 인한 스킵'
-    ).length;
+    finalApprovedCount = finalQaData.reports.filter((r) => r.final_decision === 'APPROVED').length;
+    rejectedCount = finalQaData.reports.filter((r) => r.final_decision === 'REJECTED').length - skippedCount;
 
-    await writeJSON(
-      path.resolve(__dirname, `../output/qa_reports/qa_${date}.json`),
-      qaData
-    );
-    logger.info(
-      `[app] Agent 3 complete. APPROVED: ${approvedCount}, REJECTED: ${rejectedCount}, SKIPPED: ${skippedCount}`
-    );
+    await writeJSON(path.resolve(__dirname, `../output/qa_reports/qa_${date}.json`), finalQaData);
+    logger.info(`[app] Agent 3b (vision QA) complete. Final APPROVED: ${finalApprovedCount}`);
   } catch (err) {
-    logger.error('[app] Agent 3 (qa_editor) failed. Aborting pipeline.', {
-      message: err.message,
-    });
+    logger.error('[app] Agent 3b (vision QA) failed. Aborting.', { message: err.message });
+    await sendErrorAlert('qa_editor_vision', err.message);
     return;
   }
 
   // ── Agent 4: Auto Publisher ─────────────────────────────────────────────
   let publishResults = { results: [] };
   try {
-    publishResults = await publishContents(qaData, contentData);
+    publishResults = await publishContents(finalQaData, contentData);
     await writeJSON(
       path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`),
       publishResults
@@ -182,7 +190,8 @@ async function runPipeline() {
     date: new Date().toISOString().slice(0, 10),
     elapsed_sec: elapsed,
     total: totalCount,
-    approved: approvedCount,
+    text_approved: textApprovedCount,
+    approved: finalApprovedCount,
     rejected: rejectedCount,
     skipped: skippedCount,
     dry_run: config.runtime.dryRun,
