@@ -3,6 +3,7 @@
     {
       "keyword": "경기침체 공포",
       "category": "economy",
+      "series": "오늘의 경제 용어",
       "score": 87,
       "score_reason": { "virality": 38, "commercial_value": 32, "freshness_hours": 17 },
       "source_url": "https://www.yna.co.kr/view/AKR20260518001",
@@ -11,6 +12,7 @@
     {
       "keyword": "아이돌 군백기 복귀",
       "category": "entertainment",
+      "series": "오늘의 이슈",
       "score": 76,
       "score_reason": { "virality": 35, "commercial_value": 24, "freshness_hours": 17 },
       "source_url": "https://www.yna.co.kr/view/AKR20260518002",
@@ -19,6 +21,7 @@
     {
       "keyword": "직장인 번아웃 급증",
       "category": "social",
+      "series": "오늘의 이슈",
       "score": 70,
       "score_reason": { "virality": 28, "commercial_value": 30, "freshness_hours": 12 },
       "source_url": "https://www.yna.co.kr/view/AKR20260518003",
@@ -27,6 +30,7 @@
     {
       "keyword": "금리 인하 기대감",
       "category": "economy",
+      "series": "오늘의 경제 용어",
       "score": 65,
       "score_reason": { "virality": 25, "commercial_value": 30, "freshness_hours": 10 },
       "source_url": "https://www.yna.co.kr/view/AKR20260518004",
@@ -35,6 +39,7 @@
     {
       "keyword": "AI 면접 확산 논란",
       "category": "social",
+      "series": "오늘의 이슈",
       "score": 61,
       "score_reason": { "virality": 30, "commercial_value": 20, "freshness_hours": 11 },
       "source_url": "https://www.yna.co.kr/view/AKR20260518005",

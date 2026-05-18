@@ -24,11 +24,14 @@ Agent 4: auto_publisher   → output/qa_reports/publish_YYYYMMDD.json
 ## 자주 쓰는 명령
 
 ```bash
-npm run validate    # 환경변수 설정 확인 (첫 실행 전 필수)
-npm run estimate    # API 예상 비용 계산
-npm run dry-run     # 실제 업로드 없이 전체 테스트
-npm run status      # 최신 실행 결과 5분 요약
-npm run analyze     # QA 탈락 사유 분석 + 프롬프트 개선 제안
+npm run validate          # 환경변수 설정 확인 (첫 실행 전 필수)
+npm run estimate          # API 예상 비용 계산
+npm run dry-run           # 실제 업로드 없이 전체 테스트 (1회 실행 후 자동 종료)
+npm run status            # 최신 실행 결과 5분 요약
+npm run analyze           # QA 탈락 사유 분석 + 프롬프트 개선 제안
+npm run youtube:auth      # YouTube OAuth refresh_token 발급 헬퍼
+npm run wp:publish        # WordPress draft → publish 전환 (날짜 선택 가능)
+npm run affiliate:replace # 제휴 링크 플레이스홀더 → 실제 URL 치환
 ```
 
 ## 파일 수정 시 주의

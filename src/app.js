@@ -202,6 +202,11 @@ async function runPipeline() {
   await sendDailyReport(summary);
 }
 
-// 스케줄러 시작 + 즉시 1회 실행
-startScheduler(runPipeline);
-runPipeline();
+// DRY_RUN 시에는 스케줄러 없이 1회 실행 후 종료
+if (config.runtime.dryRun) {
+  logger.info('[app] DRY_RUN mode — running once and exiting.');
+  runPipeline().then(() => process.exit(0));
+} else {
+  startScheduler(runPipeline);
+  runPipeline();
+}

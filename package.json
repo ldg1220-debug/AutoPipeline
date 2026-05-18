@@ -16,7 +16,10 @@
     "validate": "node scripts/validate-env.js",
     "status": "node scripts/check-status.js",
     "estimate": "node scripts/estimate-cost.js",
-    "analyze": "node scripts/analyze-rejected.js"
+    "analyze": "node scripts/analyze-rejected.js",
+    "youtube:auth": "node scripts/get-youtube-token.js",
+    "wp:publish": "node scripts/publish-wordpress.js",
+    "affiliate:replace": "node scripts/replace-affiliate-links.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
