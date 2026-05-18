@@ -86,23 +86,20 @@ async function uploadAudioForShotstack(audioPath) {
 }
 
 /**
- * ElevenLabs TTS API로 대본 텍스트를 음성 파일(.mp3)로 변환한다.
+ * OpenAI TTS API로 대본 텍스트를 음성 파일(.mp3)로 변환한다.
+ * 한국어 지원, tts-1 모델 사용 (저렴하고 품질 충분)
+ * 보이스: nova(밝고 자연스러운 여성 한국어에 적합) — OPENAI_TTS_VOICE 환경변수로 변경 가능
  */
 async function generateAudio(text, outputPath) {
-  const voiceId = config.elevenlabs.voiceId;
+  const voice = process.env.OPENAI_TTS_VOICE || 'nova';
 
   const response = await axios.post(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      text,
-      model_id: 'eleven_turbo_v2_5',
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-    },
+    'https://api.openai.com/v1/audio/speech',
+    { model: 'tts-1', input: text, voice },
     {
       headers: {
-        'xi-api-key': config.elevenlabs.apiKey,
+        Authorization: `Bearer ${config.openai.apiKey}`,
         'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
       },
       responseType: 'arraybuffer',
       timeout: 60000,
@@ -123,7 +120,7 @@ async function generateAudio(text, outputPath) {
  *   2. 반투명 화이트 오버레이 (0.55) → 노트지 질감 표현
  *   3. 시리즈명 레이블 (상단 고정, 카테고리 컬러 배경)
  *   4. hook / body / cta 자막 (3구간 순차 표시, 카테고리 컬러 형광펜 스타일)
- *   사운드트랙: tmpfiles.org에 호스팅된 ElevenLabs 음성
+ *   사운드트랙: tmpfiles.org에 호스팅된 OpenAI TTS 음성
  *
  * 타이밍: 총 20초 — hook(0~3s) / body(3~15s) / cta(15~20s)
  */
@@ -248,8 +245,8 @@ async function generateMedia(content) {
 
   const result = { keyword: content.keyword, audio: null, video: null };
 
-  if (!config.elevenlabs.apiKey) {
-    logger.warn(`[media_generator] ELEVENLABS_API_KEY not set. Skipping: ${content.keyword}`);
+  if (!config.openai.apiKey) {
+    logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
     return result;
   }
 
