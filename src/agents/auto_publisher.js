@@ -107,6 +107,9 @@ async function publishToYouTube(content, accessToken) {
 
 /**
  * WordPress REST API로 블로그 초안을 draft 상태로 업로드한다.
+ * - SEO 메타(Yoast 호환): meta_description, seo_keywords를 커스텀 필드로 삽입
+ * - 제휴 훅: section 말미에 [AFFILIATE_LINK: {product_category}] 플레이스홀더 삽입
+ *   → 발행 전 실제 링크로 교체 필요 (또는 자동화 가능)
  * App Password 방식의 Basic Auth를 사용한다.
  */
 async function publishToWordPress(content) {
@@ -114,18 +117,46 @@ async function publishToWordPress(content) {
     `${config.wordpress.user}:${config.wordpress.appPassword}`
   ).toString('base64');
 
-  const sections = content.blog_draft?.sections ?? [];
-  const postContent = sections
-    .map((s) => `<h2>${s.heading}</h2>\n<p>${s.body}</p>`)
+  const blog = content.blog_draft ?? {};
+  const sections = blog.sections ?? [];
+  const affiliateHooks = blog.affiliate_hooks ?? [];
+
+  // 제휴 훅을 position 기준으로 매핑
+  const affiliateByPosition = Object.fromEntries(
+    affiliateHooks.map((h) => [h.position, h])
+  );
+
+  // HTML 콘텐츠 조립 (섹션 말미에 제휴 플레이스홀더 삽입)
+  const sectionHtml = sections
+    .map((s, i) => {
+      const hookKey = `section${i + 1}_end`;
+      const hook = affiliateByPosition[hookKey];
+      const affiliateHtml = hook
+        ? `\n<p>👉 <strong>[AFFILIATE_LINK: ${hook.product_category} | 앵커: ${hook.anchor_text}]</strong></p>`
+        : '';
+      return `<h2>${s.heading}</h2>\n<p>${s.body}</p>${affiliateHtml}`;
+    })
     .join('\n\n');
+
+  // SEO 키워드를 태그로 변환 (WordPress 태그 API 미사용, excerpt에 포함)
+  const seoKeywords = blog.seo_keywords ?? [];
+  const metaDesc = blog.meta_description ?? '';
+  const excerptHtml = metaDesc
+    ? `${metaDesc}\n\n관련 키워드: ${seoKeywords.join(', ')}`
+    : '';
 
   const response = await axios.post(
     `${config.wordpress.url}/wp-json/wp/v2/posts`,
     {
-      title: content.blog_draft?.title ?? content.keyword,
-      content: postContent,
+      title: blog.title ?? content.keyword,
+      content: sectionHtml,
+      excerpt: excerptHtml,
       status: 'draft',
-      tags: [],
+      // Yoast SEO REST API 필드 (Yoast 플러그인 설치 시 자동 적용)
+      meta: {
+        _yoast_wpseo_metadesc: metaDesc,
+        _yoast_wpseo_focuskw: seoKeywords[0] ?? content.keyword,
+      },
     },
     {
       headers: {

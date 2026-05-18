@@ -92,5 +92,15 @@ console.log(`   Vision QA 비활성화 시: ${usd(noVisionCost)} ${krw(noVisionC
 console.log(`   텍스트 전용 운영 시  : ${usd(noShotstackCost)} ${krw(noShotstackCost)}/월`);
 console.log('\n   ✅ DRY_RUN=true 로 실행하면 발행 단계 API 비용 없음');
 console.log('   ✅ Shotstack 샌드박스 키는 무료 (워터마크 포함)');
-console.log('   ✅ Gemini Flash는 무료 티어 존재 (분당 15회 제한)\n');
+console.log('   ✅ Gemini Flash는 무료 티어 존재 (분당 15회 제한)');
+console.log('   ✅ Pexels API는 완전 무료 (시간당 200 요청)');
+console.log('   ✅ tmpfiles.org 오디오 임시 호스팅 무료 (Shotstack 렌더링용)\n');
+
+console.log('💰 예상 수익 (니치 집중 기준)');
+console.log('-'.repeat(55));
+console.log(`   블로그 AdSense CPM (재테크/건강): ₩3,000~15,000/1,000PV`);
+console.log(`   제휴마케팅 (금융 카드/보험):      건당 ₩5,000~30,000`);
+console.log(`   YouTube 일반 영상 CPM:            ₩1,000~4,000/1,000회`);
+console.log(`   → 월 100만PV 도달 시 예상 AdSense: ₩300,000~1,500,000`);
+console.log(`   → 제휴 전환 50건/월 시:           ₩250,000~1,500,000\n`);
 console.log('='.repeat(55) + '\n');

@@ -47,6 +47,9 @@ export const config = {
     user: process.env.WORDPRESS_USER,
     appPassword: process.env.WORDPRESS_APP_PASSWORD,
   },
+  pexels: {
+    apiKey: process.env.PEXELS_API_KEY,
+  },
   tiktok: {
     accessToken: process.env.TIKTOK_ACCESS_TOKEN,
   },

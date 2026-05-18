@@ -27,26 +27,62 @@ const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
  *    2. image_prompt: 영어로 작성된 Midjourney/DALL-E 스타일 이미지 생성 프롬프트
  *    3. blog_draft: title(SEO 제목), sections([{heading, body}] 3개, 각 300자)"
  */
+// 카테고리별 제휴 상품 추천 매핑
+const AFFILIATE_MAP = {
+  finance:      ['신용카드 비교 서비스', '증권사 계좌 개설', '로보어드바이저 투자'],
+  realestate:   ['청약 정보 서비스', '부동산 대출 비교', '인테리어 견적 서비스'],
+  health:       ['건강기능식품 쿠팡파트너스', '헬스장 할인쿠폰', '온라인 진료 서비스'],
+  economy:      ['재테크 책 쿠팡파트너스', '금융 앱 가입', '경제 유료 뉴스레터'],
+  entertainment:['관련 공연 예매', '스트리밍 구독 서비스', '굿즈 쇼핑몰'],
+  social:       ['관련 책 쿠팡파트너스', '커뮤니티 앱 가입', '관련 강의 플랫폼'],
+};
+
 async function generateContent(item) {
-  const contentPrompt = `당신은 한국 SNS 콘텐츠 전문가입니다. 다음 키워드에 대해 3가지 콘텐츠를 JSON 형식으로만 생성하세요. 다른 텍스트는 포함하지 마세요.
+  const affiliateSuggestions = AFFILIATE_MAP[item.category] ?? AFFILIATE_MAP.social;
+
+  const contentPrompt = `당신은 한국 SEO 블로그·SNS 콘텐츠 전문가입니다. 다음 키워드에 대해 콘텐츠를 JSON 형식으로만 생성하세요. 다른 텍스트는 포함하지 마세요.
 
 키워드: ${item.keyword}
 카테고리: ${item.category}
+제휴 상품 후보: ${affiliateSuggestions.join(', ')}
 
 출력 JSON 형식:
 {
   "shortform_script": {
-    "hook": "시청자의 시선을 즉시 사로잡는 첫 문장 (3초 내 어그로)",
-    "body": "60초 이내로 읽을 수 있는 본문 내용",
-    "cta": "구독·좋아요·공유 등 행동을 유도하는 마무리 문장"
+    "hook": "3초 안에 시청자를 멈추게 하는 강렬한 첫 문장 (숫자·질문·충격 사실 활용)",
+    "body": "60초 이내 본문 (핵심 정보 3가지를 간결하게, 시청자 감정 자극)",
+    "cta": "구독·좋아요와 함께 블로그 링크 클릭을 유도하는 마무리 문장"
   },
-  "image_prompt": "Midjourney/DALL-E 호환 영어 이미지 생성 프롬프트 (스타일, 구도, 색감 포함)",
+  "image_prompt": "Midjourney/DALL-E 호환 영어 프롬프트 (구체적 스타일·구도·색감 포함, 세로 9:16 비율)",
   "blog_draft": {
-    "title": "SEO를 고려한 블로그 제목",
+    "title": "검색 의도에 맞는 SEO 최적화 제목 (키워드 포함, 30자 이내)",
+    "meta_description": "검색 결과에 표시될 설명 (키워드 포함, 155자 이내, 클릭 유도 문구 포함)",
+    "seo_keywords": ["핵심키워드", "연관키워드1", "연관키워드2", "롱테일키워드1", "롱테일키워드2"],
     "sections": [
-      { "heading": "소제목 1", "body": "300자 내외 본문" },
-      { "heading": "소제목 2", "body": "300자 내외 본문" },
-      { "heading": "소제목 3", "body": "300자 내외 본문" }
+      {
+        "heading": "H2 소제목 1 (키워드 포함 권장)",
+        "body": "500자 이상 상세 본문. 독자가 검색한 이유를 해결해주는 실용적 정보 중심. 전문 용어 설명 포함."
+      },
+      {
+        "heading": "H2 소제목 2",
+        "body": "500자 이상 상세 본문. 구체적 수치·사례·비교 데이터 활용."
+      },
+      {
+        "heading": "H2 소제목 3",
+        "body": "500자 이상 상세 본문. 독자 행동을 유도하는 실천 가이드 또는 주의사항."
+      }
+    ],
+    "affiliate_hooks": [
+      {
+        "position": "section1_end",
+        "product_category": "${affiliateSuggestions[0]}",
+        "anchor_text": "자연스럽게 삽입할 링크 앵커 텍스트 (5~10자)"
+      },
+      {
+        "position": "section2_end",
+        "product_category": "${affiliateSuggestions[1]}",
+        "anchor_text": "자연스럽게 삽입할 링크 앵커 텍스트 (5~10자)"
+      }
     ]
   }
 }`;
@@ -103,7 +139,7 @@ export async function createContents(trendData) {
         category: item.category,
         shortform_script: generated.shortform_script ?? {},
         image_prompt: generated.image_prompt ?? '',
-        blog_draft: generated.blog_draft ?? { title: '', sections: [] },
+        blog_draft: generated.blog_draft ?? { title: '', meta_description: '', seo_keywords: [], sections: [], affiliate_hooks: [] },
       });
     } catch (err) {
       logger.error(`[content_creator] Failed to generate content for: ${item.keyword}`, {

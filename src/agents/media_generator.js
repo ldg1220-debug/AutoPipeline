@@ -11,10 +11,74 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
+// 카테고리별 Pexels 검색 폴백 키워드 (한국 키워드로 결과가 없을 때 사용)
+const CATEGORY_FALLBACK_QUERY = {
+  economy: 'business finance money',
+  entertainment: 'music performance stage lights',
+  social: 'people city lifestyle urban',
+};
+
+/**
+ * Pexels API로 키워드 관련 세로(portrait) 스톡 영상을 검색한다.
+ * 결과 없으면 카테고리 폴백 → 그것도 없으면 null 반환.
+ * PEXELS_API_KEY 미설정 시 null 반환 (Shotstack이 단색 배경으로 폴백).
+ */
+async function searchPexelsVideo(keyword, category) {
+  const apiKey = config.pexels.apiKey;
+  if (!apiKey) return null;
+
+  const trySearch = async (query) => {
+    try {
+      const res = await axios.get('https://api.pexels.com/videos/search', {
+        params: { query, per_page: 5, orientation: 'portrait' },
+        headers: { Authorization: apiKey },
+        timeout: 10000,
+      });
+      const videos = res.data.videos ?? [];
+      if (videos.length === 0) return null;
+
+      // HD 이하 파일 우선 (너무 크면 Shotstack 처리 느림)
+      const pick = videos[Math.floor(Math.random() * Math.min(videos.length, 3))];
+      const file =
+        pick.video_files.find((f) => f.quality === 'hd' && f.width <= 1080) ??
+        pick.video_files[0];
+      return file?.link ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const result = await trySearch(keyword);
+  if (result) return result;
+  return trySearch(CATEGORY_FALLBACK_QUERY[category] ?? 'trending news korea');
+}
+
+/**
+ * 오디오 파일을 tmpfiles.org에 임시 업로드하고 직접 다운로드 URL을 반환한다.
+ * Shotstack은 공개 URL만 soundtrack으로 허용하므로 이 단계가 필수다.
+ * 파일은 약 1시간 후 자동 삭제되므로 렌더링에만 사용한다.
+ *
+ * 프로덕션: 트래픽이 늘면 Cloudflare R2(무료 10GB/월)로 교체 권장.
+ */
+async function uploadAudioForShotstack(audioPath) {
+  const fileBuffer = await fs.readFile(audioPath);
+  const blob = new Blob([fileBuffer], { type: 'audio/mpeg' });
+  const formData = new FormData();
+  formData.append('file', blob, path.basename(audioPath));
+
+  const res = await axios.post('https://tmpfiles.org/api/v1/upload', formData, {
+    timeout: 30000,
+  });
+
+  // tmpfiles.org: { status: 'success', data: { url: 'https://tmpfiles.org/XXXXX/file.mp3' } }
+  // 직접 다운로드는 /dl/ 경로 필요
+  const uploadedUrl = res.data?.data?.url;
+  if (!uploadedUrl) throw new Error('tmpfiles.org did not return a URL');
+  return uploadedUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+}
+
 /**
  * ElevenLabs TTS API로 대본 텍스트를 음성 파일(.mp3)로 변환한다.
- * 한국어 기본 voice_id: "21m00Tcm4TlvDq8ikWAM" (Rachel, 영어) →
- * 한국어 지원 모델: eleven_multilingual_v2 사용 시 한국어 지원됨.
  */
 async function generateAudio(text, outputPath) {
   const voiceId = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
@@ -44,79 +108,79 @@ async function generateAudio(text, outputPath) {
 }
 
 /**
- * Shotstack API로 영상을 렌더링한다.
- * 배경 색상 + 자막 트랙 구성의 최소 템플릿을 사용한다.
- * 렌더링은 비동기(polling)이므로 완료까지 최대 120초 대기한다.
+ * Shotstack API로 9:16 숏폼 영상을 렌더링한다.
  *
- * Shotstack 무료 플랜: 샌드박스 환경에서 워터마크 포함 렌더링 가능.
- * 실제 서비스 전 production API 키로 전환 필요.
+ * 레이어 구조 (아래에서 위):
+ *   1. Pexels 스톡 영상 배경 (없으면 단색 #1a1a2e)
+ *   2. 반투명 다크 오버레이 → 자막 가독성 확보
+ *   3. 자막 트랙 (6청크, 10초 단위)
+ *   사운드트랙: tmpfiles.org에 호스팅된 ElevenLabs 음성
  */
 async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const shotstackApiKey = process.env.SHOTSTACK_API_KEY;
-  if (!shotstackApiKey) {
-    throw new Error('SHOTSTACK_API_KEY is not set');
-  }
+  if (!shotstackApiKey) throw new Error('SHOTSTACK_API_KEY is not set');
 
+  // 1. 오디오 임시 업로드
+  logger.info(`[media_generator] Uploading audio for Shotstack: ${content.keyword}`);
+  const audioUrl = await uploadAudioForShotstack(audioPath);
+
+  // 2. Pexels 배경 영상 검색
+  const bgVideoUrl = await searchPexelsVideo(content.keyword, content.category);
+  logger.info(`[media_generator] Background video: ${bgVideoUrl ? 'Pexels' : 'solid color fallback'}`);
+
+  // 3. 자막 생성 (6청크)
   const scriptText = [
     content.shortform_script?.hook ?? '',
     content.shortform_script?.body ?? '',
     content.shortform_script?.cta ?? '',
   ].join(' ');
-
-  // 자막을 10초 단위로 분할 (Shotstack 자막 트랙 구조)
-  const words = scriptText.split(' ');
+  const words = scriptText.split(' ').filter(Boolean);
   const chunkSize = Math.ceil(words.length / 6);
+
   const subtitleClips = Array.from({ length: 6 }, (_, i) => {
-    const start = i * 10;
     const chunk = words.slice(i * chunkSize, (i + 1) * chunkSize).join(' ');
+    if (!chunk) return null;
     return {
       asset: {
         type: 'html',
-        html: `<p style="font-size:48px;color:#fff;text-align:center;font-weight:bold;text-shadow:2px 2px 4px #000">${chunk}</p>`,
-        width: 1080,
-        height: 200,
+        html: `<p style="font-family:sans-serif;font-size:52px;color:#ffffff;text-align:center;font-weight:800;line-height:1.3;text-shadow:2px 3px 6px rgba(0,0,0,0.9);padding:0 20px">${chunk}</p>`,
+        width: 1000,
+        height: 260,
       },
-      start,
+      start: i * 10,
       length: 9.5,
       position: 'bottom',
-      offset: { y: -0.1 },
+      offset: { y: -0.08 },
     };
-  });
+  }).filter(Boolean);
 
-  const timeline = {
-    soundtrack: {
-      src: `file://${audioPath}`,
-      effect: 'fadeOut',
-    },
-    tracks: [
-      { clips: subtitleClips },
-      {
-        clips: [
-          {
-            asset: { type: 'color', color: '#1a1a2e' },
-            start: 0,
-            length: 60,
-          },
-        ],
-      },
-    ],
+  // 4. 배경 트랙 (Pexels 영상 or 단색)
+  const bgClip = bgVideoUrl
+    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: 60, fit: 'crop' }
+    : { asset: { type: 'color', color: '#1a1a2e' }, start: 0, length: 60 };
+
+  // 5. 반투명 오버레이 (가독성)
+  const overlayClip = {
+    asset: { type: 'color', color: '#000000' },
+    start: 0,
+    length: 60,
+    opacity: 0.45,
   };
 
-  const output = {
-    format: 'mp4',
-    resolution: 'hd',
-    aspectRatio: '9:16', // 숏폼 세로 포맷
-    fps: 30,
+  const timeline = {
+    soundtrack: { src: audioUrl, effect: 'fadeOut' },
+    tracks: [
+      { clips: subtitleClips },
+      { clips: [overlayClip] },
+      { clips: [bgClip] },
+    ],
   };
 
   const renderResponse = await axios.post(
     'https://api.shotstack.io/stage/render',
-    { timeline, output },
+    { timeline, output: { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 } },
     {
-      headers: {
-        'x-api-key': shotstackApiKey,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'x-api-key': shotstackApiKey, 'Content-Type': 'application/json' },
       timeout: 30000,
     }
   );
@@ -124,9 +188,9 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const renderId = renderResponse.data.response.id;
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
-  // 렌더링 완료까지 polling (최대 120초)
+  // 6. 완료 대기 polling (최대 150초)
   const pollUrl = `https://api.shotstack.io/stage/render/${renderId}`;
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await axios.get(pollUrl, {
       headers: { 'x-api-key': shotstackApiKey },
@@ -135,24 +199,20 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
     const { status, url } = statusRes.data.response;
 
     if (status === 'done' && url) {
-      const videoRes = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
+      const videoRes = await axios.get(url, { responseType: 'arraybuffer', timeout: 120000 });
       await fs.mkdir(path.dirname(outputPath), { recursive: true });
       await fs.writeFile(outputPath, Buffer.from(videoRes.data));
       logger.info(`[media_generator] Video saved: ${outputPath}`);
       return outputPath;
     }
-
-    if (status === 'failed') {
-      throw new Error(`Shotstack render failed for renderId: ${renderId}`);
-    }
+    if (status === 'failed') throw new Error(`Shotstack render failed: ${renderId}`);
   }
 
-  throw new Error(`Shotstack render timed out for renderId: ${renderId}`);
+  throw new Error(`Shotstack render timed out: ${renderId}`);
 }
 
 /**
  * 단일 콘텐츠에 대해 오디오 → 영상 순서로 미디어를 생성한다.
- * ElevenLabs 또는 Shotstack API 키가 없으면 해당 단계를 스킵하고 결과에 표시한다.
  */
 async function generateMedia(content) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
@@ -161,28 +221,21 @@ async function generateMedia(content) {
 
   const result = { keyword: content.keyword, audio: null, video: null };
 
-  // 오디오 생성
   if (!config.elevenlabs.apiKey) {
-    logger.warn(`[media_generator] ELEVENLABS_API_KEY not set. Skipping audio: ${content.keyword}`);
-  } else {
-    try {
-      const scriptText = [
-        content.shortform_script?.hook ?? '',
-        content.shortform_script?.body ?? '',
-        content.shortform_script?.cta ?? '',
-      ].join(' ');
-      await generateAudio(scriptText, audioPath);
-      result.audio = audioPath;
-    } catch (err) {
-      logger.error(`[media_generator] Audio generation failed: ${content.keyword}`, {
-        message: err.message,
-      });
-    }
+    logger.warn(`[media_generator] ELEVENLABS_API_KEY not set. Skipping: ${content.keyword}`);
+    return result;
   }
 
-  // 영상 렌더링 (오디오 생성 성공 시에만 시도)
-  if (!result.audio) {
-    logger.warn(`[media_generator] Skipping video render (no audio): ${content.keyword}`);
+  try {
+    const scriptText = [
+      content.shortform_script?.hook ?? '',
+      content.shortform_script?.body ?? '',
+      content.shortform_script?.cta ?? '',
+    ].join(' ');
+    await generateAudio(scriptText, audioPath);
+    result.audio = audioPath;
+  } catch (err) {
+    logger.error(`[media_generator] Audio generation failed: ${content.keyword}`, { message: err.message });
     return result;
   }
 
@@ -190,21 +243,14 @@ async function generateMedia(content) {
     await renderVideoWithShotstack(content, result.audio, videoPath);
     result.video = videoPath;
   } catch (err) {
-    logger.error(`[media_generator] Video render failed: ${content.keyword}`, {
-      message: err.message,
-    });
+    logger.error(`[media_generator] Video render failed: ${content.keyword}`, { message: err.message });
   }
 
   return result;
 }
 
-/**
- * 모든 콘텐츠에 대해 순차적으로 미디어를 생성한다.
- * API Rate Limit 보호를 위해 병렬 처리를 하지 않는다.
- */
 export async function generateAllMedia(contentData) {
   const contents = contentData?.contents ?? [];
-
   if (contents.length === 0) {
     logger.warn('[media_generator] No contents to process.');
     return { generated_at: new Date().toISOString(), results: [] };
@@ -213,10 +259,8 @@ export async function generateAllMedia(contentData) {
   const results = [];
   for (const content of contents) {
     logger.info(`[media_generator] Processing: ${content.keyword}`);
-    const result = await generateMedia(content);
-    results.push(result);
+    results.push(await generateMedia(content));
   }
-
   return { generated_at: new Date().toISOString(), results };
 }
 
@@ -226,11 +270,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     try {
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       let contentData;
-
       try {
-        contentData = await readJSON(
-          path.resolve(__dirname, `../../output/scripts/content_${date}.json`)
-        );
+        contentData = await readJSON(path.resolve(__dirname, `../../output/scripts/content_${date}.json`));
       } catch {
         logger.warn('[media_generator] No content file found. Using mock data.');
         const mockTrend = await readJSON(MOCK_CONTENT_PATH);
@@ -251,10 +292,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
 
       const result = await generateAllMedia(contentData);
-
       const outPath = path.resolve(__dirname, `../../output/scripts/media_${date}.json`);
       await writeJSON(outPath, result);
-
       logger.info(`[media_generator] Saved to ${outPath}`);
       console.log(JSON.stringify(result, null, 2));
     } catch (err) {

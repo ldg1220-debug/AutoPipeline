@@ -21,6 +21,18 @@ const RSS_SOURCES = [
     url: 'https://www.yna.co.kr/rss/economy.xml',
   },
   {
+    label: 'mk_stock',                          // 매일경제 증권·재테크 (고CPM)
+    url: 'https://rss.mk.co.kr/2/3.xml',
+  },
+  {
+    label: 'mk_realestate',                     // 매일경제 부동산 (고CPM)
+    url: 'https://rss.mk.co.kr/2/1.xml',
+  },
+  {
+    label: 'health_chosun',                     // 헬스조선 건강 (고CPM)
+    url: 'https://health.chosun.com/rss/news.xml',
+  },
+  {
     label: 'yonhap_entertainment',
     url: 'https://www.yna.co.kr/rss/entertainment.xml',
   },
@@ -71,10 +83,19 @@ async function fetchRSS(source) {
 async function scoreKeywordsWithLLM(keywords) {
   const scoringPrompt = `다음은 한국 뉴스·트렌드 키워드 목록입니다.
 각 키워드에 대해 아래 기준으로 점수를 매기고 JSON 배열로만 응답하세요. 다른 텍스트는 포함하지 마세요.
+
+점수 기준:
 - virality: 0~40 (SNS 확산 속도, 커뮤니티 반응)
 - commercial_value: 0~40 (광고·제휴 상품 연결 가능성)
+  ★ 가중치 우대 니치: 재테크·투자·금리·부동산·보험·대출·건강·다이어트·보충제 관련이면 35~40점 부여
+  ✗ 순수 연예·가십·정치 키워드는 10점 이하
 - freshness_hours: 0~20 (뉴스 발행 신선도, 최신일수록 고점)
-출력 형식: [{ "keyword": "...", "category": "entertainment|social|economy", "virality": 0, "commercial_value": 0, "freshness_hours": 0, "source_url": "..." }]
+- niche_premium: 0~20 (고CPM 니치 보너스)
+  금융·재테크·부동산·건강 카테고리면 15~20점, 연예·사회면 0~5점
+
+category 분류: "finance" | "realestate" | "health" | "entertainment" | "social" | "economy"
+
+출력 형식: [{ "keyword": "...", "category": "...", "virality": 0, "commercial_value": 0, "freshness_hours": 0, "niche_premium": 0, "source_url": "..." }]
 
 키워드 목록:
 ${JSON.stringify(keywords, null, 2)}`;
@@ -132,15 +153,20 @@ export async function fetchTrends() {
 
     const scored = await scoreKeywordsWithLLM(keywordInput);
 
-    // 총점 계산 후 상위 5개 선정
+    // 총점 계산 후 상위 5개 선정 (niche_premium 포함)
     const sorted = scored
       .map((item) => ({
         ...item,
-        score: (item.virality ?? 0) + (item.commercial_value ?? 0) + (item.freshness_hours ?? 0),
+        score:
+          (item.virality ?? 0) +
+          (item.commercial_value ?? 0) +
+          (item.freshness_hours ?? 0) +
+          (item.niche_premium ?? 0),
         score_reason: {
           virality: item.virality ?? 0,
           commercial_value: item.commercial_value ?? 0,
           freshness_hours: item.freshness_hours ?? 0,
+          niche_premium: item.niche_premium ?? 0,
         },
         collected_at: new Date().toISOString(),
       }))
