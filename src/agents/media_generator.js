@@ -278,7 +278,10 @@ async function generateMedia(content) {
     await renderVideoWithShotstack(content, result.audio, videoPath);
     result.video = videoPath;
   } catch (err) {
-    logger.error(`[media_generator] Video render failed: ${content.keyword}`, { message: err.message });
+    const detail = err.response?.data
+      ? JSON.stringify(err.response.data).slice(0, 400)
+      : err.message;
+    logger.error(`[media_generator] Video render failed: ${content.keyword} | ${detail}`);
   }
 
   return result;
