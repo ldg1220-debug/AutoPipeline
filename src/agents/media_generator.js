@@ -270,10 +270,10 @@ async function generateMedia(content) {
   } catch (err) {
     const detail = err.response?.data
       ? Buffer.isBuffer(err.response.data)
-        ? err.response.data.toString('utf8').slice(0, 200)
-        : JSON.stringify(err.response.data).slice(0, 200)
+        ? err.response.data.toString('utf8').slice(0, 300)
+        : JSON.stringify(err.response.data).slice(0, 300)
       : err.message;
-    logger.error(`[media_generator] Audio generation failed: ${content.keyword}`, { detail });
+    logger.error(`[media_generator] Audio generation failed: ${content.keyword} | ${detail}`);
     return result;
   }
 
