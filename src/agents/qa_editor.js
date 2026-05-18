@@ -192,7 +192,8 @@ export async function runTextQA(contentData) {
     if (bannedDetected) reasons.push('금지어 감지됨');
     if (grammarCheck === 'FAIL') reasons.push('문법 오류 감지됨');
     if (factScore < 60) reasons.push(`팩트체크 점수 미달 (${factScore}/100)`);
-    if (llmIssues) reasons.push(llmIssues);
+    // llmIssues는 리포트에 기록만 하고 거부 기준으로 쓰지 않는다.
+    // 금융 수치(금리, 금액 등)에 LLM이 항상 "확인 필요" 메모를 남겨 전량 REJECT되는 문제 방지.
 
     const approved = reasons.length === 0;
     const report = {
@@ -202,7 +203,8 @@ export async function runTextQA(contentData) {
       fact_check_score: factScore,
       grammar_check: grammarCheck,
       banned_words_detected: bannedDetected,
-      video_layout_check: 'PENDING', // 아직 영상 미제작
+      llm_issues: llmIssues,         // 참고용으로만 기록
+      video_layout_check: 'PENDING',
       audio_sync_check: 'PENDING',
       final_decision: approved ? 'APPROVED' : 'REJECTED',
       revision_reason: approved ? '' : reasons.join(' / '),

@@ -39,8 +39,8 @@ const RSS_SOURCES = [
     url: 'https://www.mk.co.kr/rss/30000041/',
   },
   {
-    label: 'chosun_health',                        // 조선일보 건강 (고CPM)
-    url: 'https://www.chosun.com/arc/outboundfeeds/rss/category/life/health/?outputType=xml',
+    label: 'yonhap_health',                        // 연합뉴스 건강·의학 (고CPM)
+    url: 'https://www.yna.co.kr/rss/health.xml',
   },
   {
     label: 'yonhap_entertainment',
