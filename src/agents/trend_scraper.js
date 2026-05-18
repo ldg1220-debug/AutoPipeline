@@ -92,7 +92,7 @@ async function fetchRSS(source) {
  */
 async function scoreKeywordsWithLLM(keywords) {
   const scoringPrompt = `다음은 한국 뉴스·트렌드 키워드 목록입니다.
-각 키워드에 대해 아래 기준으로 점수를 매기고 JSON 배열로만 응답하세요. 다른 텍스트는 포함하지 마세요.
+각 키워드에 대해 아래 기준으로 점수를 매기고 다음 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
 점수 기준:
 - virality: 0~40 (SNS 확산 속도, 커뮤니티 반응)
@@ -105,7 +105,8 @@ async function scoreKeywordsWithLLM(keywords) {
 
 category 분류: "finance" | "realestate" | "health" | "entertainment" | "social" | "economy"
 
-출력 형식: [{ "keyword": "...", "category": "...", "virality": 0, "commercial_value": 0, "freshness_hours": 0, "niche_premium": 0, "source_url": "..." }]
+출력 형식 (items 배열을 반드시 포함):
+{ "items": [{ "keyword": "...", "category": "...", "virality": 0, "commercial_value": 0, "freshness_hours": 0, "niche_premium": 0, "source_url": "..." }] }
 
 키워드 목록:
 ${JSON.stringify(keywords, null, 2)}`;
@@ -127,11 +128,10 @@ ${JSON.stringify(keywords, null, 2)}`;
     }
   );
 
-  // response_format: json_object는 최상위 객체를 반환하므로 배열 추출
   const raw = response.data.choices[0].message.content;
   const parsed = JSON.parse(raw);
-  // GPT가 { items: [...] } 형태로 감쌀 수 있어 배열 탐색
-  const arr = Array.isArray(parsed) ? parsed : Object.values(parsed).find(Array.isArray) ?? [];
+  // 프롬프트에서 { items: [...] } 형태를 강제했으나 방어적으로 배열도 허용
+  const arr = Array.isArray(parsed) ? parsed : (parsed.items ?? Object.values(parsed).find(Array.isArray) ?? []);
   return arr;
 }
 

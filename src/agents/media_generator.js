@@ -89,7 +89,7 @@ async function uploadAudioForShotstack(audioPath) {
  * ElevenLabs TTS API로 대본 텍스트를 음성 파일(.mp3)로 변환한다.
  */
 async function generateAudio(text, outputPath) {
-  const voiceId = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
+  const voiceId = config.elevenlabs.voiceId;
 
   const response = await axios.post(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -128,7 +128,7 @@ async function generateAudio(text, outputPath) {
  * 타이밍: 총 20초 — hook(0~3s) / body(3~15s) / cta(15~20s)
  */
 async function renderVideoWithShotstack(content, audioPath, outputPath) {
-  const shotstackApiKey = process.env.SHOTSTACK_API_KEY;
+  const shotstackApiKey = config.shotstack.apiKey;
   if (!shotstackApiKey) throw new Error('SHOTSTACK_API_KEY is not set');
 
   // 1. 오디오 임시 업로드
@@ -254,11 +254,17 @@ async function generateMedia(content) {
   }
 
   try {
-    const scriptText = [
+    const parts = [
       content.shortform_script?.hook ?? '',
       content.shortform_script?.body ?? '',
       content.shortform_script?.cta ?? '',
-    ].join(' ');
+    ].filter(Boolean);
+    let scriptText = parts.join(' ');
+    // 한국어 기준 20초 = 약 100자. 초과 시 body를 잘라 영상-오디오 타임라인 불일치 방지
+    if (scriptText.length > 100) {
+      logger.warn(`[media_generator] Script too long (${scriptText.length}chars). Trimming to 100.`);
+      scriptText = scriptText.slice(0, 100);
+    }
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
   } catch (err) {
@@ -307,12 +313,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           contents: mockTrend.selected_items.map((item) => ({
             keyword: item.keyword,
             category: item.category,
+            series_name: item.series ?? '오늘의 이슈',
             shortform_script: {
-              hook: `${item.keyword}에 대해 알고 계셨나요?`,
-              body: `${item.keyword}은 최근 큰 화제를 모으고 있습니다. 자세한 내용을 알아봅시다.`,
-              cta: '구독과 좋아요 부탁드립니다!',
+              hook: `${item.keyword}, 30초만 투자하세요`,
+              body: `${item.keyword} 핵심 인사이트 한 줄 정리`,
+              cta: `자세한 내용은 링크에서 → ${item.series ?? '오늘의 이슈'} 더 보기`,
             },
-            image_prompt: `compelling illustration about ${item.keyword}, Korean news style`,
+            image_prompt: `notebook paper background, handwritten Korean text, ${item.keyword}, study desk, 9:16`,
             blog_draft: { title: `${item.keyword} 완벽 정리`, sections: [] },
           })),
         };

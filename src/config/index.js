@@ -36,6 +36,10 @@ export const config = {
   },
   elevenlabs: {
     apiKey: process.env.ELEVENLABS_API_KEY,
+    voiceId: process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM',
+  },
+  shotstack: {
+    apiKey: process.env.SHOTSTACK_API_KEY,
   },
   youtube: {
     clientId: process.env.YOUTUBE_CLIENT_ID,

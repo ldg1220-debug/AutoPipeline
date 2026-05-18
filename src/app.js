@@ -179,10 +179,14 @@ async function runPipeline() {
       publishResults
     );
     logger.info(`[app] Agent 4 complete. Published: ${publishResults.results?.length ?? 0}`);
-    scheduleWordPressPublish(publishResults);
   } catch (err) {
     logger.error('[app] Agent 4 (auto_publisher) failed.', { message: err.message });
     await sendErrorAlert('auto_publisher', err.message);
+  }
+
+  // WordPress 자동 발행 예약 (+2시간, YouTube 발행 시각과 동기화)
+  if (publishResults.results.length > 0) {
+    scheduleWordPressPublish(publishResults);
   }
 
   // ── 실행 요약 리포트 + 텔레그램 알림 ──────────────────────────────────

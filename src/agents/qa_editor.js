@@ -61,7 +61,7 @@ async function runLLMQA(content) {
 }
 
 function validateSchema(content) {
-  const required = ['keyword', 'category', 'shortform_script', 'image_prompt', 'blog_draft'];
+  const required = ['keyword', 'category', 'series_name', 'shortform_script', 'image_prompt', 'blog_draft'];
   const missing = required.filter((f) => !content[f]);
   if (missing.length > 0) return { valid: false, reason: `필수 필드 누락: ${missing.join(', ')}` };
 
@@ -280,12 +280,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           contents: mockTrend.selected_items.map((item) => ({
             keyword: item.keyword,
             category: item.category,
-            shortform_script: { hook: '훅', body: '본문', cta: 'CTA' },
-            image_prompt: 'placeholder image prompt',
+            series_name: item.series ?? '오늘의 이슈',
+            shortform_script: { hook: `${item.keyword}?`, body: `${item.keyword} 핵심 한 줄`, cta: '링크에서 더 보기' },
+            image_prompt: `notebook paper background, ${item.keyword}, study desk, 9:16`,
             blog_draft: {
               title: `${item.keyword} 정리`,
-              meta_description: '',
-              seo_keywords: [],
+              meta_description: `${item.keyword}에 대해 알아보세요.`,
+              seo_keywords: [item.keyword],
               sections: [
                 { heading: '배경', body: '배경 내용' },
                 { heading: '현황', body: '현황 내용' },

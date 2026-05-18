@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs/promises';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
@@ -34,8 +35,6 @@ async function refreshYouTubeAccessToken() {
  * publishAt은 현재 시각 + 2시간으로 설정한다.
  */
 async function publishToYouTube(content, accessToken) {
-  const fs = await import('fs/promises');
-
   // 영상 파일 경로 규칙: output/media/<keyword>.mp4
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const videoPath = path.resolve(
@@ -201,7 +200,7 @@ async function publishToTikTok(content) {
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
 
   try {
-    await import('fs/promises').then((fs) => fs.access(videoPath));
+    await fs.access(videoPath);
   } catch {
     logger.warn(`[auto_publisher] TikTok: video file not found, skipping: ${videoPath}`);
     return { platform: 'tiktok', status: 'skipped_no_video_file' };
@@ -236,9 +235,8 @@ async function publishToTikTok(content) {
   const { publish_id, upload_url } = initRes.data.data;
 
   // Step 2: 영상 파일 업로드
-  const { readFile, stat } = await import('fs/promises');
-  const videoBuffer = await readFile(videoPath);
-  const videoSize = (await stat(videoPath)).size;
+  const videoBuffer = await fs.readFile(videoPath);
+  const videoSize = (await fs.stat(videoPath)).size;
 
   await axios.put(upload_url, videoBuffer, {
     headers: {
@@ -453,11 +451,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           contents: mockTrend.selected_items.map((item) => ({
             keyword: item.keyword,
             category: item.category,
-            shortform_script: { hook: '훅', body: '본문', cta: 'CTA' },
+            series_name: item.series ?? '오늘의 이슈',
+            shortform_script: { hook: `${item.keyword}?`, body: `${item.keyword} 핵심 한 줄`, cta: '링크에서 더 보기' },
             image_prompt: 'placeholder',
             blog_draft: {
               title: `${item.keyword} 정리`,
+              meta_description: `${item.keyword}에 대해 알아보세요.`,
+              seo_keywords: [item.keyword],
               sections: [{ heading: '배경', body: '내용' }],
+              affiliate_hooks: [],
             },
           })),
         };
