@@ -143,13 +143,16 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const body = content.shortform_script?.body ?? '';
   const cta  = content.shortform_script?.cta  ?? '';
 
-  // 3. 자막 클립 (hook / body / cta 3구간, 카테고리 형광펜 강조)
+  // 3. 자막 클립 (hook / body / cta 3구간)
+  // Shotstack text 타입 사용 (rich-text/html 타입 deprecated)
   const makeSubtitle = (text, start, length, fontSize = 48) => ({
     asset: {
-      type: 'rich-text',
-      html: `<p style="font-family:'Noto Sans KR',sans-serif;font-size:${fontSize}px;color:#1a1a1a;text-align:center;font-weight:800;line-height:1.4;padding:12px 24px;background:${accentColor}cc;border-radius:8px;margin:0 16px">${text}</p>`,
+      type: 'text',
+      text,
       width: 900,
       height: 320,
+      font: { family: 'Noto Sans', size: fontSize, color: '#1A1A1A', weight: 'bold' },
+      alignment: { horizontal: 'center' },
     },
     start,
     length,
@@ -160,10 +163,12 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   // 시리즈명 레이블 (전체 구간 상단 고정)
   const seriesLabel = {
     asset: {
-      type: 'rich-text',
-      html: `<p style="font-family:'Noto Sans KR',sans-serif;font-size:30px;color:#1a1a1a;text-align:center;font-weight:700;padding:8px 20px;background:${accentColor};border-radius:20px;letter-spacing:1px">${seriesName}</p>`,
+      type: 'text',
+      text: seriesName,
       width: 700,
       height: 80,
+      font: { family: 'Noto Sans', size: 30, color: '#1A1A1A', weight: 'bold' },
+      alignment: { horizontal: 'center' },
     },
     start: 0,
     length: 20,
