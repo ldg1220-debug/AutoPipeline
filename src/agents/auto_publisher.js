@@ -52,19 +52,25 @@ async function publishToYouTube(content, accessToken) {
   }
 
   const publishAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+
+  const seriesName = content.series_name ?? '경제 직독직해';
+  const seriesTag = seriesName.replace(/\s/g, '');
+
   const description = [
-    content.shortform_script?.hook ?? '',
+    `[${seriesName}] ${content.shortform_script?.hook ?? ''}`,
     '',
     content.shortform_script?.body ?? '',
     '',
     content.shortform_script?.cta ?? '',
+    '',
+    `#${seriesTag} #${content.category} #경제직독직해 #숏폼 #${content.keyword.replace(/\s/g, '')}`,
   ].join('\n');
 
   const metadata = JSON.stringify({
     snippet: {
-      title: content.blog_draft?.title ?? content.keyword,
+      title: `[${seriesName}] ${content.blog_draft?.title ?? content.keyword}`,
       description,
-      tags: [content.keyword, content.category, '숏폼', '트렌드'],
+      tags: [seriesName, content.keyword, content.category, '경제직독직해', '숏폼', '트렌드'],
       categoryId: '22',
     },
     status: {
@@ -202,11 +208,15 @@ async function publishToTikTok(content) {
   }
 
   // Step 1: 업로드 세션 초기화
+  const seriesNameTt = content.series_name ?? '경제 직독직해';
+  const seriesTagTt = seriesNameTt.replace(/\s/g, '');
+  const tiktokTitle = `[${seriesNameTt}] ${content.blog_draft?.title ?? content.keyword} #${seriesTagTt} #경제직독직해 #숏폼`;
+
   const initRes = await axios.post(
     'https://open.tiktokapis.com/v2/post/publish/video/init/',
     {
       post_info: {
-        title: content.blog_draft?.title ?? content.keyword,
+        title: tiktokTitle,
         privacy_level: 'SELF_ONLY', // 검토 후 PUBLIC_TO_EVERYONE 으로 변경
         disable_duet: false,
         disable_comment: false,
