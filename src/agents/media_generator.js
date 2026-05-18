@@ -268,7 +268,12 @@ async function generateMedia(content) {
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
   } catch (err) {
-    logger.error(`[media_generator] Audio generation failed: ${content.keyword}`, { message: err.message });
+    const detail = err.response?.data
+      ? Buffer.isBuffer(err.response.data)
+        ? err.response.data.toString('utf8').slice(0, 200)
+        : JSON.stringify(err.response.data).slice(0, 200)
+      : err.message;
+    logger.error(`[media_generator] Audio generation failed: ${content.keyword}`, { detail });
     return result;
   }
 
