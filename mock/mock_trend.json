@@ -5,7 +5,7 @@
       "category": "economy",
       "score": 87,
       "score_reason": { "virality": 38, "commercial_value": 32, "freshness_hours": 17 },
-      "source_url": "https://news.naver.com/mock/economy/001",
+      "source_url": "https://www.yna.co.kr/view/AKR20260518001",
       "collected_at": "2026-05-18T06:00:00+09:00"
     },
     {
@@ -13,7 +13,7 @@
       "category": "entertainment",
       "score": 76,
       "score_reason": { "virality": 35, "commercial_value": 24, "freshness_hours": 17 },
-      "source_url": "https://news.naver.com/mock/entertainment/002",
+      "source_url": "https://www.yna.co.kr/view/AKR20260518002",
       "collected_at": "2026-05-18T06:00:00+09:00"
     },
     {
@@ -21,7 +21,23 @@
       "category": "social",
       "score": 70,
       "score_reason": { "virality": 28, "commercial_value": 30, "freshness_hours": 12 },
-      "source_url": "https://news.naver.com/mock/social/003",
+      "source_url": "https://www.yna.co.kr/view/AKR20260518003",
+      "collected_at": "2026-05-18T06:00:00+09:00"
+    },
+    {
+      "keyword": "금리 인하 기대감",
+      "category": "economy",
+      "score": 65,
+      "score_reason": { "virality": 25, "commercial_value": 30, "freshness_hours": 10 },
+      "source_url": "https://www.yna.co.kr/view/AKR20260518004",
+      "collected_at": "2026-05-18T06:00:00+09:00"
+    },
+    {
+      "keyword": "AI 면접 확산 논란",
+      "category": "social",
+      "score": 61,
+      "score_reason": { "virality": 30, "commercial_value": 20, "freshness_hours": 11 },
+      "source_url": "https://www.yna.co.kr/view/AKR20260518005",
       "collected_at": "2026-05-18T06:00:00+09:00"
     }
   ]

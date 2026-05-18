@@ -145,7 +145,79 @@ async function publishToWordPress(content) {
 }
 
 /**
- * APPROVED 콘텐츠를 YouTube와 WordPress에 발행한다.
+ * TikTok Content Posting API v2로 숏폼 영상을 발행한다.
+ * 영상 파일이 없으면 스킵한다.
+ *
+ * TikTok API 주의사항:
+ *   - 2023년 이후 Content Posting API는 TikTok Developer 심사 필요
+ *   - access_token은 OAuth 2.0 흐름으로 발급받은 단기 토큰을 사용
+ *   - 영상은 PULL_FROM_URL 또는 FILE_UPLOAD 방식 모두 지원
+ *     현재 구현은 로컬 파일 → FILE_UPLOAD 방식
+ */
+async function publishToTikTok(content) {
+  const accessToken = config.tiktok.accessToken;
+  if (!accessToken) {
+    throw new Error('TIKTOK_ACCESS_TOKEN is not configured');
+  }
+
+  const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+
+  try {
+    await import('fs/promises').then((fs) => fs.access(videoPath));
+  } catch {
+    logger.warn(`[auto_publisher] TikTok: video file not found, skipping: ${videoPath}`);
+    return { platform: 'tiktok', status: 'skipped_no_video_file' };
+  }
+
+  // Step 1: 업로드 세션 초기화
+  const initRes = await axios.post(
+    'https://open.tiktokapis.com/v2/post/publish/video/init/',
+    {
+      post_info: {
+        title: content.blog_draft?.title ?? content.keyword,
+        privacy_level: 'SELF_ONLY', // 검토 후 PUBLIC_TO_EVERYONE 으로 변경
+        disable_duet: false,
+        disable_comment: false,
+        disable_stitch: false,
+      },
+      source_info: { source: 'FILE_UPLOAD' },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      timeout: 15000,
+    }
+  );
+
+  const { publish_id, upload_url } = initRes.data.data;
+
+  // Step 2: 영상 파일 업로드
+  const { readFile, stat } = await import('fs/promises');
+  const videoBuffer = await readFile(videoPath);
+  const videoSize = (await stat(videoPath)).size;
+
+  await axios.put(upload_url, videoBuffer, {
+    headers: {
+      'Content-Type': 'video/mp4',
+      'Content-Range': `bytes 0-${videoSize - 1}/${videoSize}`,
+      'Content-Length': videoSize,
+    },
+    timeout: 120000,
+  });
+
+  return {
+    platform: 'tiktok',
+    publish_id,
+    status: 'uploaded',
+    privacy: 'SELF_ONLY',
+  };
+}
+
+/**
+ * APPROVED 콘텐츠를 YouTube·WordPress·TikTok에 발행한다.
  * DRY_RUN=true이면 실제 업로드 없이 로그만 출력한다.
  */
 export async function publishContents(qaData, contentData) {
@@ -181,6 +253,7 @@ export async function publishContents(qaData, contentData) {
         dry_run: true,
         youtube: { platform: 'youtube', status: 'dry_run' },
         wordpress: { platform: 'wordpress', status: 'dry_run' },
+        tiktok: { platform: 'tiktok', status: 'dry_run' },
       });
       continue;
     }
@@ -214,6 +287,19 @@ export async function publishContents(qaData, contentData) {
         message: err.message,
       });
       result.wordpress = { platform: 'wordpress', status: 'failed', error: err.message };
+    }
+
+    // TikTok 발행 (영상 파일 존재 시에만)
+    try {
+      result.tiktok = await publishToTikTok(content);
+      if (result.tiktok.status === 'uploaded') {
+        logger.info(`[auto_publisher] TikTok upload success: ${content.keyword}`);
+      }
+    } catch (err) {
+      logger.error(`[auto_publisher] TikTok upload failed: ${content.keyword}`, {
+        message: err.message,
+      });
+      result.tiktok = { platform: 'tiktok', status: 'failed', error: err.message };
     }
 
     results.push(result);

@@ -52,9 +52,10 @@ export async function sendDailyReport(summary) {
     lines.push('');
     lines.push('*발행된 콘텐츠:*');
     for (const r of summary.publishResults.results) {
-      const ytStatus = r.youtube?.url ? `[YouTube](${r.youtube.url})` : r.youtube?.status ?? '-';
-      const wpStatus = r.wordpress?.url ? `[WordPress](${r.wordpress.url})` : r.wordpress?.status ?? '-';
-      lines.push(`• ${r.keyword} — ${ytStatus} / ${wpStatus}`);
+      const ytStatus = r.youtube?.url ? `[YT](${r.youtube.url})` : r.youtube?.status ?? '-';
+      const wpStatus = r.wordpress?.url ? `[WP](${r.wordpress.url})` : r.wordpress?.status ?? '-';
+      const ttStatus = r.tiktok?.publish_id ? '✓ TikTok' : r.tiktok?.status ?? '-';
+      lines.push(`• ${r.keyword} — ${ytStatus} / ${wpStatus} / ${ttStatus}`);
     }
   }
 
