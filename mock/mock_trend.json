@@ -1,0 +1,28 @@
+{
+  "selected_items": [
+    {
+      "keyword": "경기침체 공포",
+      "category": "economy",
+      "score": 87,
+      "score_reason": { "virality": 38, "commercial_value": 32, "freshness_hours": 17 },
+      "source_url": "https://news.naver.com/mock/economy/001",
+      "collected_at": "2026-05-18T06:00:00+09:00"
+    },
+    {
+      "keyword": "아이돌 군백기 복귀",
+      "category": "entertainment",
+      "score": 76,
+      "score_reason": { "virality": 35, "commercial_value": 24, "freshness_hours": 17 },
+      "source_url": "https://news.naver.com/mock/entertainment/002",
+      "collected_at": "2026-05-18T06:00:00+09:00"
+    },
+    {
+      "keyword": "직장인 번아웃 급증",
+      "category": "social",
+      "score": 70,
+      "score_reason": { "virality": 28, "commercial_value": 30, "freshness_hours": 12 },
+      "source_url": "https://news.naver.com/mock/social/003",
+      "collected_at": "2026-05-18T06:00:00+09:00"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+.env
+node_modules/
+logs/
+output/media/
+output/scripts/
+output/qa_reports/
+*.mp4
+*.mp3

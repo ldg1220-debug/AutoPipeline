@@ -1,0 +1,26 @@
+{
+  "name": "autopipeline",
+  "version": "1.0.0",
+  "description": "Fully automated content pipeline: trend scraping → content creation → QA → publishing",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "agent:trend": "node src/agents/trend_scraper.js",
+    "agent:content": "node src/agents/content_creator.js",
+    "agent:qa": "node src/agents/qa_editor.js",
+    "agent:publish": "node src/agents/auto_publisher.js",
+    "dry-run": "DRY_RUN=true node src/app.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "winston": "^3.13.0",
+    "xml2js": "^0.6.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
