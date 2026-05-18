@@ -146,7 +146,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   // 3. 자막 클립 (hook / body / cta 3구간, 카테고리 형광펜 강조)
   const makeSubtitle = (text, start, length, fontSize = 48) => ({
     asset: {
-      type: 'html',
+      type: 'rich-text',
       html: `<p style="font-family:'Noto Sans KR',sans-serif;font-size:${fontSize}px;color:#1a1a1a;text-align:center;font-weight:800;line-height:1.4;padding:12px 24px;background:${accentColor}cc;border-radius:8px;margin:0 16px">${text}</p>`,
       width: 900,
       height: 320,
@@ -160,7 +160,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   // 시리즈명 레이블 (전체 구간 상단 고정)
   const seriesLabel = {
     asset: {
-      type: 'html',
+      type: 'rich-text',
       html: `<p style="font-family:'Noto Sans KR',sans-serif;font-size:30px;color:#1a1a1a;text-align:center;font-weight:700;padding:8px 20px;background:${accentColor};border-radius:20px;letter-spacing:1px">${seriesName}</p>`,
       width: 700,
       height: 80,
@@ -181,14 +181,16 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   // 4. 배경 트랙 (Pexels 영상 or 크림 단색)
   const bgClip = bgVideoUrl
     ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: 20, fit: 'crop' }
-    : { asset: { type: 'color', color: '#FAFAF2' }, start: 0, length: 20 };
+    : { asset: { type: 'image', src: 'https://placehold.co/1080x1920/FAFAF2/FAFAF2.png' }, start: 0, length: 20, fit: 'cover' };
 
   // 5. 화이트 오버레이 (노트지 질감, 다크 배경 대신 밝은 오버레이)
+  // Shotstack은 color 타입을 지원하지 않으므로 단색 image로 대체
   const overlayClip = {
-    asset: { type: 'color', color: '#FFFFFF' },
+    asset: { type: 'image', src: 'https://placehold.co/1080x1920/FFFFFF/FFFFFF.png' },
     start: 0,
     length: 20,
     opacity: 0.55,
+    fit: 'cover',
   };
 
   const timeline = {
