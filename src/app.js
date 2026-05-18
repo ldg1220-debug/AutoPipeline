@@ -4,8 +4,10 @@ import { config } from './config/index.js';
 import logger from './utils/logger.js';
 import { writeJSON } from './utils/fileIO.js';
 import { startScheduler } from './utils/scheduler.js';
+import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
+import { generateAllMedia } from './agents/media_generator.js';
 import { runQA } from './agents/qa_editor.js';
 import { publishContents } from './agents/auto_publisher.js';
 
@@ -58,6 +60,22 @@ async function runPipeline() {
       message: err.message,
     });
     return;
+  }
+
+  // ── Agent 2.5: Media Generator (TTS + 영상 렌더링) ────────────────────
+  try {
+    const mediaResult = await generateAllMedia(contentData);
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/media_${date}.json`),
+      mediaResult
+    );
+    logger.info(`[app] Agent 2.5 complete. Media generated: ${mediaResult.results?.length ?? 0}`);
+  } catch (err) {
+    // 미디어 생성 실패는 치명적이지 않음 — QA에서 영상 없는 항목은 PASS 처리됨
+    logger.warn('[app] Agent 2.5 (media_generator) failed. Continuing without media.', {
+      message: err.message,
+    });
+    await sendErrorAlert('media_generator', err.message);
   }
 
   // ── Agent 3: QA Editor (REJECTED 항목 재시도 포함) ──────────────────────
@@ -145,27 +163,34 @@ async function runPipeline() {
   }
 
   // ── Agent 4: Auto Publisher ─────────────────────────────────────────────
+  let publishResults = { results: [] };
   try {
-    const publishResult = await publishContents(qaData, contentData);
+    publishResults = await publishContents(qaData, contentData);
     await writeJSON(
       path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`),
-      publishResult
+      publishResults
     );
-    logger.info(`[app] Agent 4 complete. Published: ${publishResult.results?.length ?? 0}`);
+    logger.info(`[app] Agent 4 complete. Published: ${publishResults.results?.length ?? 0}`);
   } catch (err) {
     logger.error('[app] Agent 4 (auto_publisher) failed.', { message: err.message });
+    await sendErrorAlert('auto_publisher', err.message);
   }
 
-  // ── 실행 요약 리포트 ────────────────────────────────────────────────────
+  // ── 실행 요약 리포트 + 텔레그램 알림 ──────────────────────────────────
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  logger.info('[app] ===== Pipeline finished =====', {
+  const summary = {
+    date: new Date().toISOString().slice(0, 10),
     elapsed_sec: elapsed,
     total: totalCount,
     approved: approvedCount,
     rejected: rejectedCount,
     skipped: skippedCount,
     dry_run: config.runtime.dryRun,
-  });
+    publishResults,
+  };
+
+  logger.info('[app] ===== Pipeline finished =====', summary);
+  await sendDailyReport(summary);
 }
 
 // 스케줄러 시작 + 즉시 1회 실행

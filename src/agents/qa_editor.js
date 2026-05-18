@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs/promises';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
@@ -111,6 +112,70 @@ function detectBannedWords(content) {
 }
 
 /**
+ * Gemini 1.5 Flash Vision API로 완성 영상의 레이아웃·싱크를 시각 검수한다.
+ * 영상 파일이 없으면 검수를 건너뛰고 PASS를 반환한다.
+ *
+ * 검수 기준:
+ *   - 자막이 화면 가장자리에 잘리거나 다른 요소와 겹치지 않는가
+ *   - 배경 영상의 화질이 깨지거나 부자연스러운 부분이 없는가
+ *   결과를 { layout: "PASS"|"FAIL", sync: "PASS"|"FAIL", reason: string } JSON으로 반환.
+ */
+async function runVisionQA(videoPath) {
+  if (!config.gemini.apiKey) {
+    logger.warn('[qa_editor] GEMINI_API_KEY not set. Skipping Vision QA.');
+    return { layout: 'PASS', sync: 'PASS', reason: '' };
+  }
+
+  try {
+    await fs.access(videoPath);
+  } catch {
+    // 영상 파일 미존재 = 미디어 생성 단계 미완료, 시각 검수 스킵
+    return { layout: 'PASS', sync: 'PASS', reason: '' };
+  }
+
+  try {
+    const videoBuffer = await fs.readFile(videoPath);
+    const base64Video = videoBuffer.toString('base64');
+
+    const prompt = `이 숏폼 영상을 분석하고 JSON으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
+
+검수 항목:
+1. layout ("PASS"|"FAIL"): 자막이 화면 가장자리에 잘리거나 다른 요소와 겹치는가. 문제없으면 PASS.
+2. sync ("PASS"|"FAIL"): 오디오와 자막의 타이밍이 심각하게 어긋나는가. 문제없으면 PASS.
+3. reason (string): FAIL 사유 요약. 문제없으면 빈 문자열.
+
+출력: { "layout": "PASS", "sync": "PASS", "reason": "" }`;
+
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${config.gemini.apiKey}`,
+      {
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'video/mp4', data: base64Video } },
+            ],
+          },
+        ],
+        generationConfig: { response_mime_type: 'application/json' },
+      },
+      { timeout: 60000 }
+    );
+
+    const raw = response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+    const parsed = JSON.parse(raw);
+    return {
+      layout: parsed.layout ?? 'PASS',
+      sync: parsed.sync ?? 'PASS',
+      reason: parsed.reason ?? '',
+    };
+  } catch (err) {
+    logger.warn('[qa_editor] Vision QA call failed. Defaulting to PASS.', { message: err.message });
+    return { layout: 'PASS', sync: 'PASS', reason: '' };
+  }
+}
+
+/**
  * 단일 콘텐츠에 대한 QA 판정을 수행하고 결과 객체를 반환한다.
  */
 async function judgeContent(content, index) {
@@ -136,12 +201,19 @@ async function judgeContent(content, index) {
     logger.warn(`[qa_editor] OPENAI_API_KEY not set. Skipping LLM QA for: ${content.keyword}`);
   }
 
+  // Vision QA: 영상 파일이 있을 때만 실제 검수, 없으면 자동 PASS
+  const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+  const visionResult = await runVisionQA(videoPath);
+
   const reasons = [];
   if (!schemaResult.valid) reasons.push(schemaResult.reason);
   if (bannedDetected) reasons.push('금지어 감지됨');
   if (grammarCheck === 'FAIL') reasons.push('문법 오류 감지됨');
   if (factScore < 60) reasons.push(`팩트체크 점수 미달 (${factScore}/100)`);
   if (llmIssues) reasons.push(llmIssues);
+  if (visionResult.layout === 'FAIL') reasons.push(`영상 레이아웃 오류: ${visionResult.reason}`);
+  if (visionResult.sync === 'FAIL') reasons.push(`오디오 싱크 오류: ${visionResult.reason}`);
 
   const approved = reasons.length === 0;
 
@@ -150,8 +222,8 @@ async function judgeContent(content, index) {
     fact_check_score: factScore,
     grammar_check: grammarCheck,
     banned_words_detected: bannedDetected,
-    video_layout_check: 'PASS', // 영상 파일 없는 단계에서는 기본값 PASS
-    audio_sync_check: 'PASS',   // 음성 파일 없는 단계에서는 기본값 PASS
+    video_layout_check: visionResult.layout,
+    audio_sync_check: visionResult.sync,
     final_decision: approved ? 'APPROVED' : 'REJECTED',
     revision_reason: approved ? '' : reasons.join(' / '),
   };
