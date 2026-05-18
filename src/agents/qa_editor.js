@@ -211,7 +211,11 @@ export async function runTextQA(contentData) {
     };
 
     reports.push(report);
-    logger.info(`[qa_editor] Text QA ${content.keyword} → ${report.final_decision}`);
+    if (approved) {
+      logger.info(`[qa_editor] Text QA ${content.keyword} → APPROVED`);
+    } else {
+      logger.warn(`[qa_editor] Text QA ${content.keyword} → REJECTED | ${report.revision_reason} | fact:${factScore} grammar:${grammarCheck}`);
+    }
   }
 
   return { evaluated_at: new Date().toISOString(), stage: 'text', reports };
