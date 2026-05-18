@@ -9,7 +9,7 @@ import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
 import { runTextQA, runVisionQA } from './agents/qa_editor.js';
 import { generateAllMedia } from './agents/media_generator.js';
-import { publishContents } from './agents/auto_publisher.js';
+import { publishContents, scheduleWordPressPublish } from './agents/auto_publisher.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -179,6 +179,7 @@ async function runPipeline() {
       publishResults
     );
     logger.info(`[app] Agent 4 complete. Published: ${publishResults.results?.length ?? 0}`);
+    scheduleWordPressPublish(publishResults);
   } catch (err) {
     logger.error('[app] Agent 4 (auto_publisher) failed.', { message: err.message });
     await sendErrorAlert('auto_publisher', err.message);

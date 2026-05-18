@@ -352,7 +352,60 @@ export async function publishContents(qaData, contentData) {
   };
 }
 
-// 단독 실행
+/**
+ * YouTube 예약 발행 시각(+2시간)에 맞춰 WordPress 포스트를 자동으로 publish 상태로 전환한다.
+ * setTimeout으로 비동기 예약하므로 파이프라인 실행을 블로킹하지 않는다.
+ * DRY_RUN 시에는 예약만 로깅하고 실제 API 호출은 하지 않는다.
+ *
+ * @param {object} publishResults - publishContents() 반환값
+ * @param {number} delayMs - 지연 시간 (기본 2시간 = YouTube 예약 발행 시각과 동기화)
+ */
+export function scheduleWordPressPublish(publishResults, delayMs = 2 * 60 * 60 * 1000) {
+  const wpItems = (publishResults.results ?? [])
+    .filter((r) => r.wordpress?.post_id && !r.dry_run)
+    .map((r) => ({ keyword: r.keyword, post_id: r.wordpress.post_id }));
+
+  if (wpItems.length === 0) {
+    logger.info('[auto_publisher] No WordPress posts to schedule for publish.');
+    return;
+  }
+
+  const publishAt = new Date(Date.now() + delayMs).toISOString();
+  logger.info(`[auto_publisher] WordPress auto-publish scheduled for ${publishAt} (${wpItems.length}건)`);
+
+  if (config.runtime.dryRun) {
+    logger.info('[auto_publisher] DRY_RUN — WordPress scheduled publish skipped.');
+    return;
+  }
+
+  setTimeout(async () => {
+    logger.info('[auto_publisher] WordPress scheduled publish triggered.');
+
+    const token = Buffer.from(
+      `${config.wordpress.user}:${config.wordpress.appPassword}`
+    ).toString('base64');
+
+    for (const item of wpItems) {
+      try {
+        await axios.post(
+          `${config.wordpress.url}/wp-json/wp/v2/posts/${item.post_id}`,
+          { status: 'publish' },
+          {
+            headers: { Authorization: `Basic ${token}`, 'Content-Type': 'application/json' },
+            timeout: 15000,
+          }
+        );
+        logger.info(`[auto_publisher] WordPress published: ${item.keyword} (ID: ${item.post_id})`);
+      } catch (err) {
+        logger.error(`[auto_publisher] WordPress publish failed: ${item.keyword}`, {
+          message: err.message,
+        });
+      }
+    }
+
+    logger.info('[auto_publisher] WordPress scheduled publish complete.');
+  }, delayMs);
+}
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {
