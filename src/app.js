@@ -11,6 +11,12 @@ import { runTextQA, runVisionQA } from './agents/qa_editor.js';
 import { generateAllMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
+import { mineKeywords } from './agents/keyword_miner.js';
+import { enhanceAllBlogDrafts } from './agents/blog_content_enhancer.js';
+import { buildAllAssets } from './agents/blog_asset_builder.js';
+import { monetizeAll } from './agents/monetizer.js';
+import { publishBlogPosts } from './agents/blog_publisher.js';
+import { runBlogAnalytics } from './agents/blog_analytics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -215,11 +221,125 @@ async function runPipeline() {
   await sendDailyReport(summary);
 }
 
+// ── Blog Pipeline ─────────────────────────────────────────────────────────
+/**
+ * 블로그 파이프라인 1회 실행:
+ *   Part 1: keyword_miner      → 키워드 발굴 + 중복 제거
+ *   Part 2: blog_content_enhancer → 3-pass 포스트 초안 생성
+ *   Part 3: blog_asset_builder → 썸네일/본문이미지 생성
+ *   Part 4: monetizer          → AdSense + 쿠팡 파트너스 삽입
+ *   Part 5: blog_publisher     → Tistory Playwright 발행
+ *   Part 6: blog_analytics     → GSC 지표 수집 + 성과 리포트
+ *
+ * YouTube 파이프라인 완료 후 publishResults에 youtube_url이 있으면
+ * 해당 키워드 포스트에 유튜브 임베드가 자동 삽입된다.
+ */
+async function runBlogPipeline(youtubeResults = null) {
+  const startTime = Date.now();
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  logger.info('[app] ===== Blog Pipeline started =====');
+
+  // ── Part 1: Keyword Miner ──────────────────────────────────────────────
+  let keywordData;
+  try {
+    const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
+    keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
+    await writeJSON(path.resolve(__dirname, `../output/keywords/keywords_${date}.json`), keywordData);
+    logger.info(`[app] Blog Part 1 complete. Keywords: ${keywordData.contents?.length ?? 0}`);
+  } catch (err) {
+    logger.error('[app] Blog Part 1 (keyword_miner) failed. Aborting blog pipeline.', { message: err.message });
+    await sendErrorAlert('keyword_miner', err.message);
+    return;
+  }
+
+  if (!keywordData.contents?.length) {
+    logger.warn('[app] Blog Part 1: no new keywords. Skipping blog pipeline.');
+    return;
+  }
+
+  // YouTube 발행 결과가 있으면 키워드별 youtube_url 매핑
+  if (youtubeResults?.results?.length) {
+    const ytMap = {};
+    for (const r of youtubeResults.results) {
+      if (r.keyword && r.youtube_url) ytMap[r.keyword] = r.youtube_url;
+    }
+    keywordData.contents = keywordData.contents.map((c) => ({
+      ...c,
+      youtube_url: ytMap[c.keyword] ?? null,
+    }));
+  }
+
+  // ── Part 2: Blog Content Enhancer ──────────────────────────────────────
+  let draftData;
+  try {
+    draftData = await enhanceAllBlogDrafts(keywordData);
+    await writeJSON(path.resolve(__dirname, `../output/blog/draft_${date}.json`), draftData);
+    logger.info(`[app] Blog Part 2 complete. Drafts: ${draftData.contents?.length ?? 0}`);
+  } catch (err) {
+    logger.error('[app] Blog Part 2 (blog_content_enhancer) failed.', { message: err.message });
+    await sendErrorAlert('blog_content_enhancer', err.message);
+    return;
+  }
+
+  // ── Part 3: Asset Builder ──────────────────────────────────────────────
+  let assetData;
+  try {
+    assetData = await buildAllAssets(draftData);
+    await writeJSON(path.resolve(__dirname, `../output/blog/assets_${date}.json`), assetData);
+    logger.info(`[app] Blog Part 3 complete.`);
+  } catch (err) {
+    logger.warn('[app] Blog Part 3 (blog_asset_builder) failed. Continuing without assets.', { message: err.message });
+    assetData = draftData;
+  }
+
+  // ── Part 4: Monetizer ──────────────────────────────────────────────────
+  let monetizedData;
+  try {
+    monetizedData = await monetizeAll(assetData);
+    await writeJSON(path.resolve(__dirname, `../output/blog/monetized_${date}.json`), monetizedData);
+    logger.info(`[app] Blog Part 4 complete.`);
+  } catch (err) {
+    logger.warn('[app] Blog Part 4 (monetizer) failed. Continuing without monetization.', { message: err.message });
+    monetizedData = assetData;
+  }
+
+  // ── Part 5: Blog Publisher ─────────────────────────────────────────────
+  let publishedData;
+  try {
+    publishedData = await publishBlogPosts(monetizedData);
+    await writeJSON(path.resolve(__dirname, `../output/blog/published_${date}.json`), publishedData);
+    const pubCount = publishedData.contents?.filter((c) => c.blog_publish?.status === 'published').length ?? 0;
+    logger.info(`[app] Blog Part 5 complete. Published: ${pubCount}`);
+  } catch (err) {
+    logger.error('[app] Blog Part 5 (blog_publisher) failed.', { message: err.message });
+    await sendErrorAlert('blog_publisher', err.message);
+  }
+
+  // ── Part 6: Analytics (주간 수집 — 금요일만 실행) ─────────────────────
+  const dayOfWeek = new Date().getDay();
+  if (dayOfWeek === 5) {
+    try {
+      await runBlogAnalytics();
+      logger.info('[app] Blog Part 6 complete.');
+    } catch (err) {
+      logger.warn('[app] Blog Part 6 (blog_analytics) failed.', { message: err.message });
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  logger.info(`[app] ===== Blog Pipeline finished in ${elapsed}s =====`);
+}
+
+// ── 스케줄러 / 단독 실행 ──────────────────────────────────────────────────
 // DRY_RUN 시에는 스케줄러 없이 1회 실행 후 종료
 if (config.runtime.dryRun) {
   logger.info('[app] DRY_RUN mode — running once and exiting.');
   runPipeline().then(() => process.exit(0));
 } else {
-  startScheduler(runPipeline);
+  // YouTube 파이프라인: 매일 06:00
+  startScheduler(runPipeline, config.runtime.cronSchedule);
+  // 블로그 파이프라인: 매일 08:00 (YouTube 완료 후 독립 실행)
+  startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
+  // 최초 기동 시 즉시 실행
   runPipeline();
 }

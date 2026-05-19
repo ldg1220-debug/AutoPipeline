@@ -3,11 +3,11 @@ import { config } from '../config/index.js';
 import logger from './logger.js';
 
 /**
- * 파이프라인 실행 함수를 CRON_SCHEDULE 주기로 반복 실행한다.
- * @param {Function} task - 비동기 파이프라인 실행 함수
+ * 파이프라인 실행 함수를 cron 주기로 반복 실행한다.
+ * @param {Function} task     - 비동기 파이프라인 실행 함수
+ * @param {string}   schedule - cron 표현식 (기본값: CRON_SCHEDULE 환경변수)
  */
-export function startScheduler(task) {
-  const schedule = config.runtime.cronSchedule;
+export function startScheduler(task, schedule = config.runtime.cronSchedule) {
 
   if (!cron.validate(schedule)) {
     logger.error(`[scheduler] Invalid cron expression: "${schedule}"`);

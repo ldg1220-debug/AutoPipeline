@@ -25,7 +25,8 @@
     "blog:assets": "node src/agents/blog_asset_builder.js",
     "blog:monetize": "node src/agents/monetizer.js",
     "blog:publish": "node src/agents/blog_publisher.js",
-    "blog:analytics": "node src/agents/blog_analytics.js"
+    "blog:analytics": "node src/agents/blog_analytics.js",
+    "blog:login": "node scripts/tistory-login.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
@@ -33,6 +34,7 @@
     "cross-env": "^10.1.0",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
+    "playwright": "^1.60.0",
     "sharp": "^0.34.5",
     "winston": "^3.13.0",
     "xml2js": "^0.6.2"
