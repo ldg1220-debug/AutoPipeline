@@ -11,64 +11,120 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// ── 매읽남 캐릭터 DALL-E 3 프롬프트 ───────────────────────────────────────
-// 흰 페르시안 고양이 교수 캐릭터. 씬 감정에 따라 3가지 포즈를 교차 사용한다.
+// ── 매읽남 캐릭터 공통 설명 (DALL-E 프롬프트 고정 파트) ──────────────────
 const MAEILNAMJA_BASE =
   'Chibi kawaii anime-style white Persian cat professor character, ' +
   'wearing beige/tan blazer with dark navy necktie, small round gold-rim glasses, ' +
   'extremely fluffy white fur, adorable chubby proportions, full body visible, ' +
   'expressive large eyes, Korean YouTube Shorts educational content style, ' +
-  'vibrant clean illustration, no text or letters in the image';
+  'vibrant clean illustration, absolutely no text or letters anywhere in the image';
 
-// 씬 구간(도입/본론/마무리)별 캐릭터 포즈 프롬프트
-const CHARACTER_POSES = [
-  // 포즈 0: 도입부 — 충격·긴장감으로 시청자 훅
-  'alarmed shocked expression, both arms raised dramatically, mouth wide open, ' +
-  'eyebrows furrowed, dramatic economic crisis atmosphere, dark red gradient background ' +
-  'with falling arrow graphs, spotlight effect',
+// act별 고정 포즈 (배경은 GPT-4o-mini가 대본 기반으로 동적 생성)
+const ACT_POSES = [
+  // Act 0 도입: 시청자를 훅하는 충격·긴장 포즈
+  'alarmed shocked expression, both arms raised dramatically, ' +
+  'mouth wide open, eyebrows furrowed upward, leaning forward with urgency',
 
-  // 포즈 1: 본론 — 포인터 들고 설명
-  'pointing confidently with a wooden pointer stick at a glowing stock chart board, ' +
-  'open mouth explaining, determined serious eyebrows, classroom/lecture room background ' +
-  'with whiteboards and bookshelves, warm lighting',
+  // Act 1 본론: 자신감 있게 설명하는 포즈
+  'pointing confidently with a wooden pointer stick, ' +
+  'open mouth explaining, determined serious eyebrows, one paw gesturing',
 
-  // 포즈 2: 마무리 — 책 들고 정리
-  'holding an open blue hardcover book titled "경제학", calm wise expression, ' +
-  'gentle smile, one paw raised giving a thumbs-up, soft library background ' +
-  'with warm golden light through window',
+  // Act 2 마무리: 차분하게 정리하는 포즈
+  'calm wise expression, gentle reassuring smile, ' +
+  'one paw raised giving thumbs-up, slightly bowing head',
 ];
+
+// ── GPT-4o-mini로 대본 기반 장면 배경 생성 ────────────────────────────────
+/**
+ * 대본 3개 구간(도입/본론/마무리)의 실제 내용을 분석해
+ * 각 DALL-E 이미지에 쓸 장면 배경 설명을 영어로 생성한다.
+ * GPT-4o-mini 1회 호출 ($0.0001) → 이미지 3장의 배경이 대본과 일치한다.
+ */
+async function buildSceneBackgrounds(keyword, scripts) {
+  const actTexts = [
+    scripts.hook    ?? '',
+    `${scripts.context ?? ''} ${scripts.insight ?? ''}`.trim(),
+    `${scripts.summary ?? ''} ${scripts.cta ?? ''}`.trim(),
+  ].map((t) => t.slice(0, 150));
+
+  const prompt =
+    `You are a creative director for a Korean economic YouTube Shorts channel featuring a cute cat professor character named 매읽남.\n` +
+    `Topic: "${keyword}"\n\n` +
+    `Script sections (Korean):\n` +
+    `[도입/Hook]: ${actTexts[0]}\n` +
+    `[본론/Body]: ${actTexts[1]}\n` +
+    `[마무리/Close]: ${actTexts[2]}\n\n` +
+    `Generate a visually specific BACKGROUND SCENE description in English for each section.\n` +
+    `Rules:\n` +
+    `- Describe ONLY the background/environment, NOT the cat character\n` +
+    `- Make it directly relevant to the script content (e.g., if hook mentions falling stocks → dramatic red falling chart room)\n` +
+    `- Cinematic, vivid, specific details\n` +
+    `- No text/numbers visible in scene\n` +
+    `Return JSON: {"hook_bg":"...","body_bg":"...","close_bg":"..."}`;
+
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.8,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 20000,
+      }
+    );
+    return JSON.parse(res.data.choices[0].message.content);
+  } catch (err) {
+    logger.warn(`[media_generator] Scene background generation failed: ${err.message}. Using defaults.`);
+    return {
+      hook_bg:  'dramatic dark room with large red falling arrow graphs on glowing screens, spotlight',
+      body_bg:  'bright lecture classroom with economic charts on whiteboard, warm lighting, bookshelves',
+      close_bg: 'cozy library with warm golden sunlight through window, stacked books, calm atmosphere',
+    };
+  }
+}
 
 // ── DALL-E 3 캐릭터 이미지 생성 ───────────────────────────────────────────
 /**
- * 매읽남 캐릭터 이미지 3장을 DALL-E 3로 생성한다.
- * 1024×1792 (9:16 portrait) — Shotstack 9:16 영상에 바로 사용 가능.
- * 실패 시 null 배열 반환 → Pexels 폴백.
+ * 매읽남 캐릭터 이미지 3장 생성.
+ * - 포즈: act별 고정 (도입=충격, 본론=설명, 마무리=정리)
+ * - 배경: GPT-4o-mini가 실제 대본 내용 기반으로 동적 생성
+ * - 크기: 1024×1792 (9:16 portrait)
  */
-async function generateCharacterImages(keyword) {
+async function generateCharacterImages(keyword, scripts) {
   if (!config.openai.apiKey) return [null, null, null];
 
+  // 1. 대본 기반 장면 배경 생성
+  const backgrounds = await buildSceneBackgrounds(keyword, scripts ?? {});
+  const bgList = [backgrounds.hook_bg, backgrounds.body_bg, backgrounds.close_bg];
+
+  logger.info(`[media_generator] Scene backgrounds generated for: ${keyword}`);
+
+  // 2. 포즈 + 배경을 합쳐 DALL-E 3 이미지 3장 생성
   const results = [];
   for (let i = 0; i < 3; i++) {
-    const prompt =
-      `${MAEILNAMJA_BASE}, ${CHARACTER_POSES[i]} ` +
-      `Economic topic: "${keyword}". High quality, expressive full-body character.`;
+    const dallePrompt =
+      `${MAEILNAMJA_BASE}. ` +
+      `Character pose: ${ACT_POSES[i]}. ` +
+      `Background scene: ${bgList[i]}. ` +
+      `Full body character centered, 9:16 portrait composition, high quality.`;
 
     try {
       const res = await axios.post(
         'https://api.openai.com/v1/images/generations',
-        { model: 'dall-e-3', prompt, n: 1, size: '1024x1792', quality: 'standard' },
+        { model: 'dall-e-3', prompt: dallePrompt, n: 1, size: '1024x1792', quality: 'standard' },
         {
-          headers: {
-            Authorization: `Bearer ${config.openai.apiKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           timeout: 60000,
         }
       );
       results.push(res.data.data[0].url);
-      logger.info(`[media_generator] Character image ${i + 1}/3 generated: ${keyword}`);
+      logger.info(`[media_generator] Character image ${i + 1}/3 done (${['도입', '본론', '마무리'][i]}): ${keyword}`);
     } catch (err) {
-      logger.warn(`[media_generator] DALL-E character image ${i + 1} failed: ${err.message}`);
+      logger.warn(`[media_generator] DALL-E image ${i + 1} failed: ${err.message}`);
       results.push(null);
     }
   }
@@ -424,7 +480,7 @@ async function generateMedia(content) {
   let characterUrls;
   try {
     logger.info(`[media_generator] Generating 매읽남 character images (3 poses): ${content.keyword}`);
-    characterUrls = await generateCharacterImages(content.keyword);
+    characterUrls = await generateCharacterImages(content.keyword, content.shortform_script ?? {});
     const successCount = characterUrls.filter(Boolean).length;
     logger.info(`[media_generator] Character images: ${successCount}/3 generated`);
 
