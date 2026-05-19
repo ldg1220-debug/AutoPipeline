@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// 경제 직독직해 브랜드 컬러 (카테고리별 형광펜 색상)
+// 매일읽어주는남자 브랜드 컬러 (카테고리별 형광펜 색상)
 const BRAND_COLORS = {
   finance:       '#FFD700', // 노란 형광펜 (재테크·금융)
   economy:       '#FFD700',
@@ -21,7 +21,7 @@ const BRAND_COLORS = {
   social:        '#B4D4FF', // 스카이블루 (사회)
 };
 
-// 경제 직독직해 배경용 Pexels 고정 쿼리 (노트·공부 테마)
+// 매일읽어주는남자 배경용 Pexels 고정 쿼리 (노트·공부 테마)
 const CATEGORY_BG_QUERY = {
   finance:       'notebook paper grid desk study notes',
   economy:       'notebook paper grid desk study notes',
@@ -32,7 +32,7 @@ const CATEGORY_BG_QUERY = {
 };
 
 /**
- * 경제 직독직해 브랜드 컨셉에 맞는 배경 영상을 Pexels에서 검색한다.
+ * 매일읽어주는남자 브랜드 컨셉에 맞는 배경 영상을 Pexels에서 검색한다.
  * 카테고리별 고정 쿼리로 노트·공부 테마 영상을 가져온다.
  * PEXELS_API_KEY 미설정 시 null 반환 (Shotstack이 단색 배경으로 폴백).
  */
@@ -113,7 +113,7 @@ async function generateAudio(text, outputPath) {
 }
 
 /**
- * Shotstack API로 9:16 숏폼 영상을 렌더링한다. (경제 직독직해 브랜드)
+ * Shotstack API로 9:16 숏폼 영상을 렌더링한다. (매일읽어주는남자 브랜드)
  *
  * 레이어 구조 (아래에서 위):
  *   1. Pexels 노트/공부 테마 영상 배경 (없으면 크림 단색 #FAFAF2)
@@ -137,7 +137,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   logger.info(`[media_generator] Background: ${bgVideoUrl ? 'Pexels notebook theme' : 'cream fallback'}`);
 
   const accentColor = BRAND_COLORS[content.category] ?? '#FFD700';
-  const seriesName = content.series_name ?? '경제 직독직해';
+  const seriesName = content.series_name ?? '매일읽어주는남자';
 
   const hook    = content.shortform_script?.hook    ?? '';
   const context = content.shortform_script?.context ?? '';

@@ -25,7 +25,7 @@ const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 async function generateContent(item) {
   const seriesName = item.series ?? '오늘의 이슈';
 
-  const contentPrompt = `당신은 한국 경제 유튜브 채널 "경제 직독직해"의 수석 콘텐츠 전문가입니다.
+  const contentPrompt = `당신은 한국 경제 유튜브 채널 "매일읽어주는남자"의 수석 콘텐츠 전문가입니다.
 이 채널은 매일 경제 뉴스를 "나에게 어떤 영향을 주는가"로 풀어서 55초 숏폼으로 전달합니다.
 시청자는 20~40대 직장인으로, 재테크에 관심 있지만 경제 용어가 어렵다고 느끼는 사람들입니다.
 
@@ -163,10 +163,10 @@ function buildPlaceholder(item) {
       context: `[PLACEHOLDER] ${item.keyword} 관련 현황과 나에게 미치는 영향`,
       insight: `[PLACEHOLDER] ${item.keyword} 핵심 인사이트. 배경-현황-행동 순서로 설명.`,
       summary: `한 줄 정리: ${item.keyword} 핵심 포인트`,
-      cta: '경제 직독직해 구독하면 매일 아침 이런 소식 먼저 받아봐요',
+      cta: '매일읽어주는남자 구독하면 매일 아침 이런 소식 먼저 받아봐요',
     },
     youtube_title: `${item.keyword} 지금 어떻게 해야 하나?`,
-    youtube_description: `${item.keyword}에 대해 알아봅니다. #경제직독직해 #재테크 #${item.keyword.replace(/\s/g, '')}`,
+    youtube_description: `${item.keyword}에 대해 알아봅니다. #매일읽어주는남자 #재테크 #${item.keyword.replace(/\s/g, '')}`,
     image_prompt: `notebook paper background, handwritten Korean text, ${item.keyword}, study desk aesthetic, 9:16 portrait`,
     blog_draft: {
       title: `${item.keyword} 완벽 정리`,

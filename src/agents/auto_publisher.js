@@ -52,7 +52,7 @@ async function publishToYouTube(content, accessToken) {
 
   const publishAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 
-  const seriesName = content.series_name ?? '경제 직독직해';
+  const seriesName = content.series_name ?? '매일읽어주는남자';
 
   const description = content.youtube_description
     ?? [
@@ -62,14 +62,14 @@ async function publishToYouTube(content, accessToken) {
         '',
         content.shortform_script?.cta ?? '',
         '',
-        `#경제직독직해 #${content.category} #숏폼 #${content.keyword.replace(/\s/g, '')}`,
+        `#매일읽어주는남자 #${content.category} #숏폼 #${content.keyword.replace(/\s/g, '')}`,
       ].join('\n');
 
   const metadata = JSON.stringify({
     snippet: {
       title: content.youtube_title ?? `[${seriesName}] ${content.keyword}`,
       description,
-      tags: [seriesName, content.keyword, content.category, '경제직독직해', '숏폼', '트렌드'],
+      tags: [seriesName, content.keyword, content.category, '매일읽어주는남자', '숏폼', '트렌드'],
       categoryId: '22',
     },
     status: {
@@ -230,10 +230,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
               context: `${item.keyword} 관련 현황과 나에게 미치는 영향`,
               insight: `${item.keyword} 핵심 인사이트. 배경-현황-행동 순서로 설명.`,
               summary: `한 줄 정리: ${item.keyword} 핵심 포인트`,
-              cta: '경제 직독직해 구독하면 매일 아침 이런 소식 먼저 받아봐요',
+              cta: '매일읽어주는남자 구독하면 매일 아침 이런 소식 먼저 받아봐요',
             },
             youtube_title: `${item.keyword} 지금 어떻게 해야 하나?`,
-            youtube_description: `${item.keyword}에 대해 알아봅니다. #경제직독직해 #재테크 #${item.keyword.replace(/\s/g, '')}`,
+            youtube_description: `${item.keyword}에 대해 알아봅니다. #매일읽어주는남자 #재테크 #${item.keyword.replace(/\s/g, '')}`,
             image_prompt: 'placeholder',
             blog_draft: { title: `${item.keyword} 정리`, sections: [], affiliate_hooks: [] },
           })),

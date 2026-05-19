@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-const PD_PROMPT_TEMPLATE = `당신은 한국 경제 유튜브 채널 "경제 직독직해"의 PD입니다.
+const PD_PROMPT_TEMPLATE = `당신은 한국 경제 유튜브 채널 "매일읽어주는남자"의 PD입니다.
 시청자가 첫 3초 안에 스크롤을 멈추도록 훅을 평가하고 개선합니다.
 
 훅 유형 기준:
@@ -168,10 +168,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
               context: `[PLACEHOLDER] ${item.keyword} 관련 현황`,
               insight: `[PLACEHOLDER] ${item.keyword} 핵심 인사이트`,
               summary: `한 줄 정리: ${item.keyword} 핵심 포인트`,
-              cta: '경제 직독직해 구독하면 매일 아침 이런 소식 먼저 받아봐요',
+              cta: '매일읽어주는남자 구독하면 매일 아침 이런 소식 먼저 받아봐요',
             },
             youtube_title: `${item.keyword} 지금 어떻게 해야 하나?`,
-            youtube_description: `${item.keyword} #경제직독직해`,
+            youtube_description: `${item.keyword} #매일읽어주는남자`,
             image_prompt: `notebook paper background, ${item.keyword}, 9:16 portrait`,
             blog_draft: { title: `${item.keyword} 완벽 정리`, meta_description: '', seo_keywords: [item.keyword], sections: [], affiliate_hooks: [] },
           })),

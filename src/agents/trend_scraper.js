@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// 카테고리 → 경제 직독직해 시리즈명 매핑
+// 카테고리 → 매일읽어주는남자 시리즈명 매핑
 const SERIES_MAP = {
   finance:       '오늘의 경제 용어',
   economy:       '오늘의 경제 용어',
