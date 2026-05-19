@@ -2,12 +2,16 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs/promises';
 import axios from 'axios';
+import { createRequire } from 'module';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 
+const require = createRequire(import.meta.url);
+const sharp   = require('sharp');
+
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
@@ -319,6 +323,103 @@ function buildTextClips(scenes, seriesName, totalDuration) {
   return clips;
 }
 
+// ── 썸네일 제목 생성 ──────────────────────────────────────────────────────
+/**
+ * GPT-4o-mini로 클릭을 유도하는 썸네일 2줄 제목을 만든다.
+ * 한 줄 최대 10자, 숫자·감탄·질문 포함 권장.
+ * 예) line1:"금리 또 올랐다!" line2:"내 대출 괜찮나?"
+ */
+async function generateThumbnailTitle(keyword, hook) {
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content:
+            `YouTube 썸네일용 강렬한 한국어 제목을 만들어줘.\n` +
+            `키워드: ${keyword}\n훅: ${(hook ?? '').slice(0, 80)}\n\n` +
+            `조건: 2줄, 한 줄 10자 이내, 숫자/감탄/질문 적극 활용, 클릭 욕구 자극\n` +
+            `예시: {"line1":"금리 또 올랐다!","line2":"내 대출 괜찮나?"}\n` +
+            `JSON만 반환: {"line1":"...","line2":"..."}`,
+        }],
+        response_format: { type: 'json_object' },
+        temperature: 0.95,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      }
+    );
+    return JSON.parse(res.data.choices[0].message.content);
+  } catch {
+    const words = keyword.replace(/[^가-힣a-z0-9\s]/gi, '').trim().split(/\s+/);
+    return { line1: words.slice(0, 3).join(' '), line2: words.slice(3, 6).join(' ') || '지금 확인!' };
+  }
+}
+
+// ── 썸네일 이미지 합성 (1280×720) ────────────────────────────────────────
+/**
+ * 레이아웃:
+ *   좌측 660px: 다크 배경 + 썸네일 제목(흰색/하늘색) + 시리즈 레이블
+ *   우측 620px: Act0 캐릭터 이미지(놀란 표정) — 썸네일에서 가장 눈길 끄는 포즈
+ *   하단 8px:   카테고리 액센트 컬러 바
+ *
+ * 폰트: Malgun Gothic(Windows) → AppleGothic(Mac) → sans-serif 순 폴백
+ * 텍스트는 SVG composite로 합성 → librsvg가 처리 (Sharp 번들 포함)
+ */
+async function generateThumbnail(content, charImageUrl, outputPath) {
+  const hook = content.shortform_script?.hook ?? content.keyword;
+  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
+  logger.info(`[media_generator] Thumbnail title: "${line1} / ${line2}"`);
+
+  const W = 1280, H = 720, LEFT = 660, RIGHT = 620;
+
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+
+  // SVG: 좌측 텍스트 레이어
+  const textSvg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${LEFT}" height="${H}">
+      <rect width="${LEFT}" height="${H}" fill="#0a1228"/>
+      <text x="44" y="280" font-family="${FONT}" font-size="88" font-weight="bold" fill="#FFFFFF">${esc(line1)}</text>
+      ${line2 ? `<text x="44" y="390" font-family="${FONT}" font-size="88" font-weight="bold" fill="#93c5fd">${esc(line2)}</text>` : ''}
+      <text x="44" y="520" font-family="${FONT}" font-size="34" fill="#94a3b8">📺 매일읽어주는남자</text>
+      <rect x="44" y="556" width="120" height="5" rx="3" fill="#3b82f6"/>
+    </svg>`
+  );
+
+  // 캐릭터 이미지 다운로드 & 우측 크롭
+  const charRes = await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 });
+  const charBuf = await sharp(Buffer.from(charRes.data))
+    .resize(RIGHT, H, { fit: 'cover', position: 'top' })
+    .png()
+    .toBuffer();
+
+  // 하단 액센트 바
+  const accentBar = await sharp({
+    create: { width: W, height: 8, channels: 4, background: { r: 59, g: 130, b: 246, alpha: 1 } },
+  }).png().toBuffer();
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+  await sharp({
+    create: { width: W, height: H, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
+  })
+    .composite([
+      { input: textSvg,   left: 0,    top: 0 },
+      { input: charBuf,   left: LEFT, top: 0 },
+      { input: accentBar, left: 0,    top: H - 8 },
+    ])
+    .jpeg({ quality: 95 })
+    .toFile(outputPath);
+
+  logger.info(`[media_generator] Thumbnail saved: ${outputPath}`);
+  return outputPath;
+}
+
 // ── 오디오 임시 업로드 ─────────────────────────────────────────────────────
 async function uploadAudioForShotstack(audioPath) {
   const fileBuffer = await fs.readFile(audioPath);
@@ -444,7 +545,8 @@ async function generateMedia(content) {
   const audioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp3`);
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
 
-  const result = { keyword: content.keyword, audio: null, video: null };
+  const thumbPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
+  const result = { keyword: content.keyword, audio: null, video: null, thumbnail: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -496,7 +598,18 @@ async function generateMedia(content) {
     characterUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 3. 영상 렌더링
+  // 3. 썸네일 생성 (Act 0 캐릭터 이미지 사용)
+  const thumbCharUrl = characterUrls[0];
+  if (thumbCharUrl) {
+    try {
+      await generateThumbnail(content, thumbCharUrl, thumbPath);
+      result.thumbnail = thumbPath;
+    } catch (err) {
+      logger.warn(`[media_generator] Thumbnail generation failed: ${err.message}`);
+    }
+  }
+
+  // 4. 영상 렌더링
   try {
     await renderVideoWithShotstack(content, result.audio, videoPath, characterUrls);
     result.video = videoPath;

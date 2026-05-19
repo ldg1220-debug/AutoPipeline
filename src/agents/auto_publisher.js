@@ -102,12 +102,56 @@ async function publishToYouTube(content, accessToken) {
     }
   );
 
+  const videoId = response.data.id;
+
+  // 썸네일 업로드 (output/media/<keyword>_thumb.jpg)
+  const thumbPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    `../../output/media/${safeKeyword}_thumb.jpg`
+  );
+  let thumbnailUploaded = false;
+  try {
+    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
+  } catch (err) {
+    logger.warn(`[auto_publisher] Thumbnail upload failed: ${err.message}`);
+  }
+
   return {
     platform: 'youtube',
-    video_id: response.data.id,
+    video_id: videoId,
     publish_at: publishAt,
-    url: `https://youtu.be/${response.data.id}`,
+    url: `https://youtu.be/${videoId}`,
+    thumbnail_uploaded: thumbnailUploaded,
   };
+}
+
+/**
+ * 업로드된 YouTube 영상에 썸네일을 설정한다.
+ * thumbnails.set API는 multipart/form-data로 이미지를 전송한다.
+ */
+async function uploadYouTubeThumbnail(videoId, thumbnailPath, accessToken) {
+  let imageData;
+  try {
+    imageData = await fs.readFile(thumbnailPath);
+  } catch {
+    logger.warn(`[auto_publisher] Thumbnail file not found, skipping: ${thumbnailPath}`);
+    return false;
+  }
+
+  await axios.post(
+    `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`,
+    imageData,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'image/jpeg',
+        'Content-Length': imageData.length,
+      },
+      timeout: 60000,
+    }
+  );
+  logger.info(`[auto_publisher] Thumbnail uploaded for video: ${videoId}`);
+  return true;
 }
 
 /**
