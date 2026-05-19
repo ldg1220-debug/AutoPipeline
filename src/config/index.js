@@ -75,6 +75,12 @@ export const config = {
     seeds:  process.env.KEYWORD_SEEDS || '재테크,부동산,경기침체,금리,주식투자',
     topN:   parseInt(process.env.KEYWORD_TOP_N || '30', 10),
   },
+  topicGrouper: {
+    // 지원 모델:
+    //   OpenAI   — gpt-4o-mini (기본, 저렴), gpt-4o (정확도 우선)
+    //   Anthropic — claude-haiku-4-5 (빠름), claude-sonnet-4-6 (정확도 우선)
+    model: process.env.TOPIC_GROUPER_MODEL || 'gpt-4o-mini',
+  },
   runtime: {
     dryRun:       process.env.DRY_RUN === 'true',
     cronSchedule: process.env.CRON_SCHEDULE || '0 6 * * *',
