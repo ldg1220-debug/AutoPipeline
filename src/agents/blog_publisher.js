@@ -192,29 +192,54 @@ async function publishPost(page, content, blogName) {
   }
 
   // ── 발행 플로우 ───────────────────────────────────────────────────────────
-  // 티스토리 새 에디터:
-  //   우측 사이드바가 항상 열려있음 (공개설정 "선택 안 함" → 공개로 변경)
-  //   → "비공개 저장" 버튼이 "발행"으로 바뀜 → 클릭
+  // 확인된 티스토리 새 에디터 흐름:
+  //   "완료" 클릭 → 우측 사이드바 열림 (선택 안 함더보기, 비공개 저장 등 노출)
+  //   → 공개 설정 드롭다운에서 "공개" 선택 → "발행" 버튼 클릭
 
-  // 공개 설정 드롭다운 클릭 ("선택 안 함더보기" 버튼)
+  // Step 1: "완료" 클릭으로 사이드바 열기
+  await page.click('button:has-text("완료")', { timeout: 10000 });
+  logger.info('[blog_publisher] 완료 clicked — waiting for sidebar');
+
+  // 사이드바 등장 대기 ("선택 안 함" 버튼이 보일 때까지)
+  try {
+    await page.waitForSelector('button:has-text("선택 안 함")', { timeout: 8000 });
+  } catch {
+    // 사이드바가 안 열렸으면 버튼 목록만 로깅
+    const btns = await page.evaluate(() =>
+      [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
+    );
+    logger.warn(`[blog_publisher] Sidebar may not have opened. Buttons: ${btns.join(' | ')}`);
+  }
+
+  // Step 2: 공개 설정 → "공개" 선택
   try {
     await page.click('button:has-text("선택 안 함")', { timeout: 5000 });
-    await page.waitForTimeout(700);
-    // 드롭다운에서 "공개" 선택
-    await page.click('li:has-text("공개"), [role="option"]:has-text("공개"), text="공개"', { timeout: 3000 });
+    await page.waitForTimeout(800);
+
+    // 드롭다운 옵션 "공개" 클릭 (li, option, button 등 다양한 구조 대응)
+    const openClicked = await page.evaluate(() => {
+      const candidates = [
+        ...document.querySelectorAll('li, option, [role="option"], button'),
+      ];
+      const target = candidates.find(
+        (el) => el.textContent?.trim() === '공개' && el.offsetParent !== null
+      );
+      if (target) { target.click(); return true; }
+      return false;
+    });
     await page.waitForTimeout(500);
-    logger.info('[blog_publisher] Visibility set to 공개');
+    logger.info(`[blog_publisher] Visibility 공개 selected: ${openClicked}`);
   } catch (err) {
     logger.warn(`[blog_publisher] Visibility change failed: ${err.message}`);
   }
 
-  // 모든 버튼 로깅 (디버그)
-  const visibleBtns = await page.evaluate(() =>
+  // 버튼 목록 재확인 (디버그)
+  const btnsAfter = await page.evaluate(() =>
     [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
   );
-  logger.info(`[blog_publisher] Buttons after visibility change: ${visibleBtns.join(' | ')}`);
+  logger.info(`[blog_publisher] Buttons after visibility: ${btnsAfter.join(' | ')}`);
 
-  // 발행 버튼 클릭 (공개→발행, 공개 발행, 비공개 저장 순 시도)
+  // Step 3: 발행 버튼 클릭
   const publishCandidates = [
     'button:has-text("공개 발행")',
     'button:has-text("발행")',
@@ -230,7 +255,7 @@ async function publishPost(page, content, blogName) {
     } catch { /* 다음 시도 */ }
   }
   if (!publishClicked) {
-    throw new Error('발행 버튼을 찾을 수 없음 — 버튼 목록: ' + visibleBtns.join(', '));
+    throw new Error('발행 버튼을 찾을 수 없음 — 버튼: ' + btnsAfter.join(', '));
   }
 
   // URL 변경 대기 (최대 12초)
