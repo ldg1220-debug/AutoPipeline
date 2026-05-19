@@ -219,6 +219,7 @@ async function runPipeline() {
 
   logger.info('[app] ===== Pipeline finished =====', summary);
   await sendDailyReport(summary);
+  return publishResults; // 블로그 파이프라인에 youtube_url 전달용
 }
 
 // ── Blog Pipeline ─────────────────────────────────────────────────────────
@@ -338,8 +339,17 @@ if (config.runtime.dryRun) {
 } else {
   // YouTube 파이프라인: 매일 06:00
   startScheduler(runPipeline, config.runtime.cronSchedule);
-  // 블로그 파이프라인: 매일 08:00 (YouTube 완료 후 독립 실행)
+  // 블로그 파이프라인: 매일 08:00 (06시 YouTube 결과를 youtube_url로 수신)
   startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
-  // 최초 기동 시 즉시 실행
-  runPipeline();
+
+  // 최초 기동 시 두 파이프라인 모두 순차 실행
+  // YouTube 완료 후 publish 결과를 블로그에 전달 (youtube_url 임베드)
+  (async () => {
+    try {
+      const youtubeResult = await runPipeline();
+      await runBlogPipeline(youtubeResult);
+    } catch (err) {
+      logger.error('[app] Initial run failed', { message: err.message });
+    }
+  })();
 }

@@ -26,6 +26,7 @@
     "blog:monetize": "node src/agents/monetizer.js",
     "blog:publish": "node src/agents/blog_publisher.js",
     "blog:analytics": "node src/agents/blog_analytics.js",
+    "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:login": "node scripts/tistory-login.js"
   },
   "dependencies": {
