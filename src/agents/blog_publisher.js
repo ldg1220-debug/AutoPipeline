@@ -304,27 +304,33 @@ async function publishPost(page, content, blogName) {
   // /manage/posts/ 로 리다이렉트된 경우 → 최신 포스트 URL + 공개 전환
   if (publishedUrl.includes('/manage/posts')) {
     // 최신 포스트 정보 추출 (edit URL → postId)
+    // 포스트 목록 렌더링 대기
+    await page.waitForTimeout(2000);
+
     const postInfo = await page.evaluate(() => {
-      // 페이지의 모든 링크에서 숫자 ID 포함 href 수집
       const allLinks = [...document.querySelectorAll('a[href]')]
         .map((a) => a.href)
         .filter((h) => h && !h.endsWith('#'));
 
       // /manage/newpost/123 형태 (편집 링크)
       const editLinks = allLinks.filter((h) => /\/manage\/newpost\/\d+/.test(h));
-      // /123 형태 (공개 포스트 URL)
+      // ggoondaeng.tistory.com/123 형태 (공개 포스트 URL)
       const postLinks = allLinks.filter((h) => /tistory\.com\/\d+$/.test(h));
+      // data-post-id 또는 숫자 ID 속성을 가진 요소
+      const dataIds = [...document.querySelectorAll('[data-post-id],[data-id]')]
+        .map((el) => el.dataset.postId ?? el.dataset.id)
+        .filter(Boolean);
 
       const firstEdit = editLinks[0] ?? null;
-      const idMatch = firstEdit?.match(/\/manage\/newpost\/(\d+)/);
-      const postId = idMatch?.[1] ?? null;
+      const idMatch = firstEdit?.match(/\/manage\/newpost\/(\d+)/)
+                   ?? postLinks[0]?.match(/\/(\d+)$/);
+      const postId = idMatch?.[1] ?? dataIds[0] ?? null;
 
       return {
         postId,
-        firstEditLink: firstEdit,
-        editLinksCount: editLinks.length,
-        postLinksCount: postLinks.length,
-        sampleLinks: allLinks.slice(0, 15),
+        editLinks: editLinks.slice(0, 3),
+        postLinks: postLinks.slice(0, 5),
+        dataIds: dataIds.slice(0, 3),
       };
     });
     logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
