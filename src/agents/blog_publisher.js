@@ -345,75 +345,91 @@ async function publishPost(page, content, blogName) {
       const blogHost = `https://${blogName}.tistory.com`;
       publishedUrl = `${blogHost}/${postInfo.postId}`;
 
-      // ── 공개 전환 (편집 페이지 UI) ─────────────────────────────────────
-      // 전략: /manage/newpost/{id}에서 TinyMCE 완전 초기화 대기 후
-      //        완료 클릭 → 사이드바에서 "비공개" 버튼 클릭 → 공개 선택 → 발행
+      // ── 공개 전환 (편집 페이지 + 콘텐츠 재주입) ───────────────────────
+      // 편집 페이지는 TinyMCE를 비동기로 로딩해 content-len:0 → 버튼 disabled
+      // html을 재주입하면 TinyMCE가 활성화돼 visibility 버튼 enabled
       try {
         await page.goto(`${blogHost}/manage/newpost/${postInfo.postId}`, {
           waitUntil: 'networkidle', timeout: 30000,
         });
-        // TinyMCE가 기존 본문을 완전히 로드할 때까지 대기
-        await page.waitForTimeout(4000);
+        await page.waitForTimeout(3000);
 
-        // TinyMCE 로드 확인
-        const tmLoaded = await page.evaluate(() => {
+        // html 재주입 → TinyMCE 활성화
+        const reinjected = await page.evaluate((htmlContent) => {
           const ed = window.tinyMCE?.activeEditor ?? window.tinyMCE?.editors?.[0];
-          return ed ? `content-len:${ed.getContent().length}` : 'no-tinymce';
-        });
-        logger.info(`[blog_publisher] Edit page TinyMCE: ${tmLoaded}`);
+          if (!ed) return 'no-tinymce';
+          ed.setContent(htmlContent);
+          ed.fire('change');
+          ed.fire('input');
+          return `reinjected:${htmlContent.length}`;
+        }, html);
+        logger.info(`[blog_publisher] Edit reinject: ${reinjected}`);
+
+        await page.waitForTimeout(1000);
 
         // 사이드바 열기
-        await page.click('button:has-text("완료")', { timeout: 10000 });
+        await page.click('button:has-text("완료")', { timeout: 8000 });
         await page.waitForTimeout(2000);
 
-        // 현재 버튼 목록 진단
-        const editBtns = await page.evaluate(() =>
-          [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
+        // 버튼 목록 + disabled 상태 진단
+        const editState = await page.evaluate(() =>
+          [...document.querySelectorAll('button')]
+            .map((b) => `${b.textContent?.trim()}(${b.disabled ? 'dis' : 'ena'})`)
+            .filter(Boolean).join(' | ')
         );
-        logger.info(`[blog_publisher] Edit page buttons: ${editBtns.join(' | ')}`);
+        logger.info(`[blog_publisher] Edit sidebar: ${editState}`);
 
-        // 공개 설정 버튼: 편집 페이지에서는 "비공개" 표시 (활성화)
-        const visibilityChanged = await page.evaluate(() => {
+        // visibility 버튼 클릭 (enabled인 것만)
+        const visClicked = await page.evaluate(() => {
           const btns = [...document.querySelectorAll('button')];
-          // 비공개 버튼 찾기 (disabled가 아닌 것)
-          const privBtn = btns.find((b) =>
-            (b.textContent?.includes('비공개') || b.textContent?.includes('선택 안 함')) &&
-            !b.disabled
+          const b = btns.find((x) =>
+            (x.textContent?.includes('선택 안 함') || x.textContent?.includes('비공개')) && !x.disabled
           );
-          if (!privBtn) return 'no-vis-btn';
-          privBtn.click();
-          return 'vis-clicked';
+          if (!b) return `none-enabled`;
+          b.click();
+          return `clicked:${b.textContent?.trim()}`;
         });
-        logger.info(`[blog_publisher] Visibility change attempt: ${visibilityChanged}`);
+        logger.info(`[blog_publisher] Vis click: ${visClicked}`);
 
         await page.waitForTimeout(800);
 
-        // 드롭다운에서 "공개" 선택
-        const publicSelected = await page.evaluate(() => {
-          const all = [...document.querySelectorAll('li, [role="option"], button, a')];
-          const target = all.find((el) =>
+        // 드롭다운 "공개" 선택 — 버튼 근처 컨테이너 우선, 전체 검색 폴백
+        const pubSel = await page.evaluate(() => {
+          // 1. layer-select 계열 컨테이너
+          for (const sel of ['.layer-select li', '[class*="select"] li', '[class*="dropdown"] li']) {
+            const items = [...document.querySelectorAll(sel)];
+            const t = items.find((el) => el.textContent?.includes('공개') && el.offsetParent !== null);
+            if (t) { t.click(); return `container:${t.textContent?.trim()}`; }
+          }
+          // 2. role=option
+          const opts = [...document.querySelectorAll('[role="option"]')];
+          const t2 = opts.find((el) => el.textContent?.includes('공개') && el.offsetParent !== null);
+          if (t2) { t2.click(); return `role-option:${t2.textContent?.trim()}`; }
+          // 3. 전체 li/button 중 "공개" 포함
+          const all = [...document.querySelectorAll('li, button')];
+          const t3 = all.find((el) =>
             el.textContent?.trim() === '공개' && el.offsetParent !== null
           );
-          if (target) { target.click(); return 'public-selected'; }
-          // 보이는 모든 요소 중 "공개" 텍스트
-          const visible = all.filter((el) => el.offsetParent !== null).map((el) => el.textContent?.trim()).filter(Boolean);
-          return `not-found, visible: ${visible.slice(0, 10).join('|')}`;
+          if (t3) { t3.click(); return `global:${t3.textContent?.trim()}`; }
+          // 진단: 보이는 li 전부
+          const vis = [...document.querySelectorAll('li')].filter((el) => el.offsetParent !== null).map((el) => el.textContent?.trim()).filter(Boolean);
+          return `not-found|li:${vis.slice(0, 15).join('/')}`;
         });
-        logger.info(`[blog_publisher] Public option: ${publicSelected}`);
+        logger.info(`[blog_publisher] Public sel: ${pubSel}`);
 
         await page.waitForTimeout(500);
 
-        // 발행 버튼 클릭
-        for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")']) {
+        // 발행 버튼
+        for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")']) {
           try {
             await page.click(sel, { timeout: 4000 });
-            logger.info(`[blog_publisher] Edit page publish clicked: ${sel}`);
+            logger.info(`[blog_publisher] Edit publish: ${sel}`);
             await page.waitForTimeout(2000);
             break;
           } catch { /* 다음 */ }
         }
       } catch (err) {
-        logger.warn(`[blog_publisher] Edit page visibility change failed: ${err.message}`);
+        logger.warn(`[blog_publisher] Edit page visibility failed: ${err.message}`);
       }
     }
   }
