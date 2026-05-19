@@ -339,62 +339,50 @@ async function publishPost(page, content, blogName) {
       };
     });
     logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
-    logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
 
     if (postInfo.postId) {
       // 실제 포스트 URL 구성
       const blogHost = `https://${blogName}.tistory.com`;
       publishedUrl = `${blogHost}/${postInfo.postId}`;
 
-      // 편집 페이지에서 공개 전환 (기존 포스트 수정 시 사이드바 즉시 노출)
+      // 세션 쿠키로 관리자 API 직접 호출하여 공개 전환
       try {
-        await page.goto(`${blogHost}/manage/newpost/${postInfo.postId}`, {
-          waitUntil: 'networkidle', timeout: 20000,
-        });
-        await page.waitForTimeout(2500);
+        const cookies = await page.context().cookies();
+        const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 
-        // 편집 페이지에서 "비공개" 상태 버튼 찾아서 공개로 변경
-        // (새 글 쓰기와 달리 사이드바가 항상 열려있고 비공개 상태 표시)
-        const changed = await page.evaluate(() => {
-          // 현재 비공개 상태 버튼 또는 select 탐색
-          const btns = [...document.querySelectorAll('button')];
-          const privBtn = btns.find((b) =>
-            b.textContent?.includes('비공개') || b.textContent?.includes('선택 안 함')
-          );
-          if (privBtn && !privBtn.disabled) {
-            privBtn.disabled = false;
-            privBtn.removeAttribute('disabled');
-            privBtn.click();
-            return 'clicked';
-          }
-          // hidden select 방식
-          const selects = [...document.querySelectorAll('select')];
-          for (const sel of selects) {
-            const pub = [...sel.options].find((o) => o.text.trim() === '공개' || o.value === '0');
-            if (pub) { sel.value = pub.value; sel.dispatchEvent(new Event('change', {bubbles:true})); return 'select'; }
-          }
+        // Tistory 내부 API: 포스트 공개 상태 변경
+        const apiResult = await page.evaluate(async ({ postId: pid, cookieHeader }) => {
+          // CSRF 토큰 탐색
+          const csrf = document.querySelector('meta[name="csrf-token"], input[name="_token"]')?.content
+                    ?? document.querySelector('input[name="_token"]')?.value
+                    ?? '';
+
+          // 방법 1: visibility 전용 API 엔드포인트
+          try {
+            const r = await fetch(`/apis/posts/${pid}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+              body: JSON.stringify({ visibility: 20 }), // 20 = 공개
+            });
+            if (r.ok) return `patch-api: ${r.status}`;
+          } catch {}
+
+          // 방법 2: 폼 POST
+          try {
+            const fd = new FormData();
+            fd.append('postId', pid);
+            fd.append('visibility', '20');
+            fd.append('_token', csrf);
+            const r = await fetch('/manage/post/updateVisibility', { method: 'POST', body: fd });
+            if (r.ok) return `form-post: ${r.status}`;
+          } catch {}
+
           return null;
-        });
-        await page.waitForTimeout(700);
+        }, { postId: postInfo.postId, cookieHeader: cookieStr });
 
-        if (changed) {
-          // 공개 드롭다운에서 "공개" 옵션 선택
-          await page.evaluate(() => {
-            const all = [...document.querySelectorAll('li, [role="option"]')];
-            const target = all.find((el) => el.textContent?.trim() === '공개' && el.offsetParent !== null);
-            if (target) target.click();
-          });
-          await page.waitForTimeout(500);
-        }
-
-        // 저장 (완료/발행/비공개 저장 중 하나)
-        for (const sel of ['button:has-text("발행")', 'button:has-text("완료")', 'button:has-text("비공개 저장")']) {
-          try { await page.click(sel, { timeout: 4000 }); break; } catch { /* 다음 */ }
-        }
-        await page.waitForTimeout(2000);
-        logger.info(`[blog_publisher] Public conversion attempted: ${changed}`);
+        logger.info(`[blog_publisher] Public API result: ${apiResult}`);
       } catch (err) {
-        logger.warn(`[blog_publisher] Public conversion failed: ${err.message}`);
+        logger.warn(`[blog_publisher] Public API failed: ${err.message}`);
       }
     }
   }
@@ -433,7 +421,7 @@ export async function publishBlogPosts(contentData) {
     };
   }
 
-  const browser = await chromium.launch({ headless: false, slowMo: 300 });
+  const browser = await chromium.launch({ headless: true });
   const context  = await createTistoryContext(browser);
 
   if (!context) {
