@@ -353,39 +353,95 @@ async function publishPost(page, content, blogName) {
         await page.waitForTimeout(2000);
 
         const apiResult = await page.evaluate(async (pid) => {
-          // 편집 페이지에서 CSRF 토큰 탐색
           const csrf = document.querySelector('meta[name="csrf-token"]')?.content
                     ?? document.querySelector('input[name="_token"]')?.value
                     ?? '';
 
-          // 방법 1: PATCH /apis/posts/{id}
-          try {
-            const r = await fetch(`/apis/posts/${pid}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
-              body: JSON.stringify({ visibility: 20 }), // 20 = 공개
-            });
-            const text = await r.text();
-            if (r.ok) return `patch-api: ${r.status}`;
-            return `patch-api-fail: ${r.status} ${text.slice(0, 80)}`;
-          } catch (e) { /* 다음 방법 시도 */ }
-
-          // 방법 2: 폼 POST /manage/post/updateVisibility
+          // 방법 1: 폼 POST /manage/post/updateVisibility
           try {
             const fd = new FormData();
             fd.append('postId', pid);
-            fd.append('visibility', '20');
+            fd.append('visibility', '20'); // 20 = 공개
             fd.append('_token', csrf);
             const r = await fetch('/manage/post/updateVisibility', { method: 'POST', body: fd });
             const text = await r.text();
             if (r.ok) return `form-post: ${r.status}`;
-            return `form-post-fail: ${r.status} ${text.slice(0, 80)}`;
-          } catch (e) { /* 실패 */ }
+            // 실패 — 방법 2로 계속
+          } catch {}
 
-          return `no-csrf: "${csrf}"`;
+          // 방법 2: PUT /manage/api/post/{id}/visibility
+          try {
+            const r = await fetch(`/manage/api/post/${pid}/visibility`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+              body: JSON.stringify({ visibility: 20 }),
+            });
+            if (r.ok) return `put-visibility: ${r.status}`;
+          } catch {}
+
+          // 방법 3: Tistory Open API (access_token 기반)
+          const token = document.querySelector('meta[name="tistory-access-token"]')?.content ?? '';
+          if (token) {
+            try {
+              const params = new URLSearchParams({
+                access_token: token, blogName: window.location.hostname.split('.')[0],
+                postId: pid, visibility: '3', output: 'json',
+              });
+              const r = await fetch(`https://www.tistory.com/apis/post/modify?${params}`, { method: 'POST' });
+              if (r.ok) return `open-api: ${r.status}`;
+            } catch {}
+          }
+
+          return `csrf-len:${csrf.length}`;
         }, postInfo.postId);
 
         logger.info(`[blog_publisher] Public API result: ${apiResult}`);
+
+        // API 모두 실패 시 편집 페이지 UI에서 직접 공개 변경 시도
+        if (!apiResult.startsWith('form-post:') && !apiResult.startsWith('put-visibility:') && !apiResult.startsWith('open-api:')) {
+          logger.info('[blog_publisher] API failed — trying UI visibility change on edit page');
+          try {
+            // 편집 페이지에서 사이드바 열기
+            await page.click('button:has-text("완료")', { timeout: 8000 });
+            await page.waitForTimeout(1500);
+
+            // 공개 설정 버튼 (편집 페이지에서는 "비공개" 또는 "선택 안 함" 표시)
+            const visBtn = await page.evaluate(() => {
+              const btns = [...document.querySelectorAll('button')];
+              const b = btns.find((x) =>
+                x.textContent?.includes('비공개') || x.textContent?.includes('선택 안 함')
+              );
+              return b ? b.textContent?.trim() : null;
+            });
+            logger.info(`[blog_publisher] Visibility button text: ${visBtn}`);
+
+            if (visBtn) {
+              await page.click(`button:has-text("${visBtn}")`, { force: true, timeout: 3000 });
+              await page.waitForTimeout(700);
+              // 드롭다운에서 "공개" 선택
+              await page.evaluate(() => {
+                const all = [...document.querySelectorAll('li, [role="option"], button')];
+                const t = all.find((el) =>
+                  el.textContent?.trim() === '공개' && el.offsetParent !== null
+                );
+                if (t) t.click();
+              });
+              await page.waitForTimeout(500);
+            }
+
+            // 발행 버튼 클릭
+            for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")']) {
+              try {
+                await page.click(sel, { timeout: 4000 });
+                logger.info(`[blog_publisher] UI publish clicked: ${sel}`);
+                await page.waitForTimeout(2000);
+                break;
+              } catch { /* 다음 */ }
+            }
+          } catch (uiErr) {
+            logger.warn(`[blog_publisher] UI visibility change failed: ${uiErr.message}`);
+          }
+        }
       } catch (err) {
         logger.warn(`[blog_publisher] Public API failed: ${err.message}`);
       }
