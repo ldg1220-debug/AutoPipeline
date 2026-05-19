@@ -55,9 +55,7 @@ export async function sendDailyReport(summary) {
     lines.push('*발행된 콘텐츠:*');
     for (const r of summary.publishResults.results) {
       const ytStatus = r.youtube?.url ? `[YT](${r.youtube.url})` : r.youtube?.status ?? '-';
-      const tistoryStatus = r.tistory?.url ? `[Tistory](${r.tistory.url})` : r.tistory?.status ?? '-';
-      const ttStatus = r.tiktok?.publish_id ? '✓ TikTok' : r.tiktok?.status ?? '-';
-      lines.push(`• ${r.keyword} — ${ytStatus} / ${tistoryStatus} / ${ttStatus}`);
+      lines.push(`• ${r.keyword} — ${ytStatus}`);
     }
   }
 

@@ -27,7 +27,9 @@ async function runLLMQA(content) {
 검수 대상 콘텐츠:
 - 키워드: ${content.keyword}
 - 숏폼 훅: ${content.shortform_script?.hook ?? ''}
-- 숏폼 본문: ${content.shortform_script?.body ?? ''}
+- 숏폼 컨텍스트: ${content.shortform_script?.context ?? ''}
+- 숏폼 인사이트: ${content.shortform_script?.insight ?? ''}
+- 숏폼 요약: ${content.shortform_script?.summary ?? ''}
 - 숏폼 CTA: ${content.shortform_script?.cta ?? ''}
 - 블로그 제목: ${content.blog_draft?.title ?? ''}
 - 블로그 섹션: ${JSON.stringify(content.blog_draft?.sections ?? [])}
@@ -65,7 +67,7 @@ function validateSchema(content) {
   const missing = required.filter((f) => !content[f]);
   if (missing.length > 0) return { valid: false, reason: `필수 필드 누락: ${missing.join(', ')}` };
 
-  const scriptMissing = ['hook', 'body', 'cta'].filter((f) => !content.shortform_script?.[f]);
+  const scriptMissing = ['hook', 'context', 'insight', 'summary', 'cta'].filter((f) => !content.shortform_script?.[f]);
   if (scriptMissing.length > 0) return { valid: false, reason: `shortform_script 필드 누락: ${scriptMissing.join(', ')}` };
 
   if (!content.blog_draft?.title || !Array.isArray(content.blog_draft?.sections)) {

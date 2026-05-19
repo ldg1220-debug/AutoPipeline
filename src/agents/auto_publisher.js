@@ -53,21 +53,21 @@ async function publishToYouTube(content, accessToken) {
   const publishAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
 
   const seriesName = content.series_name ?? '경제 직독직해';
-  const seriesTag = seriesName.replace(/\s/g, '');
 
-  const description = [
-    `[${seriesName}] ${content.shortform_script?.hook ?? ''}`,
-    '',
-    content.shortform_script?.body ?? '',
-    '',
-    content.shortform_script?.cta ?? '',
-    '',
-    `#${seriesTag} #${content.category} #경제직독직해 #숏폼 #${content.keyword.replace(/\s/g, '')}`,
-  ].join('\n');
+  const description = content.youtube_description
+    ?? [
+        `[${seriesName}] ${content.shortform_script?.hook ?? ''}`,
+        '',
+        content.shortform_script?.insight ?? content.shortform_script?.context ?? '',
+        '',
+        content.shortform_script?.cta ?? '',
+        '',
+        `#경제직독직해 #${content.category} #숏폼 #${content.keyword.replace(/\s/g, '')}`,
+      ].join('\n');
 
   const metadata = JSON.stringify({
     snippet: {
-      title: `[${seriesName}] ${content.blog_draft?.title ?? content.keyword}`,
+      title: content.youtube_title ?? `[${seriesName}] ${content.keyword}`,
       description,
       tags: [seriesName, content.keyword, content.category, '경제직독직해', '숏폼', '트렌드'],
       categoryId: '22',
@@ -111,142 +111,7 @@ async function publishToYouTube(content, accessToken) {
 }
 
 /**
- * Tistory API로 블로그 포스트를 공개 상태로 발행한다.
- * - 제휴 훅: section 말미에 [AFFILIATE_LINK: {product_category}] 플레이스홀더 삽입
- *   → 발행 전 실제 링크로 교체 필요 (또는 자동화 가능)
- * access_token 방식의 인증을 사용한다.
- */
-async function publishToTistory(content) {
-  if (!config.tistory.accessToken) {
-    logger.warn('[auto_publisher] TISTORY_ACCESS_TOKEN not configured. Skipping Tistory.');
-    return { platform: 'tistory', status: 'skipped', error: 'TISTORY_ACCESS_TOKEN not configured' };
-  }
-
-  const blog = content.blog_draft ?? {};
-  const sections = blog.sections ?? [];
-  const affiliateHooks = blog.affiliate_hooks ?? [];
-
-  // 제휴 훅을 position 기준으로 매핑
-  const affiliateByPosition = Object.fromEntries(
-    affiliateHooks.map((h) => [h.position, h])
-  );
-
-  // HTML 콘텐츠 조립 (섹션 말미에 제휴 플레이스홀더 삽입)
-  const sectionHtml = sections
-    .map((s, i) => {
-      const hookKey = `section${i + 1}_end`;
-      const hook = affiliateByPosition[hookKey];
-      const affiliateHtml = hook
-        ? `\n<p><strong>[AFFILIATE_LINK: ${hook.product_category} | 앵커: ${hook.anchor_text}]</strong></p>`
-        : '';
-      return `<h2>${s.heading}</h2>\n<p>${s.body}</p>${affiliateHtml}`;
-    })
-    .join('\n\n');
-
-  const response = await axios.post(
-    'https://www.tistory.com/apis/post/write',
-    new URLSearchParams({
-      access_token: config.tistory.accessToken,
-      output: 'json',
-      blogName: config.tistory.blogName,
-      title: blog.title ?? content.keyword,
-      content: sectionHtml,
-      visibility: '3',
-      category: '0',
-    }).toString(),
-    {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      timeout: 30000,
-    }
-  );
-
-  return {
-    platform: 'tistory',
-    post_id: response.data.tistory?.postId ?? response.data.postId,
-    url: response.data.tistory?.url ?? response.data.url,
-    status: 'published',
-  };
-}
-
-/**
- * TikTok Content Posting API v2로 숏폼 영상을 발행한다.
- * 영상 파일이 없으면 스킵한다.
- *
- * TikTok API 주의사항:
- *   - 2023년 이후 Content Posting API는 TikTok Developer 심사 필요
- *   - access_token은 OAuth 2.0 흐름으로 발급받은 단기 토큰을 사용
- *   - 영상은 PULL_FROM_URL 또는 FILE_UPLOAD 방식 모두 지원
- *     현재 구현은 로컬 파일 → FILE_UPLOAD 방식
- */
-async function publishToTikTok(content) {
-  const accessToken = config.tiktok.accessToken;
-  if (!accessToken) {
-    throw new Error('TIKTOK_ACCESS_TOKEN is not configured');
-  }
-
-  const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-  const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
-
-  try {
-    await fs.access(videoPath);
-  } catch {
-    logger.warn(`[auto_publisher] TikTok: video file not found, skipping: ${videoPath}`);
-    return { platform: 'tiktok', status: 'skipped_no_video_file' };
-  }
-
-  // Step 1: 업로드 세션 초기화
-  const seriesNameTt = content.series_name ?? '경제 직독직해';
-  const seriesTagTt = seriesNameTt.replace(/\s/g, '');
-  const tiktokTitle = `[${seriesNameTt}] ${content.blog_draft?.title ?? content.keyword} #${seriesTagTt} #경제직독직해 #숏폼`;
-
-  const initRes = await axios.post(
-    'https://open.tiktokapis.com/v2/post/publish/video/init/',
-    {
-      post_info: {
-        title: tiktokTitle,
-        privacy_level: 'SELF_ONLY', // 검토 후 PUBLIC_TO_EVERYONE 으로 변경
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
-      },
-      source_info: { source: 'FILE_UPLOAD' },
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json; charset=UTF-8',
-      },
-      timeout: 15000,
-    }
-  );
-
-  const { publish_id, upload_url } = initRes.data.data;
-
-  // Step 2: 영상 파일 업로드
-  const videoBuffer = await fs.readFile(videoPath);
-  const videoSize = (await fs.stat(videoPath)).size;
-
-  await axios.put(upload_url, videoBuffer, {
-    headers: {
-      'Content-Type': 'video/mp4',
-      'Content-Range': `bytes 0-${videoSize - 1}/${videoSize}`,
-      'Content-Length': videoSize,
-    },
-    timeout: 120000,
-  });
-
-  return {
-    platform: 'tiktok',
-    publish_id,
-    status: 'uploaded',
-    privacy: 'SELF_ONLY',
-  };
-}
-
-/**
- * APPROVED 콘텐츠를 YouTube·Tistory·TikTok에 발행한다.
+ * APPROVED 콘텐츠를 YouTube에 발행한다.
  * DRY_RUN=true이면 실제 업로드 없이 로그만 출력한다.
  */
 export async function publishContents(qaData, contentData) {
@@ -281,8 +146,6 @@ export async function publishContents(qaData, contentData) {
         keyword: content.keyword,
         dry_run: true,
         youtube: { platform: 'youtube', status: 'dry_run' },
-        tistory: { platform: 'tistory', status: 'dry_run' },
-        tiktok: { platform: 'tiktok', status: 'dry_run' },
       });
       continue;
     }
@@ -302,32 +165,6 @@ export async function publishContents(qaData, contentData) {
         message: err.message,
       });
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
-    }
-
-    // Tistory 발행
-    try {
-      result.tistory = await publishToTistory(content);
-      if (result.tistory.status === 'published') {
-        logger.info(`[auto_publisher] Tistory upload success: ${result.tistory.url}`);
-      }
-    } catch (err) {
-      logger.error(`[auto_publisher] Tistory upload failed: ${content.keyword}`, {
-        message: err.message,
-      });
-      result.tistory = { platform: 'tistory', status: 'failed', error: err.message };
-    }
-
-    // TikTok 발행 (영상 파일 존재 시에만)
-    try {
-      result.tiktok = await publishToTikTok(content);
-      if (result.tiktok.status === 'uploaded') {
-        logger.info(`[auto_publisher] TikTok upload success: ${content.keyword}`);
-      }
-    } catch (err) {
-      logger.error(`[auto_publisher] TikTok upload failed: ${content.keyword}`, {
-        message: err.message,
-      });
-      result.tiktok = { platform: 'tiktok', status: 'failed', error: err.message };
     }
 
     results.push(result);
@@ -388,15 +225,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             keyword: item.keyword,
             category: item.category,
             series_name: item.series ?? '오늘의 이슈',
-            shortform_script: { hook: `${item.keyword}?`, body: `${item.keyword} 핵심 한 줄`, cta: '링크에서 더 보기' },
-            image_prompt: 'placeholder',
-            blog_draft: {
-              title: `${item.keyword} 정리`,
-              meta_description: `${item.keyword}에 대해 알아보세요.`,
-              seo_keywords: [item.keyword],
-              sections: [{ heading: '배경', body: '내용' }],
-              affiliate_hooks: [],
+            shortform_script: {
+              hook: `${item.keyword}?`,
+              context: `${item.keyword} 관련 현황과 나에게 미치는 영향`,
+              insight: `${item.keyword} 핵심 인사이트. 배경-현황-행동 순서로 설명.`,
+              summary: `한 줄 정리: ${item.keyword} 핵심 포인트`,
+              cta: '경제 직독직해 구독하면 매일 아침 이런 소식 먼저 받아봐요',
             },
+            youtube_title: `${item.keyword} 지금 어떻게 해야 하나?`,
+            youtube_description: `${item.keyword}에 대해 알아봅니다. #경제직독직해 #재테크 #${item.keyword.replace(/\s/g, '')}`,
+            image_prompt: 'placeholder',
+            blog_draft: { title: `${item.keyword} 정리`, sections: [], affiliate_hooks: [] },
           })),
         };
       }

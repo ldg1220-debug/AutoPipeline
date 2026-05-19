@@ -139,18 +139,20 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const accentColor = BRAND_COLORS[content.category] ?? '#FFD700';
   const seriesName = content.series_name ?? '경제 직독직해';
 
-  const hook = content.shortform_script?.hook ?? '';
-  const body = content.shortform_script?.body ?? '';
-  const cta  = content.shortform_script?.cta  ?? '';
+  const hook    = content.shortform_script?.hook    ?? '';
+  const context = content.shortform_script?.context ?? '';
+  const insight = content.shortform_script?.insight ?? '';
+  const summary = content.shortform_script?.summary ?? '';
+  const cta     = content.shortform_script?.cta     ?? '';
 
-  // 3. 자막 클립 (hook / body / cta 3구간)
-  // Shotstack text 타입 사용 (rich-text/html 타입 deprecated)
-  const makeSubtitle = (text, start, length, fontSize = 48) => ({
+  // 3. 자막 클립 (55초 5구간 — hook/context/insight/summary/cta)
+  const TOTAL_DURATION = 55;
+  const makeSubtitle = (text, start, length, fontSize = 42) => ({
     asset: {
       type: 'text',
       text,
       width: 900,
-      height: 320,
+      height: 380,
       font: { family: 'Noto Sans', size: fontSize, color: '#1A1A1A' },
       alignment: { horizontal: 'center' },
     },
@@ -167,33 +169,34 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
       text: seriesName,
       width: 700,
       height: 80,
-      font: { family: 'Noto Sans', size: 30, color: '#1A1A1A' },
+      font: { family: 'Noto Sans', size: 28, color: '#1A1A1A' },
       alignment: { horizontal: 'center' },
     },
     start: 0,
-    length: 20,
+    length: TOTAL_DURATION,
     position: 'top',
     offset: { y: -0.05 },
   };
 
   const subtitleClips = [
     seriesLabel,
-    makeSubtitle(hook, 0, 3, 44),
-    makeSubtitle(body, 3, 12, 48),
-    makeSubtitle(cta, 15, 5, 36),
+    makeSubtitle(hook,    0,  3,  52),   // hook: 0~3초, 가장 크게
+    makeSubtitle(context, 3,  12, 38),   // context: 3~15초
+    makeSubtitle(insight, 15, 25, 36),   // insight: 15~40초
+    makeSubtitle(summary, 40, 10, 42),   // summary: 40~50초
+    makeSubtitle(cta,     50, 5,  34),   // cta: 50~55초
   ];
 
   // 4. 배경 트랙 (Pexels 영상 or 크림 단색)
   const bgClip = bgVideoUrl
-    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: 20, fit: 'crop' }
-    : { asset: { type: 'image', src: 'https://placehold.co/1080x1920/FAFAF2/FAFAF2.png' }, start: 0, length: 20, fit: 'cover' };
+    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: TOTAL_DURATION, fit: 'crop' }
+    : { asset: { type: 'image', src: 'https://placehold.co/1080x1920/FAFAF2/FAFAF2.png' }, start: 0, length: TOTAL_DURATION, fit: 'cover' };
 
-  // 5. 화이트 오버레이 (노트지 질감, 다크 배경 대신 밝은 오버레이)
-  // Shotstack은 color 타입을 지원하지 않으므로 단색 image로 대체
+  // 5. 화이트 오버레이 (노트지 질감)
   const overlayClip = {
     asset: { type: 'image', src: 'https://placehold.co/1080x1920/FFFFFF/FFFFFF.png' },
     start: 0,
-    length: 20,
+    length: TOTAL_DURATION,
     opacity: 0.55,
     fit: 'cover',
   };
@@ -219,9 +222,9 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const renderId = renderResponse.data.response.id;
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
-  // 6. 완료 대기 polling (최대 150초, 20초 영상 기준)
+  // 6. 완료 대기 polling (최대 250초, 55초 영상 기준)
   const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await axios.get(pollUrl, {
       headers: { 'x-api-key': shotstackApiKey },
@@ -259,15 +262,17 @@ async function generateMedia(content) {
 
   try {
     const parts = [
-      content.shortform_script?.hook ?? '',
-      content.shortform_script?.body ?? '',
-      content.shortform_script?.cta ?? '',
+      content.shortform_script?.hook    ?? '',
+      content.shortform_script?.context ?? '',
+      content.shortform_script?.insight ?? '',
+      content.shortform_script?.summary ?? '',
+      content.shortform_script?.cta     ?? '',
     ].filter(Boolean);
     let scriptText = parts.join(' ');
     // 한국어 기준 20초 = 약 100자. 초과 시 body를 잘라 영상-오디오 타임라인 불일치 방지
-    if (scriptText.length > 100) {
-      logger.warn(`[media_generator] Script too long (${scriptText.length}chars). Trimming to 100.`);
-      scriptText = scriptText.slice(0, 100);
+    if (scriptText.length > 300) {
+      logger.warn(`[media_generator] Script too long (${scriptText.length}chars). Trimming to 300.`);
+      scriptText = scriptText.slice(0, 300);
     }
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;

@@ -12,88 +12,77 @@ const __dirname = path.dirname(__filename);
 const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 /**
- * 단일 keyword에 대해 숏폼 대본, 이미지 프롬프트, 블로그 초안을 OpenAI로 생성한다.
+ * 숏폼 대본 구조 (55초 완결형):
+ *   hook     (0~3초)  : 최대 12자, ?/!로 끝나는 충격 한 마디
+ *   context  (3~15초) : 현상 + 나에게 미치는 영향, 구체적 수치 포함
+ *   insight  (15~40초): 핵심 인사이트 하나, 쉬운 설명, 비유 활용
+ *   summary  (40~50초): 한 줄 정리
+ *   cta      (50~55초): 구독 유도
  *
- * 프롬프트 설계 의도:
- *   - 숏폼 대본: 60초 이내 분량, 훅(첫 3초 어그로) → 본문 → CTA 3단 구조 강제
- *   - 이미지 프롬프트: DALL-E/Midjourney 호환 영어 프롬프트, 구체적 스타일 지정
- *   - 블로그 초안: SEO를 고려한 제목 + 소제목 3개 구조, 각 섹션 300자 내외
- *   JSON만 반환하도록 강제해 파싱 실패를 방지한다.
- *
- * 예시 프롬프트 (아래 contentPrompt 변수 참조):
- *   "당신은 한국 SNS 콘텐츠 전문가입니다. 다음 키워드에 대해 3가지 콘텐츠를 JSON으로 생성하세요.
- *    키워드: {keyword} / 카테고리: {category}
- *    1. shortform_script: hook(훅 문장), body(본문, 60초 이내), cta(행동 유도 문장)
- *    2. image_prompt: 영어로 작성된 Midjourney/DALL-E 스타일 이미지 생성 프롬프트
- *    3. blog_draft: title(SEO 제목), sections([{heading, body}] 3개, 각 300자)"
+ * 영상 퀄리티가 최우선 — "나한테 왜 중요한가"가 모든 내용의 중심이어야 한다.
  */
-// 카테고리별 제휴 상품 추천 매핑
-const AFFILIATE_MAP = {
-  finance:      ['신용카드 비교 서비스', '증권사 계좌 개설', '로보어드바이저 투자'],
-  realestate:   ['청약 정보 서비스', '부동산 대출 비교', '인테리어 견적 서비스'],
-  health:       ['건강기능식품 쿠팡파트너스', '헬스장 할인쿠폰', '온라인 진료 서비스'],
-  economy:      ['재테크 책 쿠팡파트너스', '금융 앱 가입', '경제 유료 뉴스레터'],
-  entertainment:['관련 공연 예매', '스트리밍 구독 서비스', '굿즈 쇼핑몰'],
-  social:       ['관련 책 쿠팡파트너스', '커뮤니티 앱 가입', '관련 강의 플랫폼'],
-};
 
 async function generateContent(item) {
-  const affiliateSuggestions = AFFILIATE_MAP[item.category] ?? AFFILIATE_MAP.social;
   const seriesName = item.series ?? '오늘의 이슈';
 
-  const contentPrompt = `당신은 "경제 직독직해" 채널의 콘텐츠 전문가입니다. 이 채널은 노트 필기 스타일의 20초 숏폼과 SEO 블로그를 운영합니다. 다음 키워드에 대해 콘텐츠를 JSON 형식으로만 생성하세요. 다른 텍스트는 포함하지 마세요.
+  const contentPrompt = `당신은 한국 경제 유튜브 채널 "경제 직독직해"의 수석 콘텐츠 전문가입니다.
+이 채널은 매일 경제 뉴스를 "나에게 어떤 영향을 주는가"로 풀어서 55초 숏폼으로 전달합니다.
+시청자는 20~40대 직장인으로, 재테크에 관심 있지만 경제 용어가 어렵다고 느끼는 사람들입니다.
 
 키워드: ${item.keyword}
 카테고리: ${item.category}
 시리즈: ${seriesName}
-제휴 상품 후보: ${affiliateSuggestions.join(', ')}
 
-【숏폼 대본 제작 규칙】
-- 총 20초 분량 (한국어 기준 약 80~100자)
-- hook(0~3초): 최대 15자, 반드시 ?나 !로 끝남. 시청자가 스크롤 멈추게 하는 단 하나의 충격 단어/질문. 예: "금리 또 올라?", "집값 꺾였다!", "내 돈 어디로?", "대출 막힌다!", "지금 사면 손해?"
-- body(3~15초): 딱 하나의 핵심 인사이트만. 노트 필기처럼 간결하게. 복잡한 개념을 중학생도 이해하도록.
-- cta(15~20초): "자세한 내용은 블로그 링크에서 → 지금 [시리즈명] 더 보기"
-- 금지: 여러 정보 나열 / "구독과 좋아요" 문구 / 60초 분량 대본
+━━━━━━━━━━━━━━━━━━━━━━━
+【영상 퀄리티 기준 — 타협 없이 준수】
+━━━━━━━━━━━━━━━━━━━━━━━
 
-출력 JSON 형식:
+❶ hook (0~3초) — 스크롤 멈추게 하는 단 하나의 충격 문장
+   - 최대 12자, 반드시 ?나 !로 끝남
+   - "나에게 직접적인 영향"을 암시하는 질문/선언
+   ✗ 나쁜 예: "금리 인하에 대해 알아보겠습니다" → 너무 길고 밋밋
+   ✓ 좋은 예: "대출이자 줄어든다?", "집값 꺾였다!", "내 월급만 제자리?", "대출 막힌다!", "지금 사면 손해?"
+
+❷ context (3~15초) — 현상과 나에게 미치는 영향 (구체적 수치 필수)
+   - "[현상]이 일어나고 있는데, 이게 여러분 [생활]에 직접 영향을 줍니다"
+   - 반드시 구체적 수치 포함: "1억 대출 기준 월 4만원", "전세가율 70% 초과" 등
+   - 50~80자
+
+❸ insight (15~40초) — 핵심 인사이트 하나만 (깊이 있게)
+   - 배경 → 현황 → 내가 해야 할 행동 또는 주의사항 순서
+   - 전문 용어는 반드시 쉽게 풀어서. 중학생도 이해할 수 있게.
+   - 비유·사례 활용. 숫자는 체감되게 표현.
+   - 100~130자
+
+❹ summary (40~50초) — 한 줄 정리
+   - "한 줄 정리: [가장 중요한 메시지]" 형식
+   - 30~40자
+
+❺ cta (50~55초) — 구독 유도 (블로그 링크 절대 금지)
+   - "경제 직독직해 구독하면 매일 아침 이런 소식 먼저 받아봐요"
+   - 30자 이내
+
+━━━━━━━━━━━━━━━━━━━━━━━
+JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
+━━━━━━━━━━━━━━━━━━━━━━━
+
 {
   "series_name": "${seriesName}",
   "shortform_script": {
-    "hook": "0~3초. 반드시 ?나 !로 끝나는 짧은 충격 문장. 최대 15자. 예시: '금리 또 올라?', '집값 꺾였다!', '내 돈 어디로?', '대출 막힌다!', '지금 사면 손해?'",
-    "body": "3~15초. 핵심 인사이트 하나만, 노트 필기처럼 간결하게 (50~70자)",
-    "cta": "15~20초. 블로그 링크 유도 (예: '자세한 내용은 링크에서 → ${seriesName} 더 보기')"
+    "hook": "최대 12자, ?나 !로 끝남 — 스크롤을 멈추게 하는 한 마디",
+    "context": "현상 + 나에게 미치는 영향, 구체적 수치 포함 (50~80자)",
+    "insight": "핵심 인사이트 하나, 쉬운 설명, 비유 활용 (100~130자)",
+    "summary": "한 줄 정리: [핵심 메시지] (30~40자)",
+    "cta": "구독 유도 문장 (30자 이내)"
   },
-  "image_prompt": "notebook paper background, handwritten Korean text style, 9:16 portrait, study desk aesthetic, ${item.category} theme, clean minimal layout",
+  "youtube_title": "유튜브 제목: 훅을 살린 제목 (25자 이내, 클릭 유발)",
+  "youtube_description": "영상 설명란 200자: 핵심 내용 요약 + 구독 유도. #해시태그 포함.",
   "blog_draft": {
-    "title": "검색 의도에 맞는 SEO 최적화 제목 (키워드 포함, 30자 이내)",
-    "meta_description": "검색 결과에 표시될 설명 (키워드 포함, 155자 이내, 클릭 유도 문구 포함)",
-    "seo_keywords": ["핵심키워드", "연관키워드1", "연관키워드2", "롱테일키워드1", "롱테일키워드2"],
-    "sections": [
-      {
-        "heading": "H2 소제목 1 (키워드 포함 권장)",
-        "body": "500자 이상 상세 본문. 독자가 검색한 이유를 해결해주는 실용적 정보 중심. 전문 용어 설명 포함."
-      },
-      {
-        "heading": "H2 소제목 2",
-        "body": "500자 이상 상세 본문. 구체적 수치·사례·비교 데이터 활용."
-      },
-      {
-        "heading": "H2 소제목 3",
-        "body": "500자 이상 상세 본문. 독자 행동을 유도하는 실천 가이드 또는 주의사항."
-      }
-    ],
-    "affiliate_hooks": [
-      {
-        "position": "section1_end",
-        "product_category": "${affiliateSuggestions[0]}",
-        "anchor_text": "자연스럽게 삽입할 링크 앵커 텍스트 (5~10자)"
-      },
-      {
-        "position": "section2_end",
-        "product_category": "${affiliateSuggestions[1]}",
-        "anchor_text": "자연스럽게 삽입할 링크 앵커 텍스트 (5~10자)"
-      }
-    ]
+    "title": "${item.keyword} 완벽 정리",
+    "meta_description": "",
+    "seo_keywords": ["${item.keyword}"],
+    "sections": [],
+    "affiliate_hooks": []
   }
 }`;
 
@@ -102,7 +91,7 @@ async function generateContent(item) {
     {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: contentPrompt }],
-      temperature: 0.7,
+      temperature: 0.8,
       response_format: { type: 'json_object' },
     },
     {
@@ -114,14 +103,9 @@ async function generateContent(item) {
     }
   );
 
-  const raw = response.data.choices[0].message.content;
-  return JSON.parse(raw);
+  return JSON.parse(response.data.choices[0].message.content);
 }
 
-/**
- * Agent 1 출력 JSON을 받아 각 keyword별 콘텐츠를 생성하고 결과를 반환한다.
- * OPENAI_API_KEY 미설정 시 mock 콘텐츠 구조를 반환해 하위 에이전트 테스트를 가능하게 한다.
- */
 export async function createContents(trendData) {
   const items = trendData?.selected_items ?? [];
 
@@ -142,28 +126,25 @@ export async function createContents(trendData) {
         continue;
       }
 
-      await throttle(2000); // GPT-4o RPM 제한 보호
+      await throttle(2000);
       const generated = await generateContent(item);
       contents.push({
         keyword: item.keyword,
         category: item.category,
         series_name: generated.series_name ?? item.series ?? '오늘의 이슈',
         shortform_script: generated.shortform_script ?? {},
-        image_prompt: generated.image_prompt ?? '',
-        blog_draft: generated.blog_draft ?? { title: '', meta_description: '', seo_keywords: [], sections: [], affiliate_hooks: [] },
+        youtube_title: generated.youtube_title ?? item.keyword,
+        youtube_description: generated.youtube_description ?? '',
+        image_prompt: `notebook paper background, handwritten Korean text style, 9:16 portrait, study desk aesthetic, ${item.category} theme, clean minimal layout`,
+        blog_draft: generated.blog_draft ?? { title: item.keyword, meta_description: '', seo_keywords: [], sections: [], affiliate_hooks: [] },
       });
     } catch (err) {
-      logger.error(`[content_creator] Failed to generate content for: ${item.keyword}`, {
-        message: err.message,
-      });
+      logger.error(`[content_creator] Failed to generate content for: ${item.keyword}`, { message: err.message });
       contents.push(buildPlaceholder(item));
     }
   }
 
-  return {
-    generated_at: new Date().toISOString(),
-    contents,
-  };
+  return { generated_at: new Date().toISOString(), contents };
 }
 
 function buildPlaceholder(item) {
@@ -172,18 +153,21 @@ function buildPlaceholder(item) {
     category: item.category,
     series_name: item.series ?? '오늘의 이슈',
     shortform_script: {
-      hook: `[PLACEHOLDER] ${item.keyword}?`,
-      body: `[PLACEHOLDER] ${item.keyword} 핵심 인사이트 한 줄 정리`,
-      cta: `[PLACEHOLDER] 자세한 내용은 링크에서 → ${item.series ?? '오늘의 이슈'} 더 보기`,
+      hook: `${item.keyword.slice(0, 10)}?`,
+      context: `[PLACEHOLDER] ${item.keyword} 관련 현황과 나에게 미치는 영향`,
+      insight: `[PLACEHOLDER] ${item.keyword} 핵심 인사이트. 배경-현황-행동 순서로 설명.`,
+      summary: `한 줄 정리: ${item.keyword} 핵심 포인트`,
+      cta: '경제 직독직해 구독하면 매일 아침 이런 소식 먼저 받아봐요',
     },
+    youtube_title: `${item.keyword} 지금 어떻게 해야 하나?`,
+    youtube_description: `${item.keyword}에 대해 알아봅니다. #경제직독직해 #재테크 #${item.keyword.replace(/\s/g, '')}`,
     image_prompt: `notebook paper background, handwritten Korean text, ${item.keyword}, study desk aesthetic, 9:16 portrait`,
     blog_draft: {
-      title: `[PLACEHOLDER] ${item.keyword} 완벽 정리`,
-      sections: [
-        { heading: '배경', body: '[PLACEHOLDER] 배경 설명' },
-        { heading: '현황', body: '[PLACEHOLDER] 현황 분석' },
-        { heading: '전망', body: '[PLACEHOLDER] 향후 전망' },
-      ],
+      title: `${item.keyword} 완벽 정리`,
+      meta_description: '',
+      seo_keywords: [item.keyword],
+      sections: [],
+      affiliate_hooks: [],
     },
   };
 }
