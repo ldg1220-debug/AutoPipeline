@@ -295,14 +295,47 @@ async function publishPost(page, content, blogName) {
     throw new Error('발행 버튼을 찾을 수 없음 — 버튼: ' + btnsAfter.join(', '));
   }
 
-  // URL 변경 대기 (최대 12초)
-  try {
-    await page.waitForURL((url) => !url.includes('/manage/newpost'), { timeout: 12000 });
-  } catch { /* URL 안 바뀌어도 계속 */ }
+  // 저장 후 5초 대기 + 상태 확인
+  await page.waitForTimeout(5000);
 
-  const publishedUrl = page.url();
-  logger.info(`[blog_publisher] Published: ${title} → ${publishedUrl}`);
-  return publishedUrl.includes('/manage/') ? null : publishedUrl;
+  // 저장 후 스크린샷 (디버그)
+  try {
+    const ssDir = path.resolve(__dirname, '../../output/blog');
+    await fs.mkdir(ssDir, { recursive: true });
+    await page.screenshot({ path: path.resolve(ssDir, 'after_save_debug.png'), fullPage: true });
+    logger.info('[blog_publisher] Screenshot: output/blog/after_save_debug.png');
+  } catch { /* 무시 */ }
+
+  // URL 확인 (query param 포함, pushState 포함)
+  let publishedUrl = page.url();
+  logger.info(`[blog_publisher] URL after save: ${publishedUrl}`);
+
+  // URL이 변경됐는지 확인 (query param 추가도 성공으로 인정)
+  if (publishedUrl.includes('/manage/newpost') && !publishedUrl.includes('postId') && !publishedUrl.includes('id=')) {
+    // 페이지에서 포스트 ID를 찾아봄
+    const postIdInfo = await page.evaluate(() => {
+      // 임시저장 후 나타날 수 있는 postId, 내 블로그 링크 등
+      const link = document.querySelector('a[href*="/manage/post/"], a[href*="/entry/"]');
+      const idInput = document.querySelector('input[name="postId"], input[name="id"]');
+      const urlParam = new URLSearchParams(window.location.search).get('postId')
+                    || new URLSearchParams(window.location.search).get('id');
+      return {
+        link: link?.href ?? null,
+        idInput: idInput?.value ?? null,
+        urlParam,
+        pageUrl: window.location.href,
+      };
+    });
+    logger.info(`[blog_publisher] Post ID search: ${JSON.stringify(postIdInfo)}`);
+
+    if (postIdInfo.link) publishedUrl = postIdInfo.link;
+    else if (postIdInfo.pageUrl !== publishedUrl) publishedUrl = postIdInfo.pageUrl;
+  }
+
+  logger.info(`[blog_publisher] Final URL: ${publishedUrl}`);
+  return publishedUrl.includes('/manage/newpost') && !publishedUrl.includes('postId')
+    ? null
+    : publishedUrl;
 }
 
 // ── DB 업데이트 ────────────────────────────────────────────────────────────
