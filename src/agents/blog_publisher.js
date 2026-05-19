@@ -191,75 +191,54 @@ async function publishPost(page, content, blogName) {
     } catch { /* 썸네일 실패해도 발행 계속 */ }
   }
 
-  // ── 발행 2단계 플로우 ───────────────────────────────────────────────────
-  // 티스토리 새 에디터: "완료" 클릭 → 우측 패널 열림 → "발행" 클릭
+  // ── 발행 플로우 ───────────────────────────────────────────────────────────
+  // 티스토리 새 에디터:
+  //   우측 사이드바가 항상 열려있음 (공개설정 "선택 안 함" → 공개로 변경)
+  //   → "비공개 저장" 버튼이 "발행"으로 바뀜 → 클릭
 
-  // 1단계: 완료 버튼 (패널 열기)
-  const step1Candidates = [
-    'button[data-btn="publish"]',
-    '.btn-publish',
-    'button:has-text("완료")',
+  // 공개 설정 드롭다운 클릭 ("선택 안 함더보기" 버튼)
+  try {
+    await page.click('button:has-text("선택 안 함")', { timeout: 5000 });
+    await page.waitForTimeout(700);
+    // 드롭다운에서 "공개" 선택
+    await page.click('li:has-text("공개"), [role="option"]:has-text("공개"), text="공개"', { timeout: 3000 });
+    await page.waitForTimeout(500);
+    logger.info('[blog_publisher] Visibility set to 공개');
+  } catch (err) {
+    logger.warn(`[blog_publisher] Visibility change failed: ${err.message}`);
+  }
+
+  // 모든 버튼 로깅 (디버그)
+  const visibleBtns = await page.evaluate(() =>
+    [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
+  );
+  logger.info(`[blog_publisher] Buttons after visibility change: ${visibleBtns.join(' | ')}`);
+
+  // 발행 버튼 클릭 (공개→발행, 공개 발행, 비공개 저장 순 시도)
+  const publishCandidates = [
+    'button:has-text("공개 발행")',
     'button:has-text("발행")',
+    'button:has-text("비공개 저장")',
   ];
-  let step1Clicked = false;
-  for (const sel of step1Candidates) {
+  let publishClicked = false;
+  for (const sel of publishCandidates) {
     try {
       await page.click(sel, { timeout: 5000 });
-      step1Clicked = true;
-      logger.info(`[blog_publisher] Step1 clicked: ${sel}`);
+      logger.info(`[blog_publisher] Publish clicked: ${sel}`);
+      publishClicked = true;
       break;
     } catch { /* 다음 시도 */ }
   }
-
-  if (!step1Clicked) {
-    throw new Error('발행 버튼(1단계)을 찾을 수 없음');
+  if (!publishClicked) {
+    throw new Error('발행 버튼을 찾을 수 없음 — 버튼 목록: ' + visibleBtns.join(', '));
   }
 
-  // 패널 등장 대기
-  await page.waitForTimeout(2500);
-
-  // 디버그용 스크린샷 저장 (패널 열린 상태)
+  // URL 변경 대기 (최대 12초)
   try {
-    const ssDir = path.resolve(__dirname, '../../output/blog');
-    await fs.mkdir(ssDir, { recursive: true });
-    await page.screenshot({ path: path.resolve(ssDir, 'publish_panel_debug.png'), fullPage: false });
-    logger.info('[blog_publisher] Screenshot saved: output/blog/publish_panel_debug.png');
-  } catch { /* 스크린샷 실패 무시 */ }
+    await page.waitForURL((url) => !url.includes('/manage/newpost'), { timeout: 12000 });
+  } catch { /* URL 안 바뀌어도 계속 */ }
 
-  // 2단계: 페이지에 보이는 모든 버튼 중 "발행" 텍스트 가진 것 클릭
-  let publishedUrl = page.url();
-  if (publishedUrl.includes('/manage/')) {
-    // 모든 가시 버튼 목록 로깅 (디버그)
-    const visibleBtns = await page.evaluate(() =>
-      [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
-    );
-    logger.info(`[blog_publisher] Visible buttons: ${visibleBtns.join(' | ')}`);
-
-    // "발행" 텍스트 버튼 모두 수집 → 마지막(모달 내 확인 버튼) 클릭
-    const publishBtns = await page.locator('button').filter({ hasText: /^발행$/ }).all();
-    if (publishBtns.length > 0) {
-      const target = publishBtns[publishBtns.length - 1];
-      await target.scrollIntoViewIfNeeded();
-      await target.click({ timeout: 5000 });
-      logger.info(`[blog_publisher] Step2 clicked: 발행 버튼 ${publishBtns.length}개 중 마지막`);
-    } else {
-      // 폴백: JavaScript로 직접 클릭
-      const clicked = await page.evaluate(() => {
-        const btns = [...document.querySelectorAll('button')];
-        const target = btns.filter((b) => b.textContent?.trim() === '발행').pop();
-        if (target) { target.click(); return true; }
-        return false;
-      });
-      logger.info(`[blog_publisher] Step2 JS fallback clicked: ${clicked}`);
-    }
-
-    // URL 변경 대기 (최대 10초)
-    try {
-      await page.waitForURL((url) => !url.includes('/manage/newpost'), { timeout: 10000 });
-    } catch { /* URL 안 바뀌어도 계속 */ }
-    publishedUrl = page.url();
-  }
-
+  const publishedUrl = page.url();
   logger.info(`[blog_publisher] Published: ${title} → ${publishedUrl}`);
   return publishedUrl.includes('/manage/') ? null : publishedUrl;
 }
