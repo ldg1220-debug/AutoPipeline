@@ -164,9 +164,9 @@ function buildTextClips(scenes, seriesName, totalDuration) {
       text: `📺 ${seriesName}`,
       width: 800,
       height: 70,
-      font: { family: 'Noto Sans', size: 24, color: '#FFE600', weight: '700' },
+      font: { family: 'Noto Sans', size: 24, color: '#FFFFFF', weight: 'bold' },
       alignment: { horizontal: 'center', vertical: 'center' },
-      background: { color: '#000000', opacity: 0.80, borderRadius: 6, padding: 12 },
+      background: { color: '#000000', opacity: 0.85, borderRadius: 6, padding: 12 },
     },
     start: 0,
     length: totalDuration,
@@ -175,11 +175,8 @@ function buildTextClips(scenes, seriesName, totalDuration) {
   });
 
   // 씬별 자막
-  // 가시성 최우선:
-  //   - 노란색 텍스트 (#FFE600) — 어떤 배경에서도 눈에 띄는 고대비 컬러
-  //   - stroke 5px — 두꺼운 검정 테두리로 배경과 분리
-  //   - background opacity 0.85 — 반투명이 아닌 거의 불투명한 다크박스
-  //   - font size 42 — 쇼츠 기준 충분히 큰 사이즈
+  // stroke는 Shotstack TextAsset 미지원 속성 → 클립 무효화 원인. 제거.
+  // 가시성은 불투명 다크박스(opacity 0.90) + 흰색 대문자 굵은 글씨로 확보.
   for (const { text, start, duration } of scenes) {
     clips.push({
       asset: {
@@ -187,10 +184,9 @@ function buildTextClips(scenes, seriesName, totalDuration) {
         text,
         width: 840,
         height: 520,
-        font: { family: 'Noto Sans', size: 42, color: '#FFE600', weight: '700', lineHeight: 1.5 },
+        font: { family: 'Noto Sans', size: 42, color: '#FFFFFF', weight: 'bold', lineHeight: 1.5 },
         alignment: { horizontal: 'center', vertical: 'center' },
-        stroke: { color: '#000000', width: 5 },
-        background: { color: '#000000', opacity: 0.85, borderRadius: 14, padding: 24 },
+        background: { color: '#000000', opacity: 0.90, borderRadius: 14, padding: 24 },
       },
       start,
       length: duration,
