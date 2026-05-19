@@ -335,7 +335,7 @@ export async function publishBlogPosts(contentData) {
     };
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false, slowMo: 300 });
   const context  = await createTistoryContext(browser);
 
   if (!context) {
