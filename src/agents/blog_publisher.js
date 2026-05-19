@@ -61,6 +61,72 @@ function injectYouTubeEmbed(html, youtubeUrl) {
   return html.replace('{{YOUTUBE_EMBED}}', embedHtml);
 }
 
+// ── HTML 본문 주입 (다단계 시도) ──────────────────────────────────────────
+async function injectHtmlContent(page, html) {
+  // 1. CodeMirror JavaScript API (HTML 소스 에디터 방식)
+  const cmResult = await page.evaluate((htmlContent) => {
+    const cm = document.querySelector('.CodeMirror')?.CodeMirror;
+    if (cm) { cm.setValue(htmlContent); return 'codemirror'; }
+    return null;
+  }, html);
+  if (cmResult) return cmResult;
+
+  // 2. iframe 내부 contenteditable (티스토리 새 에디터)
+  for (const frame of page.frames()) {
+    try {
+      const found = await frame.evaluate((htmlContent) => {
+        const el = document.querySelector('[contenteditable="true"]');
+        if (el) { el.innerHTML = htmlContent; return true; }
+        return false;
+      }, html);
+      if (found) return 'iframe-contenteditable';
+    } catch { /* 다음 frame 시도 */ }
+  }
+
+  // 3. 메인 페이지 contenteditable
+  const ceResult = await page.evaluate((htmlContent) => {
+    const el = document.querySelector('[contenteditable="true"]');
+    if (el) { el.innerHTML = htmlContent; return 'contenteditable'; }
+    return null;
+  }, html);
+  if (ceResult) return ceResult;
+
+  // 4. textarea 직접 입력
+  const textarea = await page.$('textarea[name="content"], #content-area');
+  if (textarea) {
+    await textarea.click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type(html, { delay: 0 });
+    return 'textarea';
+  }
+
+  return 'none';
+}
+
+// ── HTML 모드 전환 (티스토리 에디터 버전별 대응) ─────────────────────────
+async function switchToHtmlMode(page) {
+  // 버튼 후보 셀렉터 우선순위 순
+  const candidates = [
+    '[data-tab="source"]',
+    '[data-mode="html"]',
+    '.btn_html',
+    'button[title="HTML"]',
+    'button[aria-label="HTML"]',
+    '.tui-toolbar-icons.source',
+  ];
+  for (const sel of candidates) {
+    try {
+      const btn = await page.$(sel);
+      if (btn) { await btn.click(); return true; }
+    } catch { /* 다음 시도 */ }
+  }
+  // 텍스트로 찾기
+  try {
+    await page.click('button:has-text("HTML")', { timeout: 2000 });
+    return true;
+  } catch { return false; }
+}
+
 // ── 단일 포스트 발행 ───────────────────────────────────────────────────────
 async function publishPost(page, content, blogName) {
   const { keyword, blog_draft, blog_assets, youtube_url } = content;
@@ -76,25 +142,19 @@ async function publishPost(page, content, blogName) {
   const title = blog_draft?.title ?? keyword;
   await page.fill('#post-title-inp, input[name="title"]', title);
 
-  // HTML 모드 전환 (기본 에디터 → HTML 에디터)
-  const htmlModeBtn = await page.$('button[data-mode="html"], .btn_html, [data-tab="source"]');
-  if (htmlModeBtn) await htmlModeBtn.click();
-  await page.waitForTimeout(1000);
-
-  // 본문 HTML 주입
-  let html = blog_draft?.monetized_html ?? blog_draft?.sections?.map((s) => `<h2>${s.heading}</h2><p>${s.body}</p>`).join('\n') ?? '';
+  // 본문 HTML 구성
+  let html = blog_draft?.monetized_html
+    ?? blog_draft?.sections?.map((s) => `<h2>${s.heading}</h2><p>${s.body}</p>`).join('\n')
+    ?? '';
   html = injectYouTubeEmbed(html, youtube_url);
 
-  const editor = await page.$('textarea[name="content"], .CodeMirror textarea, #content-area');
-  if (editor) {
-    await editor.fill(html);
-  } else {
-    // contenteditable 방식
-    await page.evaluate((htmlContent) => {
-      const el = document.querySelector('[contenteditable="true"]');
-      if (el) el.innerHTML = htmlContent;
-    }, html);
-  }
+  // HTML 모드 전환 시도
+  const switched = await switchToHtmlMode(page);
+  await page.waitForTimeout(switched ? 1500 : 500);
+
+  // 본문 주입
+  const method = await injectHtmlContent(page, html);
+  logger.info(`[blog_publisher] Content injected via: ${method}`);
 
   // 카테고리 설정 (있을 때만)
   const categoryMap = {
@@ -108,40 +168,38 @@ async function publishPost(page, content, blogName) {
   const categoryName = categoryMap[content.category];
   if (categoryName) {
     try {
-      await page.click('.category-btn, [data-tistory-react-app="Category"]');
+      await page.click('.category-btn, [data-tistory-react-app="Category"]', { timeout: 3000 });
       await page.waitForTimeout(500);
-      await page.click(`text="${categoryName}"`);
-    } catch {
-      // 카테고리 없으면 무시
-    }
+      await page.click(`text="${categoryName}"`, { timeout: 3000 });
+    } catch { /* 카테고리 없으면 무시 */ }
   }
 
   // 태그 입력
   const tags = blog_draft?.seo_keywords?.slice(0, 5) ?? [keyword];
   try {
-    const tagInput = await page.$('input[name="tag"], .tag-input');
+    const tagInput = await page.$('input[name="tag"], .tag-input, input[placeholder*="태그"]');
     if (tagInput) {
       await tagInput.fill(tags.join(','));
+      await tagInput.press('Enter');
     }
-  } catch {
-    // 태그 입력 실패해도 계속
-  }
+  } catch { /* 태그 실패해도 계속 */ }
 
   // 썸네일 업로드 (있을 때만)
   if (blog_assets?.thumbnail) {
     try {
       await uploadImageToEditor(page, blog_assets.thumbnail);
-    } catch {
-      // 썸네일 실패해도 발행 계속
-    }
+    } catch { /* 썸네일 실패해도 발행 계속 */ }
   }
 
   // 발행 버튼 클릭
-  await page.click('button[data-btn="publish"], .btn-publish, button:has-text("발행")');
-  await page.waitForTimeout(3000);
+  await page.click(
+    'button[data-btn="publish"], .btn-publish, button:has-text("발행"), button:has-text("완료")',
+    { timeout: 10000 }
+  );
+  await page.waitForTimeout(4000);
 
   // 발행된 URL 추출
-  const publishedUrl = await page.url();
+  const publishedUrl = page.url();
   logger.info(`[blog_publisher] Published: ${title} → ${publishedUrl}`);
 
   return publishedUrl.includes('/manage/') ? null : publishedUrl;
