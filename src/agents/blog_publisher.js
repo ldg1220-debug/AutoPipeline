@@ -222,38 +222,52 @@ async function publishPost(page, content, blogName) {
   await page.click('button:has-text("완료")', { timeout: 10000 });
   logger.info('[blog_publisher] 완료 clicked — opening publish sidebar');
 
-  // 사이드바 "선택 안 함" 버튼이 enabled 상태로 나타날 때까지 대기
-  // (TinyMCE API로 주입했으므로 이번엔 disabled 아님)
-  try {
-    await page.waitForSelector('button:has-text("선택 안 함"):not([disabled])', { timeout: 10000 });
-    logger.info('[blog_publisher] Sidebar enabled');
-  } catch {
-    const btns = await page.evaluate(() =>
-      [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
-    );
-    logger.warn(`[blog_publisher] Sidebar buttons: ${btns.join(' | ')}`);
-  }
+  // 사이드바 등장 대기
+  await page.waitForTimeout(2000);
 
-  // Step 2: 공개 설정 → "공개" 선택
-  try {
-    await page.click('button:has-text("선택 안 함"):not([disabled])', { timeout: 5000 });
-    await page.waitForTimeout(800);
+  // Step 2: 공개 설정 — disabled 강제 해제 후 클릭
+  const visibilitySet = await page.evaluate(() => {
+    // disabled 강제 해제
+    const btn = [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('선택 안 함'));
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute('disabled');
+      btn.classList.remove('disabled');
+    }
 
-    // 드롭다운 옵션 "공개" 클릭 (li, option, button 등 다양한 구조 대응)
-    const openClicked = await page.evaluate(() => {
-      const candidates = [
-        ...document.querySelectorAll('li, option, [role="option"], button'),
-      ];
-      const target = candidates.find(
-        (el) => el.textContent?.trim() === '공개' && el.offsetParent !== null
+    // 숨겨진 select 요소로 공개 설정
+    const selects = [...document.querySelectorAll('select')];
+    for (const sel of selects) {
+      const publicOpt = [...sel.options].find(
+        (o) => o.text.trim() === '공개' || o.value === '0' || o.value === 'public'
       );
-      if (target) { target.click(); return true; }
-      return false;
-    });
-    await page.waitForTimeout(500);
-    logger.info(`[blog_publisher] Visibility 공개 selected: ${openClicked}`);
-  } catch (err) {
-    logger.warn(`[blog_publisher] Visibility change failed: ${err.message}`);
+      if (publicOpt) {
+        sel.value = publicOpt.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        return `select: ${publicOpt.value}`;
+      }
+    }
+    return null;
+  });
+  logger.info(`[blog_publisher] Visibility via JS: ${visibilitySet}`);
+
+  // JS select 실패 시 강제 disabled 해제 후 Playwright 클릭
+  if (!visibilitySet) {
+    try {
+      await page.click('button:has-text("선택 안 함")', { force: true, timeout: 3000 });
+      await page.waitForTimeout(700);
+      // 드롭다운 "공개" 옵션 클릭
+      await page.evaluate(() => {
+        const all = [...document.querySelectorAll('li, [role="option"]')];
+        const target = all.find((el) => el.textContent?.trim() === '공개' && el.offsetParent !== null);
+        if (target) target.click();
+      });
+      await page.waitForTimeout(500);
+      logger.info('[blog_publisher] Visibility set via force click');
+    } catch (err) {
+      logger.warn(`[blog_publisher] Visibility force click failed: ${err.message}`);
+    }
   }
 
   // 버튼 목록 재확인 (디버그)
