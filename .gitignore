@@ -14,3 +14,14 @@ output/qa_reports/*
 # 미디어 파일 제외 (용량), 디렉터리 구조는 .gitkeep으로 유지
 output/media/*
 !output/media/.gitkeep
+
+# 키워드/블로그/분석 결과물
+output/keywords/*
+!output/keywords/.gitkeep
+output/blog/*
+!output/blog/.gitkeep
+output/analytics/*
+!output/analytics/.gitkeep
+
+# SQLite DB (로컬 전용)
+data/
