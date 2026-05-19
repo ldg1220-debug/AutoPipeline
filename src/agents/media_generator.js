@@ -92,26 +92,33 @@ function buildScenes(scripts, totalDuration) {
   const { hook = '', context = '', insight = '', summary = '', cta = '' } = scripts;
 
   const chunks = [
-    ...splitText(hook.slice(0, 70),    55),
-    ...splitText(context.slice(0, 170), 55),
-    ...splitText(insight.slice(0, 260), 55),
-    ...splitText(summary.slice(0, 130), 55),
-    ...splitText(cta.slice(0, 100),    55),
+    ...splitText(hook.slice(0, 70),    45),
+    ...splitText(context.slice(0, 170), 45),
+    ...splitText(insight.slice(0, 260), 45),
+    ...splitText(summary.slice(0, 130), 45),
+    ...splitText(cta.slice(0, 100),    45),
   ].filter(Boolean);
 
   if (chunks.length === 0) return [];
 
-  // 씬당 표시 시간 (최소 3초, 최대 9초)
-  const sceneDur = Math.min(9, Math.max(3, Math.round(totalDuration / chunks.length)));
+  // 각 씬의 시간을 글자 수에 비례해 배분한다.
+  // 한국어 TTS는 분당 약 300자(5자/초) 속도이므로
+  // 긴 청크는 더 오래, 짧은 청크는 더 짧게 표시해 싱크를 맞춘다.
+  const totalChars = chunks.reduce((sum, t) => sum + t.length, 0);
+  const MIN_DUR = 2;
 
-  let t = 0;
-  return chunks.map((text, i) => {
+  let elapsed = 0;
+  const scenes = chunks.map((text, i) => {
     const isLast = i === chunks.length - 1;
-    const duration = isLast ? Math.max(3, totalDuration - t) : sceneDur;
-    const scene = { text, start: t, duration };
-    t += sceneDur;
+    const proportion = text.length / totalChars;
+    const rawDur = Math.max(MIN_DUR, Math.round(proportion * totalDuration));
+    const duration = isLast ? Math.max(MIN_DUR, totalDuration - elapsed) : rawDur;
+    const scene = { text, start: elapsed, duration };
+    elapsed += rawDur;
     return scene;
   });
+
+  return scenes;
 }
 
 // ── 이미지 배경 클립 생성 ─────────────────────────────────────────────────
@@ -155,9 +162,9 @@ function buildTextClips(scenes, seriesName, totalDuration) {
     asset: {
       type: 'text',
       text: `📺 ${seriesName}`,
-      width: 900,
+      width: 800,
       height: 70,
-      font: { family: 'Noto Sans', size: 26, color: '#FFFFFF', weight: '700' },
+      font: { family: 'Noto Sans', size: 24, color: '#FFFFFF', weight: '700' },
       alignment: { horizontal: 'center', vertical: 'center' },
       background: { color: '#000000', opacity: 0.55, borderRadius: 6, padding: 10 },
     },
@@ -168,22 +175,24 @@ function buildTextClips(scenes, seriesName, totalDuration) {
   });
 
   // 씬별 자막
+  // width: 840 — 1080px 영상에서 양쪽 120px 여백 확보 (한국어 글자 넘침 방지)
+  // font.size: 36 — Noto Sans 한국어는 라틴 폰트보다 실제 렌더링 폭이 넓음
   for (const { text, start, duration } of scenes) {
     clips.push({
       asset: {
         type: 'text',
         text,
-        width: 960,
-        height: 480,
-        font: { family: 'Noto Sans', size: 40, color: '#FFFFFF', weight: '700', lineHeight: 1.45 },
+        width: 840,
+        height: 500,
+        font: { family: 'Noto Sans', size: 36, color: '#FFFFFF', weight: '700', lineHeight: 1.5 },
         alignment: { horizontal: 'center', vertical: 'center' },
-        stroke: { color: '#000000', width: 3 },
-        background: { color: '#000000', opacity: 0.55, borderRadius: 10, padding: 18 },
+        stroke: { color: '#000000', width: 2 },
+        background: { color: '#000000', opacity: 0.60, borderRadius: 12, padding: 20 },
       },
       start,
       length: duration,
       position: 'center',
-      offset: { x: 0, y: 0.08 },
+      offset: { x: 0, y: 0.10 },
       transition: { in: 'fade', out: 'fade' },
     });
   }
