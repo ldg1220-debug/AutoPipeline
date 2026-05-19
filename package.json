@@ -20,11 +20,11 @@
     "youtube:auth": "node scripts/get-youtube-token.js",
     "wp:publish": "node scripts/publish-wordpress.js",
     "affiliate:replace": "node scripts/replace-affiliate-links.js",
-    "blog:keywords":  "node src/agents/keyword_miner.js",
-    "blog:content":   "node src/agents/blog_content_enhancer.js",
-    "blog:assets":    "node src/agents/blog_asset_builder.js",
-    "blog:monetize":  "node src/agents/monetizer.js",
-    "blog:publish":   "node src/agents/blog_publisher.js",
+    "blog:keywords": "node src/agents/keyword_miner.js",
+    "blog:content": "node src/agents/blog_content_enhancer.js",
+    "blog:assets": "node src/agents/blog_asset_builder.js",
+    "blog:monetize": "node src/agents/monetizer.js",
+    "blog:publish": "node src/agents/blog_publisher.js",
     "blog:analytics": "node src/agents/blog_analytics.js"
   },
   "dependencies": {
@@ -33,6 +33,7 @@
     "cross-env": "^10.1.0",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
+    "sharp": "^0.34.5",
     "winston": "^3.13.0",
     "xml2js": "^0.6.2"
   },
