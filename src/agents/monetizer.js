@@ -15,6 +15,28 @@ const PARTNERS_DISCLOSURE =
   '<p class="partners-disclosure">※ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, ' +
   '이에 따른 일정액의 수수료를 제공받습니다.</p>';
 
+// ── 블로그 스타일시트 ──────────────────────────────────────────────────────
+const BLOG_STYLES = `<style>
+.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:12px 0 28px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
+.blog-img-wrap{margin:22px 0 6px}
+.blog-img-wrap img{width:100%;border-radius:10px;display:block}
+.photo-credit{font-size:11px;color:#94a3b8;text-align:right;margin-top:3px}
+.callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:13px 18px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px;line-height:1.7;color:#1e3a8a}
+.callout b{font-weight:700}
+.section-label{display:inline-block;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;margin-bottom:8px;letter-spacing:.5px}
+.faq-wrap{margin:20px 0}
+.faq-item{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin:10px 0}
+.faq-q{font-weight:700;color:#1e3a8a;margin-bottom:6px;font-size:15px}
+.faq-a{color:#374151;font-size:14px;line-height:1.7}
+.affiliate-block{background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:14px 18px;margin:16px 0}
+.affiliate-block ul{margin:6px 0 0;padding-left:20px}
+.affiliate-block li{margin:4px 0}
+.cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:28px 24px;text-align:center;margin:32px 0}
+.cta-box h3{margin:0 0 10px;font-size:20px}
+.cta-box p{margin:0;font-size:14px;opacity:.9;line-height:1.7}
+.partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
+</style>`;
+
 // 애드센스 슬롯 HTML — 실제 슬롯 ID는 .env에서 주입
 function adsenseSlot(position) {
   const clientId = process.env.ADSENSE_CLIENT_ID || 'ca-pub-XXXXXXXXXX';
@@ -98,13 +120,46 @@ function buildAffiliateBlock(products, anchorText) {
 }
 
 // ── 섹션 HTML 렌더링 ───────────────────────────────────────────────────────
-function renderSections(sections, affiliateMap) {
+
+// 섹션 번호에 맞는 이모지 레이블
+const SECTION_LABELS = ['① 핵심 정보', '② 자세히 보기', '③ 심층 분석', '④ 실전 적용', '⑤ 마무리'];
+
+/**
+ * @param {Array} sections
+ * @param {Object} affiliateMap - position별 제휴 HTML
+ * @param {Array} bodyImages    - blog_assets.body_images (image_url, photographer 포함)
+ */
+function renderSections(sections, affiliateMap, bodyImages = []) {
   return sections
     .map((s, i) => {
       const tag = s.level === 'h3' ? 'h3' : 'h2';
       const hookKey = `section${i + 1}_end`;
       const affiliateHtml = affiliateMap[hookKey] ?? '';
-      return `<${tag}>${s.heading}</${tag}>\n<p>${s.body}</p>${affiliateHtml}`;
+
+      // 섹션마다 이미지 1장씩 순환 삽입 (이미지 있을 때만)
+      const imgData = bodyImages[i % bodyImages.length];
+      const imageHtml = imgData?.image_url
+        ? `<div class="blog-img-wrap">` +
+          `<img src="${imgData.image_url}" alt="${s.heading}" loading="lazy" />` +
+          `<p class="photo-credit">Photo by ${imgData.photographer ?? 'Pexels'} on Pexels</p>` +
+          `</div>`
+        : '';
+
+      // 첫 문장을 callout 박스로 강조
+      const firstSentence = (s.body ?? '').split(/(?<=[.!?。])\s/)[0].trim();
+      const calloutHtml = firstSentence
+        ? `<div class="callout"><b>핵심 포인트:</b> ${firstSentence}</div>`
+        : '';
+
+      const label = SECTION_LABELS[i] ?? `${i + 1}번째 섹션`;
+
+      return (
+        `${imageHtml}` +
+        `<span class="section-label">${label}</span>` +
+        `<${tag}>${s.heading}</${tag}>\n` +
+        `<p>${s.body ?? ''}</p>\n` +
+        `${calloutHtml}${affiliateHtml}`
+      );
     })
     .join('\n\n');
 }
@@ -112,9 +167,15 @@ function renderSections(sections, affiliateMap) {
 function renderFaq(faqList) {
   if (!faqList?.length) return '';
   const items = faqList
-    .map((f) => `<dt>${f.q}</dt>\n<dd>${f.a}</dd>`)
+    .map(
+      (f) =>
+        `<div class="faq-item">` +
+        `<div class="faq-q">Q. ${f.q}</div>` +
+        `<div class="faq-a">${f.a}</div>` +
+        `</div>`
+    )
     .join('\n');
-  return `<h2>자주 묻는 질문 (FAQ)</h2>\n<dl>\n${items}\n</dl>`;
+  return `<h2>자주 묻는 질문 (FAQ)</h2>\n<div class="faq-wrap">\n${items}\n</div>`;
 }
 
 /**
@@ -126,7 +187,7 @@ function renderFaq(faqList) {
  *   - 파트너스 고지문: 쿠팡 링크 있을 때만 푸터에 자동 삽입
  */
 async function monetizeBlogDraft(content) {
-  const { keyword, blog_draft } = content;
+  const { keyword, blog_draft, blog_assets } = content;
   if (!blog_draft?.sections?.length) {
     logger.warn(`[monetizer] No sections found, skipping: ${keyword}`);
     return content;
@@ -148,7 +209,10 @@ async function monetizeBlogDraft(content) {
   // conclusion_top 처리 (섹션 렌더링 후 삽입 예정)
   const conclusionAffiliate = affiliateMap['conclusion_top'] ?? '';
 
-  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap);
+  // Pexels 본문 이미지 목록 (blog_asset_builder가 image_url 포함하여 저장)
+  const bodyImages = blog_assets?.body_images ?? [];
+
+  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages);
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // JSON-LD 스키마
@@ -158,11 +222,20 @@ async function monetizeBlogDraft(content) {
 
   // 유튜브 임베드 플레이스홀더 → 실제 ID는 auto_publisher가 교체
   const youtubeSection =
-    `<h2>관련 영상</h2>\n` +
+    `<h2>📺 관련 영상</h2>\n` +
     `<div class="youtube-embed">{{YOUTUBE_EMBED}}</div>`;
+
+  // 유튜브 아래 구독 CTA 박스
+  const ctaBox =
+    `<div class="cta-box">` +
+    `<h3>📌 매일읽어주는남자</h3>` +
+    `<p>매일 아침 경제·생활 정보를 짧고 쉽게 전달합니다.<br>` +
+    `유튜브 <strong>구독 &amp; 🔔 알림 설정</strong>으로 놓치지 마세요!</p>` +
+    `</div>`;
 
   // 최종 HTML 조립
   const html = [
+    BLOG_STYLES,
     jsonLdScript,
     adsenseSlot('title_below'),                   // 제목 아래 광고
     `<div class="blog-intro">${blog_draft.meta_description || ''}</div>`,
@@ -171,13 +244,14 @@ async function monetizeBlogDraft(content) {
     conclusionAffiliate,
     faqHtml,
     youtubeSection,
+    ctaBox,                                       // YouTube 아래 CTA
     adsenseSlot('post_end'),                      // 본문 끝 광고
     hasAffiliate ? PARTNERS_DISCLOSURE : '',      // 제휴 고지 (링크 있을 때만)
   ]
     .filter(Boolean)
     .join('\n\n');
 
-  logger.info(`[monetizer] Monetized: ${keyword} (affiliate links: ${Object.keys(affiliateMap).length})`);
+  logger.info(`[monetizer] Monetized: ${keyword} (images: ${bodyImages.length}, affiliate links: ${Object.keys(affiliateMap).length})`);
 
   return {
     ...content,

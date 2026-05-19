@@ -110,6 +110,7 @@ async function fetchPexelsImages(keyword, category, count, destDir) {
 
       paths.push({
         path: resizedPath,
+        image_url: srcUrl,        // Pexels 직접 URL — HTML <img> 삽입용
         pexels_id: photo.id,
         photographer: photo.photographer,
         pexels_url: photo.url,
