@@ -196,24 +196,25 @@ async function publishPost(page, content, blogName) {
   //   "완료" 클릭 → 우측 사이드바 열림 (선택 안 함더보기, 비공개 저장 등 노출)
   //   → 공개 설정 드롭다운에서 "공개" 선택 → "발행" 버튼 클릭
 
-  // Step 1: "완료" 클릭으로 사이드바 열기
+  // Step 1: "완료" 클릭으로 사이드바 열기 (TinyMCE 소스 모드 종료)
   await page.click('button:has-text("완료")', { timeout: 10000 });
-  logger.info('[blog_publisher] 완료 clicked — waiting for sidebar');
+  logger.info('[blog_publisher] 완료 clicked — waiting for TinyMCE to process');
 
-  // 사이드바 등장 대기 ("선택 안 함" 버튼이 보일 때까지)
+  // TinyMCE가 HTML 파싱 완료 후 sidebar 버튼이 enabled 될 때까지 대기
   try {
-    await page.waitForSelector('button:has-text("선택 안 함")', { timeout: 8000 });
+    await page.waitForSelector('button:has-text("선택 안 함"):not([disabled])', { timeout: 12000 });
+    logger.info('[blog_publisher] Sidebar enabled');
   } catch {
-    // 사이드바가 안 열렸으면 버튼 목록만 로깅
+    // disabled 해제 안 돼도 계속 진행
     const btns = await page.evaluate(() =>
       [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
     );
-    logger.warn(`[blog_publisher] Sidebar may not have opened. Buttons: ${btns.join(' | ')}`);
+    logger.warn(`[blog_publisher] Sidebar buttons: ${btns.join(' | ')}`);
   }
 
   // Step 2: 공개 설정 → "공개" 선택
   try {
-    await page.click('button:has-text("선택 안 함")', { timeout: 5000 });
+    await page.click('button:has-text("선택 안 함"):not([disabled])', { timeout: 5000 });
     await page.waitForTimeout(800);
 
     // 드롭다운 옵션 "공개" 클릭 (li, option, button 등 다양한 구조 대응)
