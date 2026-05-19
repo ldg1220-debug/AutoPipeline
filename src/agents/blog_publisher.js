@@ -276,7 +276,24 @@ async function publishPost(page, content, blogName) {
   );
   logger.info(`[blog_publisher] Buttons after visibility: ${btnsAfter.join(' | ')}`);
 
-  // Step 3: 발행 버튼 클릭
+  // Step 3: 발행 버튼 클릭 + 저장 요청 캡처 (CSRF 토큰 추출용)
+  // 비공개 저장 클릭과 동시에 Tistory가 보내는 POST 요청을 가로채
+  // CSRF 토큰과 엔드포인트를 확인한다
+  let capturedSaveReq = null;
+  const saveReqPromise = page.waitForRequest(
+    (req) => req.method() === 'POST' && (
+      req.url().includes(`${blogName}.tistory.com/manage`) ||
+      req.url().includes(`${blogName}.tistory.com/apis`)
+    ),
+    { timeout: 12000 }
+  ).then((req) => {
+    capturedSaveReq = {
+      url: req.url(),
+      headers: req.headers(),
+      body: req.postData() ?? '',
+    };
+  }).catch(() => { /* 캡처 실패 시 무시 */ });
+
   const publishCandidates = [
     'button:has-text("공개 발행")',
     'button:has-text("발행")',
@@ -295,7 +312,21 @@ async function publishPost(page, content, blogName) {
     throw new Error('발행 버튼을 찾을 수 없음 — 버튼: ' + btnsAfter.join(', '));
   }
 
-  // 저장 후 5초 대기 + 상태 확인
+  // 저장 요청 캡처 완료 대기
+  await saveReqPromise;
+  if (capturedSaveReq) {
+    const h = capturedSaveReq.headers;
+    const csrf = h['x-csrf-token'] ?? h['csrf-token'] ?? h['x-tistory-token']
+              ?? h['x-xsrf-token'] ?? h['x-requested-with'] ?? '';
+    logger.info(`[blog_publisher] Save req: ${capturedSaveReq.url}`);
+    logger.info(`[blog_publisher] Save headers: ${Object.keys(h).join(', ')}`);
+    logger.info(`[blog_publisher] Save body(200): ${capturedSaveReq.body.slice(0, 200)}`);
+    logger.info(`[blog_publisher] CSRF candidate: ${csrf.slice(0, 40)}`);
+  } else {
+    logger.info('[blog_publisher] Save request not captured');
+  }
+
+  // 저장 후 대기
   await page.waitForTimeout(3000);
 
   let publishedUrl = page.url();
