@@ -11,63 +11,187 @@ const __dirname = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// 매일읽어주는남자 브랜드 컬러 (카테고리별 형광펜 색상)
+// 카테고리별 브랜드 액센트 컬러
 const BRAND_COLORS = {
-  finance:       '#FFD700', // 노란 형광펜 (재테크·금융)
+  finance:       '#FFD700',
   economy:       '#FFD700',
-  realestate:    '#FFCBA4', // 피치 형광펜 (부동산)
-  health:        '#98FFD8', // 민트 형광펜 (건강)
-  entertainment: '#D4B4FF', // 라벤더 (연예)
-  social:        '#B4D4FF', // 스카이블루 (사회)
+  realestate:    '#FFCBA4',
+  health:        '#98FFD8',
+  entertainment: '#D4B4FF',
+  social:        '#B4D4FF',
 };
 
-// 매일읽어주는남자 배경용 Pexels 고정 쿼리 (노트·공부 테마)
-const CATEGORY_BG_QUERY = {
-  finance:       'notebook paper grid desk study notes',
-  economy:       'notebook paper grid desk study notes',
-  realestate:    'notebook paper property real estate notes',
-  health:        'notebook paper health wellness clean desk',
-  entertainment: 'notebook paper grid desk pastel study',
-  social:        'notebook paper grid desk clean minimal',
+// Pexels 이미지 검색 쿼리 (한국 경제/라이프 콘텐츠에 어울리는 쿼리)
+const CATEGORY_IMG_QUERY = {
+  finance:       'korea money finance stock market business graph',
+  economy:       'korea economy news newspaper business people',
+  realestate:    'korea apartment building real estate city',
+  health:        'korea health medical lifestyle wellness people',
+  entertainment: 'korea entertainment media drama people stage',
+  social:        'korea society community people lifestyle street',
 };
 
+// ── Pexels 이미지 여러 장 검색 ─────────────────────────────────────────────
 /**
- * 매일읽어주는남자 브랜드 컨셉에 맞는 배경 영상을 Pexels에서 검색한다.
- * 카테고리별 고정 쿼리로 노트·공부 테마 영상을 가져온다.
- * PEXELS_API_KEY 미설정 시 null 반환 (Shotstack이 단색 배경으로 폴백).
+ * 배경 씬 전환용 이미지를 Pexels에서 여러 장 가져온다.
+ * portrait(800×1200) URL을 반환해 9:16 크롭에 적합하다.
  */
-async function searchPexelsVideo(keyword, category) {
+async function searchPexelsImages(keyword, category, count = 8) {
   const apiKey = config.pexels.apiKey;
-  if (!apiKey) return null;
+  if (!apiKey) return [];
 
-  const query = CATEGORY_BG_QUERY[category] ?? 'notebook paper desk study minimal';
+  const query = CATEGORY_IMG_QUERY[category] ?? `${keyword} korea people`;
 
   try {
-    const res = await axios.get('https://api.pexels.com/videos/search', {
-      params: { query, per_page: 5, orientation: 'portrait' },
+    const res = await axios.get('https://api.pexels.com/v1/search', {
+      params: { query, per_page: count + 2, orientation: 'portrait' },
       headers: { Authorization: apiKey },
       timeout: 10000,
     });
-    const videos = res.data.videos ?? [];
-    if (videos.length === 0) return null;
-
-    const pick = videos[Math.floor(Math.random() * Math.min(videos.length, 3))];
-    const file =
-      pick.video_files.find((f) => f.quality === 'hd' && f.width <= 1080) ??
-      pick.video_files[0];
-    return file?.link ?? null;
+    const photos = res.data.photos ?? [];
+    return photos
+      .slice(0, count)
+      .map((p) => p.src.portrait || p.src.large2x || p.src.large);
   } catch {
-    return null;
+    return [];
   }
 }
 
+// ── 텍스트 분할 ────────────────────────────────────────────────────────────
 /**
- * 오디오 파일을 tmpfiles.org에 임시 업로드하고 직접 다운로드 URL을 반환한다.
- * Shotstack은 공개 URL만 soundtrack으로 허용하므로 이 단계가 필수다.
- * 파일은 약 1시간 후 자동 삭제되므로 렌더링에만 사용한다.
- *
- * 프로덕션: 트래픽이 늘면 Cloudflare R2(무료 10GB/월)로 교체 권장.
+ * 텍스트를 maxLen 이하의 자연스러운 청크로 나눈다.
+ * 마침표·쉼표·공백 순으로 분할 위치를 찾는다.
  */
+function splitText(text, maxLen = 50) {
+  const t = (text ?? '').trim();
+  if (t.length <= maxLen) return t ? [t] : [];
+
+  const result = [];
+  let remaining = t;
+
+  while (remaining.length > maxLen) {
+    let cut = maxLen;
+    // 자연스러운 분할 위치 탐색 (마침표 > 쉼표 > 공백)
+    for (const sep of ['. ', '! ', '? ', ', ', ' ']) {
+      const idx = remaining.lastIndexOf(sep, maxLen);
+      if (idx > Math.floor(maxLen * 0.4)) { cut = idx + sep.length; break; }
+    }
+    result.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+
+  if (remaining) result.push(remaining);
+  return result;
+}
+
+// ── 씬 리스트 생성 ─────────────────────────────────────────────────────────
+/**
+ * 스크립트 5개 구간을 55자 단위 씬으로 분할하고 각 씬의 start/duration을 계산한다.
+ */
+function buildScenes(scripts, totalDuration) {
+  const { hook = '', context = '', insight = '', summary = '', cta = '' } = scripts;
+
+  const chunks = [
+    ...splitText(hook.slice(0, 70),    55),
+    ...splitText(context.slice(0, 170), 55),
+    ...splitText(insight.slice(0, 260), 55),
+    ...splitText(summary.slice(0, 130), 55),
+    ...splitText(cta.slice(0, 100),    55),
+  ].filter(Boolean);
+
+  if (chunks.length === 0) return [];
+
+  // 씬당 표시 시간 (최소 3초, 최대 9초)
+  const sceneDur = Math.min(9, Math.max(3, Math.round(totalDuration / chunks.length)));
+
+  let t = 0;
+  return chunks.map((text, i) => {
+    const isLast = i === chunks.length - 1;
+    const duration = isLast ? Math.max(3, totalDuration - t) : sceneDur;
+    const scene = { text, start: t, duration };
+    t += sceneDur;
+    return scene;
+  });
+}
+
+// ── 이미지 배경 클립 생성 ─────────────────────────────────────────────────
+/**
+ * 씬 수만큼 이미지 클립을 생성한다. 홀수 씬은 zoomIn, 짝수는 zoomOut.
+ * Pexels 이미지가 없으면 어두운 단색 배경으로 폴백한다.
+ */
+function buildImageClips(imageUrls, scenes, totalDuration) {
+  const FALLBACK = 'https://placehold.co/1080x1920/1a1a2e/1a1a2e.png';
+
+  if (imageUrls.length === 0 || scenes.length === 0) {
+    return [{
+      asset: { type: 'image', src: FALLBACK },
+      start: 0, length: totalDuration, fit: 'cover',
+    }];
+  }
+
+  return scenes.map((scene, i) => ({
+    asset: { type: 'image', src: imageUrls[i % imageUrls.length] },
+    start:    scene.start,
+    length:   scene.duration + 0.5, // 다음 씬과 미세 오버랩 → 부드러운 전환
+    fit:      'crop',
+    effect:   i % 2 === 0 ? 'zoomIn' : 'zoomOut',
+    transition: { in: 'fade', out: 'fade' },
+  }));
+}
+
+// ── 텍스트 클립 생성 ──────────────────────────────────────────────────────
+/**
+ * 씬별 자막 + 상단 고정 시리즈 레이블을 생성한다.
+ *
+ * 텍스트 스타일:
+ *   - 흰색 굵은 글씨 + 검정 stroke(3px) — 어떤 배경에서도 가독성 확보
+ *   - 반투명 검정 배경 박스(opacity 0.55) — 텍스트 구역 강조
+ */
+function buildTextClips(scenes, seriesName, totalDuration) {
+  const clips = [];
+
+  // 상단 시리즈 레이블 (전체 재생 동안 고정)
+  clips.push({
+    asset: {
+      type: 'text',
+      text: `📺 ${seriesName}`,
+      width: 900,
+      height: 70,
+      font: { family: 'Noto Sans', size: 26, color: '#FFFFFF', weight: '700' },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      background: { color: '#000000', opacity: 0.55, borderRadius: 6, padding: 10 },
+    },
+    start: 0,
+    length: totalDuration,
+    position: 'top',
+    offset: { x: 0, y: -0.05 },
+  });
+
+  // 씬별 자막
+  for (const { text, start, duration } of scenes) {
+    clips.push({
+      asset: {
+        type: 'text',
+        text,
+        width: 960,
+        height: 480,
+        font: { family: 'Noto Sans', size: 40, color: '#FFFFFF', weight: '700', lineHeight: 1.45 },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        stroke: { color: '#000000', width: 3 },
+        background: { color: '#000000', opacity: 0.55, borderRadius: 10, padding: 18 },
+      },
+      start,
+      length: duration,
+      position: 'center',
+      offset: { x: 0, y: 0.08 },
+      transition: { in: 'fade', out: 'fade' },
+    });
+  }
+
+  return clips;
+}
+
+// ── 오디오 임시 업로드 ─────────────────────────────────────────────────────
 async function uploadAudioForShotstack(audioPath) {
   const fileBuffer = await fs.readFile(audioPath);
   const blob = new Blob([fileBuffer], { type: 'audio/mpeg' });
@@ -78,18 +202,12 @@ async function uploadAudioForShotstack(audioPath) {
     timeout: 30000,
   });
 
-  // tmpfiles.org: { status: 'success', data: { url: 'https://tmpfiles.org/XXXXX/file.mp3' } }
-  // 직접 다운로드는 /dl/ 경로 필요
   const uploadedUrl = res.data?.data?.url;
   if (!uploadedUrl) throw new Error('tmpfiles.org did not return a URL');
   return uploadedUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
 }
 
-/**
- * OpenAI TTS API로 대본 텍스트를 음성 파일(.mp3)로 변환한다.
- * 한국어 지원, tts-1 모델 사용 (저렴하고 품질 충분)
- * 보이스: nova(밝고 자연스러운 여성 한국어에 적합) — OPENAI_TTS_VOICE 환경변수로 변경 가능
- */
+// ── OpenAI TTS 오디오 생성 ─────────────────────────────────────────────────
 async function generateAudio(text, outputPath) {
   const voice = process.env.OPENAI_TTS_VOICE || 'nova';
 
@@ -112,131 +230,66 @@ async function generateAudio(text, outputPath) {
   return outputPath;
 }
 
+// ── Shotstack 영상 렌더링 ──────────────────────────────────────────────────
 /**
- * Shotstack API로 9:16 숏폼 영상을 렌더링한다. (매일읽어주는남자 브랜드)
+ * 9:16 숏폼 영상 렌더링 (YouTube Shorts 스타일)
  *
- * 레이어 구조 (아래에서 위):
- *   1. Pexels 노트/공부 테마 영상 배경 (없으면 크림 단색 #FAFAF2)
- *   2. 반투명 화이트 오버레이 (0.55) → 노트지 질감 표현
- *   3. 시리즈명 레이블 (상단 고정, 카테고리 컬러 배경)
- *   4. hook / body / cta 자막 (3구간 순차 표시, 카테고리 컬러 형광펜 스타일)
- *   사운드트랙: tmpfiles.org에 호스팅된 OpenAI TTS 음성
+ * 레이어 구조 (위 → 아래):
+ *   1. 텍스트 클립 (흰색+검정stroke, 반투명 다크박스)
+ *   2. 다크 오버레이 (0.25) — 배경 이미지 위에 가볍게 어둡게
+ *   3. Pexels 이미지 클립 (씬마다 교체, zoomIn/zoomOut 교차)
  *
- * 타이밍: 총 20초 — hook(0~3s) / body(3~15s) / cta(15~20s)
+ * 씬 전환: 이미지마다 fade in/out + zoom 효과
+ * 텍스트:  55자 이하 청크로 분할, 씬 타이밍에 맞춰 순차 표시
  */
 async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const shotstackApiKey = config.shotstack.apiKey;
   if (!shotstackApiKey) throw new Error('SHOTSTACK_API_KEY is not set');
 
-  // 1. 오디오 임시 업로드
+  // 1. 오디오 업로드
   logger.info(`[media_generator] Uploading audio for Shotstack: ${content.keyword}`);
   const audioUrl = await uploadAudioForShotstack(audioPath);
 
-  // 2. 오디오 파일 크기로 실제 재생 시간 추정 (192kbps CBR + 2초 여유)
+  // 2. 오디오 파일 크기로 재생 시간 추정 (192kbps CBR + 2초 여유)
   const audioStats = await fs.stat(audioPath);
   const TOTAL_DURATION = Math.max(20, Math.min(90, Math.ceil(audioStats.size / 24000) + 2));
   logger.info(`[media_generator] Estimated duration: ${TOTAL_DURATION}s`);
 
-  // 3. Pexels 노트 테마 배경 검색
-  const bgVideoUrl = await searchPexelsVideo(content.keyword, content.category);
-  logger.info(`[media_generator] Background: ${bgVideoUrl ? 'Pexels notebook theme' : 'cream fallback'}`);
+  // 3. Pexels 이미지 8장 검색
+  const imageUrls = await searchPexelsImages(content.keyword, content.category, 8);
+  logger.info(`[media_generator] Pexels images: ${imageUrls.length}장`);
 
-  const accentColor = BRAND_COLORS[content.category] ?? '#FFD700';
-  const accentHex   = accentColor.replace('#', '');
-  const seriesName  = content.series_name ?? '매일읽어주는남자';
+  const seriesName = content.series_name ?? '매일읽어주는남자';
 
-  // 내용이 길면 각 구간 적절히 자르기
-  const hook    = (content.shortform_script?.hook    ?? '').slice(0, 60);
-  const context = (content.shortform_script?.context ?? '').slice(0, 130);
-  const insight = (content.shortform_script?.insight ?? '').slice(0, 180);
-  const summary = (content.shortform_script?.summary ?? '').slice(0, 100);
-  const cta     = (content.shortform_script?.cta     ?? '').slice(0, 80);
-
-  // 4. 오디오 길이에 맞춰 구간 동적 산출
-  const t  = TOTAL_DURATION;
-  const h1 = 3;                         // hook 끝 (0~3s)
-  const h2 = Math.round(t * 0.28);      // context 끝
-  const h3 = Math.round(t * 0.73);      // insight 끝
-  const h4 = Math.round(t * 0.90);      // summary 끝
-  // cta: h4 ~ t
-
-  // 5. 텍스트 클립 생성 — 넓은 박스 + 작은 폰트로 글 짤림 방지
-  const makeSubtitle = (text, start, length, fontSize = 30) => ({
-    asset: {
-      type: 'text',
-      text,
-      width: 980,   // 이전 900 → 980 (여백 50px씩)
-      height: 660,  // 이전 380 → 660 (다중 줄 수용)
-      font: { family: 'Noto Sans', size: fontSize, color: '#1A1A1A' },
-      alignment: { horizontal: 'center', vertical: 'center' },
+  // 4. 스크립트 → 씬 분할
+  const scenes = buildScenes(
+    {
+      hook:    content.shortform_script?.hook    ?? '',
+      context: content.shortform_script?.context ?? '',
+      insight: content.shortform_script?.insight ?? '',
+      summary: content.shortform_script?.summary ?? '',
+      cta:     content.shortform_script?.cta     ?? '',
     },
-    start,
-    length,
-    position: 'center',
-    offset: { x: 0, y: 0.06 },
-    transition: { in: 'fade', out: 'fade' },
-  });
+    TOTAL_DURATION
+  );
+  logger.info(`[media_generator] Scenes: ${scenes.length}개 (avg ${Math.round(TOTAL_DURATION / Math.max(1, scenes.length))}s each)`);
 
-  // 시리즈명 레이블 (상단 고정)
-  const seriesLabel = {
-    asset: {
-      type: 'text',
-      text: seriesName,
-      width: 800,
-      height: 80,
-      font: { family: 'Noto Sans', size: 26, color: '#555555' },
-      alignment: { horizontal: 'center' },
-    },
-    start: 0,
-    length: t,
-    position: 'top',
-    offset: { x: 0, y: -0.04 },
-  };
+  // 5. 클립 생성
+  const imageClips = buildImageClips(imageUrls, scenes, TOTAL_DURATION);
+  const textClips  = buildTextClips(scenes, seriesName, TOTAL_DURATION);
 
-  const subtitleClips = [
-    seriesLabel,
-    makeSubtitle(hook,    0,       h1,      44),  // hook: 크게
-    makeSubtitle(context, h1,      h2 - h1, 30),  // context
-    makeSubtitle(insight, h2,      h3 - h2, 27),  // insight: 가장 길어 작게
-    makeSubtitle(summary, h3,      h4 - h3, 33),  // summary
-    makeSubtitle(cta,     h4,      t  - h4, 26),  // cta
-  ];
-
-  // 6. 형광펜 카드 — 텍스트 뒤 악센트 색상 반투명 패널
-  const textCardClip = {
-    asset: {
-      type: 'image',
-      src: `https://placehold.co/1020x720/${accentHex}/${accentHex}.png`,
-    },
-    start: 0,
-    length: t,
-    position: 'center',
-    offset: { x: 0, y: 0.06 },
-    opacity: 0.70,
-    fit: 'none',
-  };
-
-  // 7. 배경 트랙 (Pexels 영상 or 크림 단색)
-  const bgClip = bgVideoUrl
-    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: t, fit: 'crop' }
-    : { asset: { type: 'image', src: 'https://placehold.co/1080x1920/FAFAF2/FAFAF2.png' }, start: 0, length: t, fit: 'cover' };
-
-  // 8. 화이트 오버레이 — 이전 0.55 → 0.20 (배경 더 잘 보이게)
+  // 6. 전체 다크 오버레이 (이미지를 조금 어둡게)
   const overlayClip = {
-    asset: { type: 'image', src: 'https://placehold.co/1080x1920/FFFFFF/FFFFFF.png' },
-    start: 0,
-    length: t,
-    opacity: 0.20,
-    fit: 'cover',
+    asset: { type: 'image', src: 'https://placehold.co/1080x1920/000000/000000.png' },
+    start: 0, length: TOTAL_DURATION, opacity: 0.25, fit: 'cover',
   };
 
   const timeline = {
     soundtrack: { src: audioUrl, effect: 'fadeOut' },
     tracks: [
-      { clips: subtitleClips },
-      { clips: [textCardClip] },
-      { clips: [overlayClip] },
-      { clips: [bgClip] },
+      { clips: textClips },        // 최상위: 자막
+      { clips: [overlayClip] },    // 중간: 어두운 오버레이
+      { clips: imageClips },       // 배경: 순환 이미지 (zoom 효과)
     ],
   };
 
@@ -252,7 +305,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   const renderId = renderResponse.data.response.id;
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
-  // 6. 완료 대기 polling (최대 250초, 55초 영상 기준)
+  // 7. 렌더링 완료 대기 polling (최대 250초)
   const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 5000));
@@ -275,9 +328,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   throw new Error(`Shotstack render timed out: ${renderId}`);
 }
 
-/**
- * 단일 콘텐츠에 대해 오디오 → 영상 순서로 미디어를 생성한다.
- */
+// ── 단일 콘텐츠 미디어 생성 ───────────────────────────────────────────────
 async function generateMedia(content) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const audioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp3`);
@@ -298,12 +349,13 @@ async function generateMedia(content) {
       content.shortform_script?.summary ?? '',
       content.shortform_script?.cta     ?? '',
     ].filter(Boolean);
+
     let scriptText = parts.join(' ');
-    // 한국어 기준 20초 = 약 100자. 초과 시 body를 잘라 영상-오디오 타임라인 불일치 방지
-    if (scriptText.length > 300) {
-      logger.warn(`[media_generator] Script too long (${scriptText.length}chars). Trimming to 300.`);
-      scriptText = scriptText.slice(0, 300);
+    if (scriptText.length > 600) {
+      logger.warn(`[media_generator] Script too long (${scriptText.length}chars). Trimming to 600.`);
+      scriptText = scriptText.slice(0, 600);
     }
+
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
   } catch (err) {
@@ -362,11 +414,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             category: item.category,
             series_name: item.series ?? '오늘의 이슈',
             shortform_script: {
-              hook: `${item.keyword}, 30초만 투자하세요`,
-              body: `${item.keyword} 핵심 인사이트 한 줄 정리`,
-              cta: `자세한 내용은 링크에서 → ${item.series ?? '오늘의 이슈'} 더 보기`,
+              hook:    `${item.keyword}, 지금 바로 확인하세요`,
+              context: `${item.keyword}이(가) 왜 지금 중요한지 알아봅니다.`,
+              insight: `전문가들은 ${item.keyword}에 대해 이렇게 말합니다.`,
+              summary: `핵심 요약: ${item.keyword}`,
+              cta:     `구독 & 알림 설정으로 매일 받아보세요!`,
             },
-            image_prompt: `notebook paper background, handwritten Korean text, ${item.keyword}, study desk, 9:16`,
+            image_prompt: `${item.keyword} concept korea news`,
             blog_draft: { title: `${item.keyword} 완벽 정리`, sections: [] },
           })),
         };
