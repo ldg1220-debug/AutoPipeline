@@ -15,15 +15,41 @@ const PARTNERS_DISCLOSURE =
   '<p class="partners-disclosure">※ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, ' +
   '이에 따른 일정액의 수수료를 제공받습니다.</p>';
 
+// 카테고리별 섹션 헤더 색상
+const CATEGORY_COLOR = {
+  economy:       '#2563eb',
+  finance:       '#d97706',
+  realestate:    '#16a34a',
+  health:        '#0891b2',
+  entertainment: '#9333ea',
+  social:        '#dc2626',
+};
+
+const CATEGORY_EMOJI = {
+  economy:       '📊',
+  finance:       '💰',
+  realestate:    '🏠',
+  health:        '💊',
+  entertainment: '🎬',
+  social:        '👥',
+};
+
 // ── 블로그 스타일시트 ──────────────────────────────────────────────────────
 const BLOG_STYLES = `<style>
-.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:12px 0 28px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
-.blog-img-wrap{margin:22px 0 6px}
+.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:12px 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
+.tldr-box{background:linear-gradient(135deg,#1e3a8a,#1d4ed8);color:#fff;border-radius:12px;padding:20px 24px;margin:0 0 28px}
+.tldr-box h4{margin:0 0 10px;font-size:15px;opacity:.85;letter-spacing:.5px}
+.tldr-box ul{margin:0;padding-left:20px;font-size:14px;line-height:1.9}
+.tldr-box li::marker{color:#93c5fd}
+.section-hdr{display:flex;align-items:center;gap:10px;margin:32px 0 6px;border-bottom:2px solid #e2e8f0;padding-bottom:8px}
+.section-hdr .s-num{background:var(--cat-color,#2563eb);color:#fff;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;flex-shrink:0}
+.section-hdr h2,.section-hdr h3{margin:0;font-size:20px;color:#1e293b}
+.blog-img-wrap{margin:18px 0 6px}
 .blog-img-wrap img{width:100%;border-radius:10px;display:block}
 .photo-credit{font-size:11px;color:#94a3b8;text-align:right;margin-top:3px}
 .callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:13px 18px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px;line-height:1.7;color:#1e3a8a}
 .callout b{font-weight:700}
-.section-label{display:inline-block;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;margin-bottom:8px;letter-spacing:.5px}
+.keyword-mark{background:#fef9c3;padding:1px 4px;border-radius:3px;font-weight:700;color:#92400e}
 .faq-wrap{margin:20px 0}
 .faq-item{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin:10px 0}
 .faq-q{font-weight:700;color:#1e3a8a;margin-bottom:6px;font-size:15px}
@@ -31,6 +57,8 @@ const BLOG_STYLES = `<style>
 .affiliate-block{background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:14px 18px;margin:16px 0}
 .affiliate-block ul{margin:6px 0 0;padding-left:20px}
 .affiliate-block li{margin:4px 0}
+.keyword-tags{margin:20px 0;display:flex;flex-wrap:wrap;gap:8px}
+.keyword-tag{background:#e0e7ff;color:#3730a3;font-size:13px;padding:4px 14px;border-radius:20px;font-weight:500}
 .cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:28px 24px;text-align:center;margin:32px 0}
 .cta-box h3{margin:0 0 10px;font-size:20px}
 .cta-box p{margin:0;font-size:14px;opacity:.9;line-height:1.7}
