@@ -305,20 +305,29 @@ async function publishPost(page, content, blogName) {
   if (publishedUrl.includes('/manage/posts')) {
     // 최신 포스트 정보 추출 (edit URL → postId)
     const postInfo = await page.evaluate(() => {
-      // 관리 목록의 첫 번째 포스트 링크 (최신 글)
-      const editLink = document.querySelector(
-        'a[href*="/manage/newpost/"], a[href*="/manage/posts/"], .post-list a, td a'
-      );
-      const href = editLink?.href ?? '';
-      const idMatch = href.match(/\/manage\/newpost\/(\d+)/) ?? href.match(/\/(\d+)\/?$/);
+      // 페이지의 모든 링크에서 숫자 ID 포함 href 수집
+      const allLinks = [...document.querySelectorAll('a[href]')]
+        .map((a) => a.href)
+        .filter((h) => h && !h.endsWith('#'));
+
+      // /manage/newpost/123 형태 (편집 링크)
+      const editLinks = allLinks.filter((h) => /\/manage\/newpost\/\d+/.test(h));
+      // /123 형태 (공개 포스트 URL)
+      const postLinks = allLinks.filter((h) => /tistory\.com\/\d+$/.test(h));
+
+      const firstEdit = editLinks[0] ?? null;
+      const idMatch = firstEdit?.match(/\/manage\/newpost\/(\d+)/);
       const postId = idMatch?.[1] ?? null;
 
-      // 공개 상태 토글 버튼 탐색
-      const statusBtn = document.querySelector(
-        '[data-visibility], button[class*="visibility"], .btn-public, .ico-lock, [class*="open-state"]'
-      );
-      return { href, postId, hasStatusBtn: !!statusBtn };
+      return {
+        postId,
+        firstEditLink: firstEdit,
+        editLinksCount: editLinks.length,
+        postLinksCount: postLinks.length,
+        sampleLinks: allLinks.slice(0, 15),
+      };
     });
+    logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
     logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
 
     if (postInfo.postId) {
