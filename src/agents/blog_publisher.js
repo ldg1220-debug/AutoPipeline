@@ -276,14 +276,14 @@ async function publishPost(page, content, blogName) {
   );
   logger.info(`[blog_publisher] Buttons after visibility: ${btnsAfter.join(' | ')}`);
 
-  // Step 3: 발행 버튼 클릭 + 전체 POST 요청 캡처 (실제 저장 엔드포인트 탐색)
-  const allPostReqs = [];
+  // Step 3: 발행 버튼 클릭 + /manage/post.json 요청 전체 캡처 (공개 전환용)
+  let capturedPostJson = null;
   const reqLogger = (req) => {
-    if (req.method() === 'POST') {
-      allPostReqs.push({
+    if (req.method() === 'POST' && req.url().includes('/manage/post.json')) {
+      capturedPostJson = {
         url: req.url(),
-        body: req.postData()?.slice(0, 150) ?? '',
-      });
+        body: req.postData() ?? '',
+      };
     }
   };
   page.on('request', reqLogger);
@@ -306,13 +306,14 @@ async function publishPost(page, content, blogName) {
     throw new Error('발행 버튼을 찾을 수 없음 — 버튼: ' + btnsAfter.join(', '));
   }
 
-  // 저장 후 대기 (모든 요청이 완료될 시간)
+  // 저장 완료 대기
   await page.waitForTimeout(4000);
   page.off('request', reqLogger);
 
-  // 캡처된 모든 POST 요청 로그
-  for (const r of allPostReqs) {
-    logger.info(`[blog_publisher] POST: ${r.url} | ${r.body}`);
+  if (capturedPostJson?.body) {
+    logger.info(`[blog_publisher] post.json captured (len=${capturedPostJson.body.length})`);
+  } else {
+    logger.info('[blog_publisher] post.json not captured');
   }
 
   let publishedUrl = page.url();
@@ -362,91 +363,30 @@ async function publishPost(page, content, blogName) {
       const blogHost = `https://${blogName}.tistory.com`;
       publishedUrl = `${blogHost}/${postInfo.postId}`;
 
-      // ── 공개 전환 (편집 페이지 + 콘텐츠 재주입) ───────────────────────
-      // 편집 페이지는 TinyMCE를 비동기로 로딩해 content-len:0 → 버튼 disabled
-      // html을 재주입하면 TinyMCE가 활성화돼 visibility 버튼 enabled
+      // ── 공개 전환: /manage/post.json 재호출 (visibility:0 → 20) ────────
+      // 저장 시 캡처한 request body 구조를 그대로 재사용,
+      // id=postId + visibility=20 + content=실제html 로 교체
       try {
-        await page.goto(`${blogHost}/manage/newpost/${postInfo.postId}`, {
-          waitUntil: 'networkidle', timeout: 30000,
-        });
-        await page.waitForTimeout(3000);
+        if (!capturedPostJson?.body) throw new Error('post.json body not captured');
 
-        // html 재주입 → TinyMCE 활성화
-        const reinjected = await page.evaluate((htmlContent) => {
-          const ed = window.tinyMCE?.activeEditor ?? window.tinyMCE?.editors?.[0];
-          if (!ed) return 'no-tinymce';
-          ed.setContent(htmlContent);
-          ed.fire('change');
-          ed.fire('input');
-          return `reinjected:${htmlContent.length}`;
-        }, html);
-        logger.info(`[blog_publisher] Edit reinject: ${reinjected}`);
+        const postData = JSON.parse(capturedPostJson.body);
+        postData.id = postInfo.postId;
+        postData.visibility = 20;       // 20 = 전체 공개
+        postData.content = html;        // 실제 본문 (저장 시 empty였던 것 교체)
 
-        await page.waitForTimeout(1000);
+        const updateResult = await page.evaluate(async (data) => {
+          const r = await fetch('/manage/post.json', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+          });
+          const text = await r.text();
+          return `${r.status}: ${text.slice(0, 150)}`;
+        }, postData);
 
-        // 사이드바 열기
-        await page.click('button:has-text("완료")', { timeout: 8000 });
-        await page.waitForTimeout(2000);
-
-        // 버튼 목록 + disabled 상태 진단
-        const editState = await page.evaluate(() =>
-          [...document.querySelectorAll('button')]
-            .map((b) => `${b.textContent?.trim()}(${b.disabled ? 'dis' : 'ena'})`)
-            .filter(Boolean).join(' | ')
-        );
-        logger.info(`[blog_publisher] Edit sidebar: ${editState}`);
-
-        // visibility 버튼 클릭 (enabled인 것만)
-        const visClicked = await page.evaluate(() => {
-          const btns = [...document.querySelectorAll('button')];
-          const b = btns.find((x) =>
-            (x.textContent?.includes('선택 안 함') || x.textContent?.includes('비공개')) && !x.disabled
-          );
-          if (!b) return `none-enabled`;
-          b.click();
-          return `clicked:${b.textContent?.trim()}`;
-        });
-        logger.info(`[blog_publisher] Vis click: ${visClicked}`);
-
-        await page.waitForTimeout(800);
-
-        // 드롭다운 "공개" 선택 — 버튼 근처 컨테이너 우선, 전체 검색 폴백
-        const pubSel = await page.evaluate(() => {
-          // 1. layer-select 계열 컨테이너
-          for (const sel of ['.layer-select li', '[class*="select"] li', '[class*="dropdown"] li']) {
-            const items = [...document.querySelectorAll(sel)];
-            const t = items.find((el) => el.textContent?.includes('공개') && el.offsetParent !== null);
-            if (t) { t.click(); return `container:${t.textContent?.trim()}`; }
-          }
-          // 2. role=option
-          const opts = [...document.querySelectorAll('[role="option"]')];
-          const t2 = opts.find((el) => el.textContent?.includes('공개') && el.offsetParent !== null);
-          if (t2) { t2.click(); return `role-option:${t2.textContent?.trim()}`; }
-          // 3. 전체 li/button 중 "공개" 포함
-          const all = [...document.querySelectorAll('li, button')];
-          const t3 = all.find((el) =>
-            el.textContent?.trim() === '공개' && el.offsetParent !== null
-          );
-          if (t3) { t3.click(); return `global:${t3.textContent?.trim()}`; }
-          // 진단: 보이는 li 전부
-          const vis = [...document.querySelectorAll('li')].filter((el) => el.offsetParent !== null).map((el) => el.textContent?.trim()).filter(Boolean);
-          return `not-found|li:${vis.slice(0, 15).join('/')}`;
-        });
-        logger.info(`[blog_publisher] Public sel: ${pubSel}`);
-
-        await page.waitForTimeout(500);
-
-        // 발행 버튼
-        for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")']) {
-          try {
-            await page.click(sel, { timeout: 4000 });
-            logger.info(`[blog_publisher] Edit publish: ${sel}`);
-            await page.waitForTimeout(2000);
-            break;
-          } catch { /* 다음 */ }
-        }
+        logger.info(`[blog_publisher] Public update: ${updateResult}`);
       } catch (err) {
-        logger.warn(`[blog_publisher] Edit page visibility failed: ${err.message}`);
+        logger.warn(`[blog_publisher] Public update failed: ${err.message}`);
       }
     }
   }
