@@ -296,46 +296,72 @@ async function publishPost(page, content, blogName) {
   }
 
   // 저장 후 5초 대기 + 상태 확인
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(3000);
 
-  // 저장 후 스크린샷 (디버그)
-  try {
-    const ssDir = path.resolve(__dirname, '../../output/blog');
-    await fs.mkdir(ssDir, { recursive: true });
-    await page.screenshot({ path: path.resolve(ssDir, 'after_save_debug.png'), fullPage: true });
-    logger.info('[blog_publisher] Screenshot: output/blog/after_save_debug.png');
-  } catch { /* 무시 */ }
-
-  // URL 확인 (query param 포함, pushState 포함)
   let publishedUrl = page.url();
   logger.info(`[blog_publisher] URL after save: ${publishedUrl}`);
 
-  // URL이 변경됐는지 확인 (query param 추가도 성공으로 인정)
-  if (publishedUrl.includes('/manage/newpost') && !publishedUrl.includes('postId') && !publishedUrl.includes('id=')) {
-    // 페이지에서 포스트 ID를 찾아봄
-    const postIdInfo = await page.evaluate(() => {
-      // 임시저장 후 나타날 수 있는 postId, 내 블로그 링크 등
-      const link = document.querySelector('a[href*="/manage/post/"], a[href*="/entry/"]');
-      const idInput = document.querySelector('input[name="postId"], input[name="id"]');
-      const urlParam = new URLSearchParams(window.location.search).get('postId')
-                    || new URLSearchParams(window.location.search).get('id');
-      return {
-        link: link?.href ?? null,
-        idInput: idInput?.value ?? null,
-        urlParam,
-        pageUrl: window.location.href,
-      };
-    });
-    logger.info(`[blog_publisher] Post ID search: ${JSON.stringify(postIdInfo)}`);
+  // /manage/posts/ 로 리다이렉트된 경우 → 최신 포스트 URL + 공개 전환
+  if (publishedUrl.includes('/manage/posts')) {
+    // 최신 포스트 정보 추출 (edit URL → postId)
+    const postInfo = await page.evaluate(() => {
+      // 관리 목록의 첫 번째 포스트 링크 (최신 글)
+      const editLink = document.querySelector(
+        'a[href*="/manage/newpost/"], a[href*="/manage/posts/"], .post-list a, td a'
+      );
+      const href = editLink?.href ?? '';
+      const idMatch = href.match(/\/manage\/newpost\/(\d+)/) ?? href.match(/\/(\d+)\/?$/);
+      const postId = idMatch?.[1] ?? null;
 
-    if (postIdInfo.link) publishedUrl = postIdInfo.link;
-    else if (postIdInfo.pageUrl !== publishedUrl) publishedUrl = postIdInfo.pageUrl;
+      // 공개 상태 토글 버튼 탐색
+      const statusBtn = document.querySelector(
+        '[data-visibility], button[class*="visibility"], .btn-public, .ico-lock, [class*="open-state"]'
+      );
+      return { href, postId, hasStatusBtn: !!statusBtn };
+    });
+    logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
+
+    if (postInfo.postId) {
+      // 실제 포스트 URL 구성
+      const blogHost = `https://${blogName}.tistory.com`;
+      publishedUrl = `${blogHost}/${postInfo.postId}`;
+
+      // 편집 페이지로 이동해서 공개 변경
+      try {
+        await page.goto(`${blogHost}/manage/newpost/${postInfo.postId}`, {
+          waitUntil: 'networkidle', timeout: 20000,
+        });
+        await page.waitForTimeout(2000);
+
+        // 공개 설정 버튼 클릭 (편집 페이지에서는 활성화 상태여야 함)
+        await page.click('button:has-text("완료")', { timeout: 10000 });
+        await page.waitForTimeout(2000);
+
+        // 선택 안 함 버튼이 활성화 됐는지 확인
+        const isEnabled = await page.$('button:has-text("선택 안 함"):not([disabled])');
+        if (isEnabled) {
+          await page.click('button:has-text("선택 안 함")', { timeout: 3000 });
+          await page.waitForTimeout(700);
+          await page.evaluate(() => {
+            const all = [...document.querySelectorAll('li, [role="option"]')];
+            const target = all.find((el) => el.textContent?.trim() === '공개' && el.offsetParent !== null);
+            if (target) target.click();
+          });
+          await page.waitForTimeout(500);
+          await page.click('button:has-text("발행"), button:has-text("공개 발행")', { timeout: 5000 });
+          await page.waitForTimeout(3000);
+          logger.info(`[blog_publisher] Post made public: ${publishedUrl}`);
+        } else {
+          logger.warn('[blog_publisher] Visibility button still disabled on edit page — post remains private');
+        }
+      } catch (err) {
+        logger.warn(`[blog_publisher] Public conversion failed: ${err.message}`);
+      }
+    }
   }
 
   logger.info(`[blog_publisher] Final URL: ${publishedUrl}`);
-  return publishedUrl.includes('/manage/newpost') && !publishedUrl.includes('postId')
-    ? null
-    : publishedUrl;
+  return publishedUrl.includes('/manage/') ? null : publishedUrl;
 }
 
 // ── DB 업데이트 ────────────────────────────────────────────────────────────
