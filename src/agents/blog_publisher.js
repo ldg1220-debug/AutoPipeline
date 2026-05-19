@@ -216,32 +216,46 @@ async function publishPost(page, content, blogName) {
   }
 
   // 패널 등장 대기
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(2500);
 
-  // 2단계: 패널 안의 "발행" 버튼 클릭 (확인 버튼)
-  // 이미 발행된 경우 URL이 바뀌었을 수 있음
+  // 디버그용 스크린샷 저장 (패널 열린 상태)
+  try {
+    const ssDir = path.resolve(__dirname, '../../output/blog');
+    await fs.mkdir(ssDir, { recursive: true });
+    await page.screenshot({ path: path.resolve(ssDir, 'publish_panel_debug.png'), fullPage: false });
+    logger.info('[blog_publisher] Screenshot saved: output/blog/publish_panel_debug.png');
+  } catch { /* 스크린샷 실패 무시 */ }
+
+  // 2단계: 페이지에 보이는 모든 버튼 중 "발행" 텍스트 가진 것 클릭
   let publishedUrl = page.url();
   if (publishedUrl.includes('/manage/')) {
-    const step2Candidates = [
-      '.layer-publish button:has-text("발행")',
-      '.publish-layer button:has-text("발행")',
-      '.post-publish button:has-text("발행")',
-      '[role="dialog"] button:has-text("발행")',
-      'button[data-btn="confirm-publish"]',
-      '.btn-confirm-publish',
-      // 공개 발행 라디오 선택 후 발행
-      'button:has-text("공개 발행")',
-    ];
-    for (const sel of step2Candidates) {
-      try {
-        await page.click(sel, { timeout: 3000 });
-        logger.info(`[blog_publisher] Step2 clicked: ${sel}`);
-        break;
-      } catch { /* 다음 시도 */ }
+    // 모든 가시 버튼 목록 로깅 (디버그)
+    const visibleBtns = await page.evaluate(() =>
+      [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
+    );
+    logger.info(`[blog_publisher] Visible buttons: ${visibleBtns.join(' | ')}`);
+
+    // "발행" 텍스트 버튼 모두 수집 → 마지막(모달 내 확인 버튼) 클릭
+    const publishBtns = await page.locator('button').filter({ hasText: /^발행$/ }).all();
+    if (publishBtns.length > 0) {
+      const target = publishBtns[publishBtns.length - 1];
+      await target.scrollIntoViewIfNeeded();
+      await target.click({ timeout: 5000 });
+      logger.info(`[blog_publisher] Step2 clicked: 발행 버튼 ${publishBtns.length}개 중 마지막`);
+    } else {
+      // 폴백: JavaScript로 직접 클릭
+      const clicked = await page.evaluate(() => {
+        const btns = [...document.querySelectorAll('button')];
+        const target = btns.filter((b) => b.textContent?.trim() === '발행').pop();
+        if (target) { target.click(); return true; }
+        return false;
+      });
+      logger.info(`[blog_publisher] Step2 JS fallback clicked: ${clicked}`);
     }
-    // URL 변경 대기 (최대 8초)
+
+    // URL 변경 대기 (최대 10초)
     try {
-      await page.waitForURL((url) => !url.includes('/manage/newpost'), { timeout: 8000 });
+      await page.waitForURL((url) => !url.includes('/manage/newpost'), { timeout: 10000 });
     } catch { /* URL 안 바뀌어도 계속 */ }
     publishedUrl = page.url();
   }
