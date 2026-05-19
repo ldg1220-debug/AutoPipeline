@@ -191,17 +191,62 @@ async function publishPost(page, content, blogName) {
     } catch { /* 썸네일 실패해도 발행 계속 */ }
   }
 
-  // 발행 버튼 클릭
-  await page.click(
-    'button[data-btn="publish"], .btn-publish, button:has-text("발행"), button:has-text("완료")',
-    { timeout: 10000 }
-  );
-  await page.waitForTimeout(4000);
+  // ── 발행 2단계 플로우 ───────────────────────────────────────────────────
+  // 티스토리 새 에디터: "완료" 클릭 → 우측 패널 열림 → "발행" 클릭
 
-  // 발행된 URL 추출
-  const publishedUrl = page.url();
+  // 1단계: 완료 버튼 (패널 열기)
+  const step1Candidates = [
+    'button[data-btn="publish"]',
+    '.btn-publish',
+    'button:has-text("완료")',
+    'button:has-text("발행")',
+  ];
+  let step1Clicked = false;
+  for (const sel of step1Candidates) {
+    try {
+      await page.click(sel, { timeout: 5000 });
+      step1Clicked = true;
+      logger.info(`[blog_publisher] Step1 clicked: ${sel}`);
+      break;
+    } catch { /* 다음 시도 */ }
+  }
+
+  if (!step1Clicked) {
+    throw new Error('발행 버튼(1단계)을 찾을 수 없음');
+  }
+
+  // 패널 등장 대기
+  await page.waitForTimeout(2000);
+
+  // 2단계: 패널 안의 "발행" 버튼 클릭 (확인 버튼)
+  // 이미 발행된 경우 URL이 바뀌었을 수 있음
+  let publishedUrl = page.url();
+  if (publishedUrl.includes('/manage/')) {
+    const step2Candidates = [
+      '.layer-publish button:has-text("발행")',
+      '.publish-layer button:has-text("발행")',
+      '.post-publish button:has-text("발행")',
+      '[role="dialog"] button:has-text("발행")',
+      'button[data-btn="confirm-publish"]',
+      '.btn-confirm-publish',
+      // 공개 발행 라디오 선택 후 발행
+      'button:has-text("공개 발행")',
+    ];
+    for (const sel of step2Candidates) {
+      try {
+        await page.click(sel, { timeout: 3000 });
+        logger.info(`[blog_publisher] Step2 clicked: ${sel}`);
+        break;
+      } catch { /* 다음 시도 */ }
+    }
+    // URL 변경 대기 (최대 8초)
+    try {
+      await page.waitForURL((url) => !url.includes('/manage/newpost'), { timeout: 8000 });
+    } catch { /* URL 안 바뀌어도 계속 */ }
+    publishedUrl = page.url();
+  }
+
   logger.info(`[blog_publisher] Published: ${title} → ${publishedUrl}`);
-
   return publishedUrl.includes('/manage/') ? null : publishedUrl;
 }
 
