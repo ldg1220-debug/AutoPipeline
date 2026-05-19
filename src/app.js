@@ -9,6 +9,7 @@ import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
 import { runTextQA, runVisionQA } from './agents/qa_editor.js';
 import { generateAllMedia } from './agents/media_generator.js';
+import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,12 +18,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * 파이프라인 1회 실행 함수.
  *
  * 올바른 실행 순서:
- *   Agent 1  → 트렌드 수집
- *   Agent 2  → 콘텐츠(텍스트) 작성
- *   Agent 3a → 텍스트 QA (탈락 시 1회 재작성 후 재검수)
- *   Agent 2.5→ 텍스트 통과 항목만 미디어(영상) 제작
- *   Agent 3b → 영상 Vision QA (탈락 시 스킵, 재제작 없음)
- *   Agent 4  → 최종 APPROVED 항목 발행
+ *   Agent 1   → 트렌드 수집
+ *   Agent 2   → 콘텐츠(텍스트) 작성
+ *   Agent 2.1 → PD 리뷰 (훅 유형 분류 + score < 7 자동 개선)
+ *   Agent 3a  → 텍스트 QA (탈락 시 1회 재작성 후 재검수)
+ *   Agent 2.5 → 텍스트 통과 항목만 미디어(영상) 제작
+ *   Agent 3b  → 영상 Vision QA (탈락 시 스킵, 재제작 없음)
+ *   Agent 4   → 최종 APPROVED 항목 발행
  *
  * 이 순서를 통해 텍스트 탈락 콘텐츠에 ElevenLabs·Shotstack 비용이
  * 낭비되지 않는다.
@@ -62,6 +64,17 @@ async function runPipeline() {
     logger.error('[app] Agent 2 (content_creator) failed. Aborting.', { message: err.message });
     await sendErrorAlert('content_creator', err.message);
     return;
+  }
+
+  // ── Agent 2.1: PD Reviewer ──────────────────────────────────────────────
+  try {
+    contentData = await pdReview(contentData);
+    await writeJSON(path.resolve(__dirname, `../output/scripts/pd_${date}.json`), contentData);
+    logger.info(`[app] Agent 2.1 complete. PD review applied to ${contentData.contents?.length ?? 0} contents.`);
+  } catch (err) {
+    logger.warn('[app] Agent 2.1 (pd_reviewer) failed. Continuing with original contentData.', {
+      message: err.message,
+    });
   }
 
   // ── Agent 3a: 텍스트 QA ─────────────────────────────────────────────────
