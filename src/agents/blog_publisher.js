@@ -345,40 +345,45 @@ async function publishPost(page, content, blogName) {
       const blogHost = `https://${blogName}.tistory.com`;
       publishedUrl = `${blogHost}/${postInfo.postId}`;
 
-      // 세션 쿠키로 관리자 API 직접 호출하여 공개 전환
+      // 편집 페이지로 이동 → CSRF 토큰 획득 후 공개 전환 API 호출
       try {
-        const cookies = await page.context().cookies();
-        const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+        await page.goto(`${blogHost}/manage/newpost/${postInfo.postId}`, {
+          waitUntil: 'domcontentloaded', timeout: 20000,
+        });
+        await page.waitForTimeout(2000);
 
-        // Tistory 내부 API: 포스트 공개 상태 변경
-        const apiResult = await page.evaluate(async ({ postId: pid, cookieHeader }) => {
-          // CSRF 토큰 탐색
-          const csrf = document.querySelector('meta[name="csrf-token"], input[name="_token"]')?.content
+        const apiResult = await page.evaluate(async (pid) => {
+          // 편집 페이지에서 CSRF 토큰 탐색
+          const csrf = document.querySelector('meta[name="csrf-token"]')?.content
                     ?? document.querySelector('input[name="_token"]')?.value
                     ?? '';
 
-          // 방법 1: visibility 전용 API 엔드포인트
+          // 방법 1: PATCH /apis/posts/{id}
           try {
             const r = await fetch(`/apis/posts/${pid}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
               body: JSON.stringify({ visibility: 20 }), // 20 = 공개
             });
+            const text = await r.text();
             if (r.ok) return `patch-api: ${r.status}`;
-          } catch {}
+            return `patch-api-fail: ${r.status} ${text.slice(0, 80)}`;
+          } catch (e) { /* 다음 방법 시도 */ }
 
-          // 방법 2: 폼 POST
+          // 방법 2: 폼 POST /manage/post/updateVisibility
           try {
             const fd = new FormData();
             fd.append('postId', pid);
             fd.append('visibility', '20');
             fd.append('_token', csrf);
             const r = await fetch('/manage/post/updateVisibility', { method: 'POST', body: fd });
+            const text = await r.text();
             if (r.ok) return `form-post: ${r.status}`;
-          } catch {}
+            return `form-post-fail: ${r.status} ${text.slice(0, 80)}`;
+          } catch (e) { /* 실패 */ }
 
-          return null;
-        }, { postId: postInfo.postId, cookieHeader: cookieStr });
+          return `no-csrf: "${csrf}"`;
+        }, postInfo.postId);
 
         logger.info(`[blog_publisher] Public API result: ${apiResult}`);
       } catch (err) {
