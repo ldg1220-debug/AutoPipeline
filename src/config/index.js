@@ -15,9 +15,8 @@ const REQUIRED_FOR_PRODUCTION = [
   'YOUTUBE_CLIENT_ID',
   'YOUTUBE_CLIENT_SECRET',
   'YOUTUBE_REFRESH_TOKEN',
-  'WORDPRESS_URL',
-  'WORDPRESS_USER',
-  'WORDPRESS_APP_PASSWORD',
+  'TISTORY_ACCESS_TOKEN',
+  'TISTORY_BLOG_NAME',
 ];
 
 for (const key of REQUIRED_FOR_PRODUCTION) {
@@ -47,10 +46,9 @@ export const config = {
     clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
     refreshToken: process.env.YOUTUBE_REFRESH_TOKEN,
   },
-  wordpress: {
-    url: process.env.WORDPRESS_URL,
-    user: process.env.WORDPRESS_USER,
-    appPassword: process.env.WORDPRESS_APP_PASSWORD,
+  tistory: {
+    accessToken: process.env.TISTORY_ACCESS_TOKEN,
+    blogName: process.env.TISTORY_BLOG_NAME,
   },
   pexels: {
     apiKey: process.env.PEXELS_API_KEY,

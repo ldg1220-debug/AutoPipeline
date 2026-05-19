@@ -111,16 +111,16 @@ async function publishToYouTube(content, accessToken) {
 }
 
 /**
- * WordPress REST API로 블로그 초안을 draft 상태로 업로드한다.
- * - SEO 메타(Yoast 호환): meta_description, seo_keywords를 커스텀 필드로 삽입
+ * Tistory API로 블로그 포스트를 공개 상태로 발행한다.
  * - 제휴 훅: section 말미에 [AFFILIATE_LINK: {product_category}] 플레이스홀더 삽입
  *   → 발행 전 실제 링크로 교체 필요 (또는 자동화 가능)
- * App Password 방식의 Basic Auth를 사용한다.
+ * access_token 방식의 인증을 사용한다.
  */
-async function publishToWordPress(content) {
-  const token = Buffer.from(
-    `${config.wordpress.user}:${config.wordpress.appPassword}`
-  ).toString('base64');
+async function publishToTistory(content) {
+  if (!config.tistory.accessToken) {
+    logger.warn('[auto_publisher] TISTORY_ACCESS_TOKEN not configured. Skipping Tistory.');
+    return { platform: 'tistory', status: 'skipped', error: 'TISTORY_ACCESS_TOKEN not configured' };
+  }
 
   const blog = content.blog_draft ?? {};
   const sections = blog.sections ?? [];
@@ -137,46 +137,36 @@ async function publishToWordPress(content) {
       const hookKey = `section${i + 1}_end`;
       const hook = affiliateByPosition[hookKey];
       const affiliateHtml = hook
-        ? `\n<p>👉 <strong>[AFFILIATE_LINK: ${hook.product_category} | 앵커: ${hook.anchor_text}]</strong></p>`
+        ? `\n<p><strong>[AFFILIATE_LINK: ${hook.product_category} | 앵커: ${hook.anchor_text}]</strong></p>`
         : '';
       return `<h2>${s.heading}</h2>\n<p>${s.body}</p>${affiliateHtml}`;
     })
     .join('\n\n');
 
-  // SEO 키워드를 태그로 변환 (WordPress 태그 API 미사용, excerpt에 포함)
-  const seoKeywords = blog.seo_keywords ?? [];
-  const metaDesc = blog.meta_description ?? '';
-  const excerptHtml = metaDesc
-    ? `${metaDesc}\n\n관련 키워드: ${seoKeywords.join(', ')}`
-    : '';
-
   const response = await axios.post(
-    `${config.wordpress.url}/wp-json/wp/v2/posts`,
-    {
+    'https://www.tistory.com/apis/post/write',
+    new URLSearchParams({
+      access_token: config.tistory.accessToken,
+      output: 'json',
+      blogName: config.tistory.blogName,
       title: blog.title ?? content.keyword,
       content: sectionHtml,
-      excerpt: excerptHtml,
-      status: 'draft',
-      // Yoast SEO REST API 필드 (Yoast 플러그인 설치 시 자동 적용)
-      meta: {
-        _yoast_wpseo_metadesc: metaDesc,
-        _yoast_wpseo_focuskw: seoKeywords[0] ?? content.keyword,
-      },
-    },
+      visibility: '3',
+      category: '0',
+    }).toString(),
     {
       headers: {
-        Authorization: `Basic ${token}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
       timeout: 30000,
     }
   );
 
   return {
-    platform: 'wordpress',
-    post_id: response.data.id,
-    url: response.data.link,
-    status: response.data.status,
+    platform: 'tistory',
+    post_id: response.data.tistory?.postId ?? response.data.postId,
+    url: response.data.tistory?.url ?? response.data.url,
+    status: 'published',
   };
 }
 
@@ -256,7 +246,7 @@ async function publishToTikTok(content) {
 }
 
 /**
- * APPROVED 콘텐츠를 YouTube·WordPress·TikTok에 발행한다.
+ * APPROVED 콘텐츠를 YouTube·Tistory·TikTok에 발행한다.
  * DRY_RUN=true이면 실제 업로드 없이 로그만 출력한다.
  */
 export async function publishContents(qaData, contentData) {
@@ -291,7 +281,7 @@ export async function publishContents(qaData, contentData) {
         keyword: content.keyword,
         dry_run: true,
         youtube: { platform: 'youtube', status: 'dry_run' },
-        wordpress: { platform: 'wordpress', status: 'dry_run' },
+        tistory: { platform: 'tistory', status: 'dry_run' },
         tiktok: { platform: 'tiktok', status: 'dry_run' },
       });
       continue;
@@ -314,18 +304,17 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // WordPress 발행
+    // Tistory 발행
     try {
-      if (!config.wordpress.url || !config.wordpress.user) {
-        throw new Error('WordPress credentials not configured');
+      result.tistory = await publishToTistory(content);
+      if (result.tistory.status === 'published') {
+        logger.info(`[auto_publisher] Tistory upload success: ${result.tistory.url}`);
       }
-      result.wordpress = await publishToWordPress(content);
-      logger.info(`[auto_publisher] WordPress upload success: ${result.wordpress.url}`);
     } catch (err) {
-      logger.error(`[auto_publisher] WordPress upload failed: ${content.keyword}`, {
+      logger.error(`[auto_publisher] Tistory upload failed: ${content.keyword}`, {
         message: err.message,
       });
-      result.wordpress = { platform: 'wordpress', status: 'failed', error: err.message };
+      result.tistory = { platform: 'tistory', status: 'failed', error: err.message };
     }
 
     // TikTok 발행 (영상 파일 존재 시에만)
@@ -350,60 +339,7 @@ export async function publishContents(qaData, contentData) {
   };
 }
 
-/**
- * YouTube 예약 발행 시각(+2시간)에 맞춰 WordPress 포스트를 자동으로 publish 상태로 전환한다.
- * setTimeout으로 비동기 예약하므로 파이프라인 실행을 블로킹하지 않는다.
- * DRY_RUN 시에는 예약만 로깅하고 실제 API 호출은 하지 않는다.
- *
- * @param {object} publishResults - publishContents() 반환값
- * @param {number} delayMs - 지연 시간 (기본 2시간 = YouTube 예약 발행 시각과 동기화)
- */
-export function scheduleWordPressPublish(publishResults, delayMs = 2 * 60 * 60 * 1000) {
-  const wpItems = (publishResults.results ?? [])
-    .filter((r) => r.wordpress?.post_id && !r.dry_run)
-    .map((r) => ({ keyword: r.keyword, post_id: r.wordpress.post_id }));
 
-  if (wpItems.length === 0) {
-    logger.info('[auto_publisher] No WordPress posts to schedule for publish.');
-    return;
-  }
-
-  const publishAt = new Date(Date.now() + delayMs).toISOString();
-  logger.info(`[auto_publisher] WordPress auto-publish scheduled for ${publishAt} (${wpItems.length}건)`);
-
-  if (config.runtime.dryRun) {
-    logger.info('[auto_publisher] DRY_RUN — WordPress scheduled publish skipped.');
-    return;
-  }
-
-  setTimeout(async () => {
-    logger.info('[auto_publisher] WordPress scheduled publish triggered.');
-
-    const token = Buffer.from(
-      `${config.wordpress.user}:${config.wordpress.appPassword}`
-    ).toString('base64');
-
-    for (const item of wpItems) {
-      try {
-        await axios.post(
-          `${config.wordpress.url}/wp-json/wp/v2/posts/${item.post_id}`,
-          { status: 'publish' },
-          {
-            headers: { Authorization: `Basic ${token}`, 'Content-Type': 'application/json' },
-            timeout: 15000,
-          }
-        );
-        logger.info(`[auto_publisher] WordPress published: ${item.keyword} (ID: ${item.post_id})`);
-      } catch (err) {
-        logger.error(`[auto_publisher] WordPress publish failed: ${item.keyword}`, {
-          message: err.message,
-        });
-      }
-    }
-
-    logger.info('[auto_publisher] WordPress scheduled publish complete.');
-  }, delayMs);
-}
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {

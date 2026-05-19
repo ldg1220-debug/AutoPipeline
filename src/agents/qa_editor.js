@@ -74,6 +74,14 @@ function validateSchema(content) {
   return { valid: true, reason: '' };
 }
 
+function validateHookQuality(content) {
+  const hook = content.shortform_script?.hook ?? '';
+  const reasons = [];
+  if (hook.length > 20) reasons.push(`훅이 너무 김 (${hook.length}자, 최대 20자)`);
+  if (!/[?!]$/.test(hook)) reasons.push('훅이 ?나 !로 끝나지 않음');
+  return reasons;
+}
+
 function detectBannedWords(content) {
   const fullText = [
     content.shortform_script?.hook ?? '',
@@ -185,6 +193,13 @@ export async function runTextQA(contentData) {
       }
     } else {
       logger.warn(`[qa_editor] OPENAI_API_KEY not set. Skipping LLM QA: ${content.keyword}`);
+    }
+
+    const hookIssues = validateHookQuality(content);
+    // hookIssues는 warn으로만 기록하고 거부 기준으로 쓰지 않는다.
+    // 거부율이 높아지는 것을 방지하고 점진적으로 개선하는 방향.
+    if (hookIssues.length > 0) {
+      logger.warn(`[qa_editor] Hook quality issue: ${content.keyword} | ${hookIssues.join(', ')}`);
     }
 
     const reasons = [];
