@@ -132,72 +132,101 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
   logger.info(`[media_generator] Uploading audio for Shotstack: ${content.keyword}`);
   const audioUrl = await uploadAudioForShotstack(audioPath);
 
-  // 2. Pexels 노트 테마 배경 검색
+  // 2. 오디오 파일 크기로 실제 재생 시간 추정 (192kbps CBR + 2초 여유)
+  const audioStats = await fs.stat(audioPath);
+  const TOTAL_DURATION = Math.max(20, Math.min(90, Math.ceil(audioStats.size / 24000) + 2));
+  logger.info(`[media_generator] Estimated duration: ${TOTAL_DURATION}s`);
+
+  // 3. Pexels 노트 테마 배경 검색
   const bgVideoUrl = await searchPexelsVideo(content.keyword, content.category);
   logger.info(`[media_generator] Background: ${bgVideoUrl ? 'Pexels notebook theme' : 'cream fallback'}`);
 
   const accentColor = BRAND_COLORS[content.category] ?? '#FFD700';
-  const seriesName = content.series_name ?? '매일읽어주는남자';
+  const accentHex   = accentColor.replace('#', '');
+  const seriesName  = content.series_name ?? '매일읽어주는남자';
 
-  const hook    = content.shortform_script?.hook    ?? '';
-  const context = content.shortform_script?.context ?? '';
-  const insight = content.shortform_script?.insight ?? '';
-  const summary = content.shortform_script?.summary ?? '';
-  const cta     = content.shortform_script?.cta     ?? '';
+  // 내용이 길면 각 구간 적절히 자르기
+  const hook    = (content.shortform_script?.hook    ?? '').slice(0, 60);
+  const context = (content.shortform_script?.context ?? '').slice(0, 130);
+  const insight = (content.shortform_script?.insight ?? '').slice(0, 180);
+  const summary = (content.shortform_script?.summary ?? '').slice(0, 100);
+  const cta     = (content.shortform_script?.cta     ?? '').slice(0, 80);
 
-  // 3. 자막 클립 (55초 5구간 — hook/context/insight/summary/cta)
-  const TOTAL_DURATION = 55;
-  const makeSubtitle = (text, start, length, fontSize = 42) => ({
+  // 4. 오디오 길이에 맞춰 구간 동적 산출
+  const t  = TOTAL_DURATION;
+  const h1 = 3;                         // hook 끝 (0~3s)
+  const h2 = Math.round(t * 0.28);      // context 끝
+  const h3 = Math.round(t * 0.73);      // insight 끝
+  const h4 = Math.round(t * 0.90);      // summary 끝
+  // cta: h4 ~ t
+
+  // 5. 텍스트 클립 생성 — 넓은 박스 + 작은 폰트로 글 짤림 방지
+  const makeSubtitle = (text, start, length, fontSize = 30) => ({
     asset: {
       type: 'text',
       text,
-      width: 900,
-      height: 380,
+      width: 980,   // 이전 900 → 980 (여백 50px씩)
+      height: 660,  // 이전 380 → 660 (다중 줄 수용)
       font: { family: 'Noto Sans', size: fontSize, color: '#1A1A1A' },
-      alignment: { horizontal: 'center' },
+      alignment: { horizontal: 'center', vertical: 'center' },
     },
     start,
     length,
     position: 'center',
-    offset: { y: 0.05 },
+    offset: { x: 0, y: 0.06 },
+    transition: { in: 'fade', out: 'fade' },
   });
 
-  // 시리즈명 레이블 (전체 구간 상단 고정)
+  // 시리즈명 레이블 (상단 고정)
   const seriesLabel = {
     asset: {
       type: 'text',
       text: seriesName,
-      width: 700,
+      width: 800,
       height: 80,
-      font: { family: 'Noto Sans', size: 28, color: '#1A1A1A' },
+      font: { family: 'Noto Sans', size: 26, color: '#555555' },
       alignment: { horizontal: 'center' },
     },
     start: 0,
-    length: TOTAL_DURATION,
+    length: t,
     position: 'top',
-    offset: { y: -0.05 },
+    offset: { x: 0, y: -0.04 },
   };
 
   const subtitleClips = [
     seriesLabel,
-    makeSubtitle(hook,    0,  3,  52),   // hook: 0~3초, 가장 크게
-    makeSubtitle(context, 3,  12, 38),   // context: 3~15초
-    makeSubtitle(insight, 15, 25, 36),   // insight: 15~40초
-    makeSubtitle(summary, 40, 10, 42),   // summary: 40~50초
-    makeSubtitle(cta,     50, 5,  34),   // cta: 50~55초
+    makeSubtitle(hook,    0,       h1,      44),  // hook: 크게
+    makeSubtitle(context, h1,      h2 - h1, 30),  // context
+    makeSubtitle(insight, h2,      h3 - h2, 27),  // insight: 가장 길어 작게
+    makeSubtitle(summary, h3,      h4 - h3, 33),  // summary
+    makeSubtitle(cta,     h4,      t  - h4, 26),  // cta
   ];
 
-  // 4. 배경 트랙 (Pexels 영상 or 크림 단색)
-  const bgClip = bgVideoUrl
-    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: TOTAL_DURATION, fit: 'crop' }
-    : { asset: { type: 'image', src: 'https://placehold.co/1080x1920/FAFAF2/FAFAF2.png' }, start: 0, length: TOTAL_DURATION, fit: 'cover' };
+  // 6. 형광펜 카드 — 텍스트 뒤 악센트 색상 반투명 패널
+  const textCardClip = {
+    asset: {
+      type: 'image',
+      src: `https://placehold.co/1020x720/${accentHex}/${accentHex}.png`,
+    },
+    start: 0,
+    length: t,
+    position: 'center',
+    offset: { x: 0, y: 0.06 },
+    opacity: 0.70,
+    fit: 'none',
+  };
 
-  // 5. 화이트 오버레이 (노트지 질감)
+  // 7. 배경 트랙 (Pexels 영상 or 크림 단색)
+  const bgClip = bgVideoUrl
+    ? { asset: { type: 'video', src: bgVideoUrl }, start: 0, length: t, fit: 'crop' }
+    : { asset: { type: 'image', src: 'https://placehold.co/1080x1920/FAFAF2/FAFAF2.png' }, start: 0, length: t, fit: 'cover' };
+
+  // 8. 화이트 오버레이 — 이전 0.55 → 0.20 (배경 더 잘 보이게)
   const overlayClip = {
     asset: { type: 'image', src: 'https://placehold.co/1080x1920/FFFFFF/FFFFFF.png' },
     start: 0,
-    length: TOTAL_DURATION,
-    opacity: 0.55,
+    length: t,
+    opacity: 0.20,
     fit: 'cover',
   };
 
@@ -205,6 +234,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath) {
     soundtrack: { src: audioUrl, effect: 'fadeOut' },
     tracks: [
       { clips: subtitleClips },
+      { clips: [textCardClip] },
       { clips: [overlayClip] },
       { clips: [bgClip] },
     ],
