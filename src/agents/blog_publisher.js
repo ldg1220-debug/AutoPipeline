@@ -213,88 +213,31 @@ async function publishPost(page, content, blogName) {
     } catch { /* 썸네일 실패해도 발행 계속 */ }
   }
 
-  // ── 발행 플로우 ───────────────────────────────────────────────────────────
-  // 확인된 티스토리 새 에디터 흐름:
-  //   "완료" 클릭 → 우측 사이드바 열림 (선택 안 함더보기, 비공개 저장 등 노출)
-  //   → 공개 설정 드롭다운에서 "공개" 선택 → "발행" 버튼 클릭
+  // ── 발행 플로우: page.route() 인터셉트 ──────────────────────────────────
+  // "비공개 저장" 클릭 시 /manage/post.json 요청을 가로채
+  // visibility:20(공개) + content:html(실제 본문)으로 교체 → 한 번에 공개 발행
+  let publishApiResp = null;
+  await page.route('**/manage/post.json', async (route) => {
+    let data = {};
+    try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
+    data.visibility = 20;  // 전체 공개
+    data.content = html;   // 실제 본문 주입 (저장 시점에 TinyMCE가 비어있는 문제 해소)
+    try {
+      const resp = await route.fetch({ postData: JSON.stringify(data) });
+      publishApiResp = await resp.text();
+      await route.fulfill({ response: resp, body: publishApiResp });
+    } catch {
+      await route.continue({ postData: JSON.stringify(data) });
+    }
+  });
 
-  // "완료" 클릭으로 발행 사이드바 열기 (TinyMCE API 주입 후 항상 필요)
+  // "완료" 클릭으로 사이드바 열기
   await page.click('button:has-text("완료")', { timeout: 10000 });
-  logger.info('[blog_publisher] 완료 clicked — opening publish sidebar');
-
-  // 사이드바 등장 대기
   await page.waitForTimeout(2000);
 
-  // Step 2: 공개 설정 — disabled 강제 해제 후 클릭
-  const visibilitySet = await page.evaluate(() => {
-    // disabled 강제 해제
-    const btn = [...document.querySelectorAll('button')]
-      .find((b) => b.textContent?.includes('선택 안 함'));
-    if (btn) {
-      btn.disabled = false;
-      btn.removeAttribute('disabled');
-      btn.classList.remove('disabled');
-    }
-
-    // 숨겨진 select 요소로 공개 설정
-    const selects = [...document.querySelectorAll('select')];
-    for (const sel of selects) {
-      const publicOpt = [...sel.options].find(
-        (o) => o.text.trim() === '공개' || o.value === '0' || o.value === 'public'
-      );
-      if (publicOpt) {
-        sel.value = publicOpt.value;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-        return `select: ${publicOpt.value}`;
-      }
-    }
-    return null;
-  });
-  logger.info(`[blog_publisher] Visibility via JS: ${visibilitySet}`);
-
-  // JS select 실패 시 강제 disabled 해제 후 Playwright 클릭
-  if (!visibilitySet) {
-    try {
-      await page.click('button:has-text("선택 안 함")', { force: true, timeout: 3000 });
-      await page.waitForTimeout(700);
-      // 드롭다운 "공개" 옵션 클릭
-      await page.evaluate(() => {
-        const all = [...document.querySelectorAll('li, [role="option"]')];
-        const target = all.find((el) => el.textContent?.trim() === '공개' && el.offsetParent !== null);
-        if (target) target.click();
-      });
-      await page.waitForTimeout(500);
-      logger.info('[blog_publisher] Visibility set via force click');
-    } catch (err) {
-      logger.warn(`[blog_publisher] Visibility force click failed: ${err.message}`);
-    }
-  }
-
-  // 버튼 목록 재확인 (디버그)
-  const btnsAfter = await page.evaluate(() =>
-    [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
-  );
-  logger.info(`[blog_publisher] Buttons after visibility: ${btnsAfter.join(' | ')}`);
-
-  // Step 3: 발행 버튼 클릭 + /manage/post.json 요청 전체 캡처 (공개 전환용)
-  let capturedPostJson = null;
-  const reqLogger = (req) => {
-    if (req.method() === 'POST' && req.url().includes('/manage/post.json')) {
-      capturedPostJson = {
-        url: req.url(),
-        body: req.postData() ?? '',
-      };
-    }
-  };
-  page.on('request', reqLogger);
-
-  const publishCandidates = [
-    'button:has-text("공개 발행")',
-    'button:has-text("발행")',
-    'button:has-text("비공개 저장")',
-  ];
+  // "비공개 저장" 클릭 → 인터셉트돼 공개 저장됨
   let publishClicked = false;
-  for (const sel of publishCandidates) {
+  for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")']) {
     try {
       await page.click(sel, { timeout: 5000 });
       logger.info(`[blog_publisher] Publish clicked: ${sel}`);
@@ -302,97 +245,45 @@ async function publishPost(page, content, blogName) {
       break;
     } catch { /* 다음 시도 */ }
   }
-  if (!publishClicked) {
-    throw new Error('발행 버튼을 찾을 수 없음 — 버튼: ' + btnsAfter.join(', '));
-  }
+  if (!publishClicked) throw new Error('발행 버튼을 찾을 수 없음');
 
-  // 저장 완료 대기
-  await page.waitForTimeout(4000);
-  page.off('request', reqLogger);
+  await page.waitForTimeout(3000);
+  await page.unroute('**/manage/post.json');
 
-  if (capturedPostJson?.body) {
-    logger.info(`[blog_publisher] post.json captured (len=${capturedPostJson.body.length})`);
-  } else {
-    logger.info('[blog_publisher] post.json not captured');
-  }
+  logger.info(`[blog_publisher] API resp: ${(publishApiResp ?? '').slice(0, 150)}`);
 
-  let publishedUrl = page.url();
-  logger.info(`[blog_publisher] URL after save: ${publishedUrl}`);
+  // API 응답에서 entryUrl 추출 → 공개 포스트 URL
+  let publishedUrl = null;
+  try {
+    const respData = JSON.parse(publishApiResp ?? '{}');
+    if (respData.entryUrl) {
+      publishedUrl = respData.entryUrl;
+      logger.info(`[blog_publisher] Published: ${publishedUrl}`);
+    }
+  } catch { /* 파싱 실패 시 폴백 */ }
 
-  // /manage/posts/ 로 리다이렉트된 경우 → 최신 포스트 URL + 공개 전환
-  if (publishedUrl.includes('/manage/posts')) {
-    // 최신 포스트 정보 추출 (edit URL → postId)
-    // 포스트 목록 렌더링 대기
-    await page.waitForTimeout(2000);
-
-    const postInfo = await page.evaluate(() => {
-      const allLinks = [...document.querySelectorAll('a[href]')]
-        .map((a) => a.href)
-        .filter((h) => h && !h.endsWith('#'));
-
-      // /manage/newpost/123 형태 (편집 링크)
-      const editLinks = allLinks.filter((h) => /\/manage\/newpost\/\d+/.test(h));
-      // 현재 블로그 도메인의 숫자 URL만 (notice.tistory.com 등 제외)
-      const blogHost = window.location.hostname; // ggoondaeng.tistory.com
-      const postLinks = allLinks.filter(
-        (h) => new RegExp(`https://${blogHost}/\\d+$`).test(h)
-      );
-      // 가장 높은 번호 = 최신 포스트
-      const sortedPostLinks = postLinks.sort((a, b) => {
-        const na = parseInt(a.match(/\/(\d+)$/)?.[1] ?? '0');
-        const nb = parseInt(b.match(/\/(\d+)$/)?.[1] ?? '0');
-        return nb - na;
-      });
-
-      const firstEdit = editLinks[0] ?? null;
-      const latestPost = sortedPostLinks[0] ?? null;
-      const postId = firstEdit?.match(/\/manage\/newpost\/(\d+)/)?.[1]
-                  ?? latestPost?.match(/\/(\d+)$/)?.[1]
-                  ?? null;
-
-      return {
-        postId,
-        editLinks: editLinks.slice(0, 3),
-        postLinks: sortedPostLinks.slice(0, 5),
-      };
-    });
-    logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
-
-    if (postInfo.postId) {
-      // 실제 포스트 URL 구성
-      const blogHost = `https://${blogName}.tistory.com`;
-      publishedUrl = `${blogHost}/${postInfo.postId}`;
-
-      // ── 공개 전환: /manage/post.json 재호출 (visibility:0 → 20) ────────
-      // 저장 시 캡처한 request body 구조를 그대로 재사용,
-      // id=postId + visibility=20 + content=실제html 로 교체
-      try {
-        if (!capturedPostJson?.body) throw new Error('post.json body not captured');
-
-        const postData = JSON.parse(capturedPostJson.body);
-        postData.id = postInfo.postId;
-        postData.visibility = 20;       // 20 = 전체 공개
-        postData.content = html;        // 실제 본문 (저장 시 empty였던 것 교체)
-
-        const updateResult = await page.evaluate(async (data) => {
-          const r = await fetch('/manage/post.json', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-          });
-          const text = await r.text();
-          return `${r.status}: ${text.slice(0, 150)}`;
-        }, postData);
-
-        logger.info(`[blog_publisher] Public update: ${updateResult}`);
-      } catch (err) {
-        logger.warn(`[blog_publisher] Public update failed: ${err.message}`);
-      }
+  // entryUrl 없으면 리다이렉트 URL에서 추출
+  if (!publishedUrl) {
+    const pageUrl = page.url();
+    logger.info(`[blog_publisher] URL after save: ${pageUrl}`);
+    if (pageUrl.includes('/manage/posts')) {
+      await page.waitForTimeout(2000);
+      publishedUrl = await page.evaluate((bHost) => {
+        const links = [...document.querySelectorAll('a[href]')].map((a) => a.href);
+        const postLinks = links.filter((h) => new RegExp(`https://${bHost}/\\d+$`).test(h));
+        postLinks.sort((a, b) => {
+          const na = parseInt(a.match(/\/(\d+)$/)?.[1] ?? '0');
+          const nb = parseInt(b.match(/\/(\d+)$/)?.[1] ?? '0');
+          return nb - na;
+        });
+        return postLinks[0] ?? null;
+      }, `${blogName}.tistory.com`);
     }
   }
 
   logger.info(`[blog_publisher] Final URL: ${publishedUrl}`);
-  return publishedUrl.includes('/manage/') ? null : publishedUrl;
+  if (!publishedUrl || publishedUrl.includes('/manage/')) return null;
+  return publishedUrl;
 }
 
 // ── DB 업데이트 ────────────────────────────────────────────────────────────
