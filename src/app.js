@@ -17,6 +17,7 @@ import { buildAllAssets } from './agents/blog_asset_builder.js';
 import { monetizeAll } from './agents/monetizer.js';
 import { publishBlogPosts } from './agents/blog_publisher.js';
 import { runBlogAnalytics } from './agents/blog_analytics.js';
+import { groupSimilarTopics } from './agents/topic_grouper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -262,12 +263,25 @@ async function runBlogPipeline(youtubeResults = null) {
   if (youtubeResults?.results?.length) {
     const ytMap = {};
     for (const r of youtubeResults.results) {
-      if (r.keyword && r.youtube_url) ytMap[r.keyword] = r.youtube_url;
+      if (r.keyword && r.youtube?.url) ytMap[r.keyword] = r.youtube.url;
     }
     keywordData.contents = keywordData.contents.map((c) => ({
       ...c,
       youtube_url: ytMap[c.keyword] ?? null,
     }));
+  }
+
+  // ── Topic Grouper: 같은 주제 키워드 묶기 ─────────────────────────────
+  // 주제가 다르면 각각 별도 포스트, 겹치면 합쳐서 하나의 풍부한 포스트로
+  try {
+    keywordData = await groupSimilarTopics(keywordData);
+    logger.info(
+      `[app] Topic grouping: ${keywordData.original_count}개 → ${keywordData.grouped_count}개 포스트`
+    );
+  } catch (err) {
+    logger.warn('[app] Topic grouping failed. Continuing with original keywords.', {
+      message: err.message,
+    });
   }
 
   // ── Part 2: Blog Content Enhancer ──────────────────────────────────────
