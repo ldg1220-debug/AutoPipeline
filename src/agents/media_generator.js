@@ -164,9 +164,9 @@ function buildTextClips(scenes, seriesName, totalDuration) {
       text: `📺 ${seriesName}`,
       width: 800,
       height: 70,
-      font: { family: 'Noto Sans', size: 24, color: '#FFFFFF', weight: '700' },
+      font: { family: 'Noto Sans', size: 24, color: '#FFE600', weight: '700' },
       alignment: { horizontal: 'center', vertical: 'center' },
-      background: { color: '#000000', opacity: 0.55, borderRadius: 6, padding: 10 },
+      background: { color: '#000000', opacity: 0.80, borderRadius: 6, padding: 12 },
     },
     start: 0,
     length: totalDuration,
@@ -175,19 +175,22 @@ function buildTextClips(scenes, seriesName, totalDuration) {
   });
 
   // 씬별 자막
-  // width: 840 — 1080px 영상에서 양쪽 120px 여백 확보 (한국어 글자 넘침 방지)
-  // font.size: 36 — Noto Sans 한국어는 라틴 폰트보다 실제 렌더링 폭이 넓음
+  // 가시성 최우선:
+  //   - 노란색 텍스트 (#FFE600) — 어떤 배경에서도 눈에 띄는 고대비 컬러
+  //   - stroke 5px — 두꺼운 검정 테두리로 배경과 분리
+  //   - background opacity 0.85 — 반투명이 아닌 거의 불투명한 다크박스
+  //   - font size 42 — 쇼츠 기준 충분히 큰 사이즈
   for (const { text, start, duration } of scenes) {
     clips.push({
       asset: {
         type: 'text',
         text,
         width: 840,
-        height: 500,
-        font: { family: 'Noto Sans', size: 36, color: '#FFFFFF', weight: '700', lineHeight: 1.5 },
+        height: 520,
+        font: { family: 'Noto Sans', size: 42, color: '#FFE600', weight: '700', lineHeight: 1.5 },
         alignment: { horizontal: 'center', vertical: 'center' },
-        stroke: { color: '#000000', width: 2 },
-        background: { color: '#000000', opacity: 0.60, borderRadius: 12, padding: 20 },
+        stroke: { color: '#000000', width: 5 },
+        background: { color: '#000000', opacity: 0.85, borderRadius: 14, padding: 24 },
       },
       start,
       length: duration,
