@@ -63,7 +63,44 @@ function injectYouTubeEmbed(html, youtubeUrl) {
 
 // ── HTML 본문 주입 (다단계 시도) ──────────────────────────────────────────
 async function injectHtmlContent(page, html) {
-  // 1. CodeMirror JavaScript API (HTML 소스 에디터 방식)
+  // 1. TinyMCE API 직접 호출 — 가장 안전, 내부 상태 정상 유지
+  //    CodeMirror 방식은 TinyMCE 내부 상태를 갱신하지 못해 사이드바 비활성화됨
+  const tmResult = await page.evaluate((htmlContent) => {
+    const ed = window.tinyMCE?.activeEditor ?? window.tinyMCE?.editors?.[0];
+    if (ed) {
+      ed.setContent(htmlContent);
+      ed.fire('change');
+      return 'tinymce';
+    }
+    return null;
+  }, html);
+  if (tmResult) return tmResult;
+
+  // 2. iframe 내부 TinyMCE (iframe 기반 에디터)
+  for (const frame of page.frames()) {
+    try {
+      const found = await frame.evaluate((htmlContent) => {
+        const ed = window.tinyMCE?.activeEditor ?? window.tinyMCE?.editors?.[0];
+        if (ed) { ed.setContent(htmlContent); ed.fire('change'); return true; }
+        return false;
+      }, html);
+      if (found) return 'tinymce-iframe';
+    } catch { /* 다음 frame 시도 */ }
+  }
+
+  // 3. TinyMCE body contenteditable (iframe 내부 body)
+  for (const frame of page.frames()) {
+    try {
+      const found = await frame.evaluate((htmlContent) => {
+        const body = document.querySelector('body[contenteditable="true"], #tinymce');
+        if (body) { body.innerHTML = htmlContent; return true; }
+        return false;
+      }, html);
+      if (found) return 'tinymce-body';
+    } catch { /* 다음 frame 시도 */ }
+  }
+
+  // 4. CodeMirror (HTML 소스 모드 — TinyMCE 상태 갱신 안 됨, 최후 수단)
   const cmResult = await page.evaluate((htmlContent) => {
     const cm = document.querySelector('.CodeMirror')?.CodeMirror;
     if (cm) { cm.setValue(htmlContent); return 'codemirror'; }
@@ -71,34 +108,13 @@ async function injectHtmlContent(page, html) {
   }, html);
   if (cmResult) return cmResult;
 
-  // 2. iframe 내부 contenteditable (티스토리 새 에디터)
-  for (const frame of page.frames()) {
-    try {
-      const found = await frame.evaluate((htmlContent) => {
-        const el = document.querySelector('[contenteditable="true"]');
-        if (el) { el.innerHTML = htmlContent; return true; }
-        return false;
-      }, html);
-      if (found) return 'iframe-contenteditable';
-    } catch { /* 다음 frame 시도 */ }
-  }
-
-  // 3. 메인 페이지 contenteditable
+  // 5. 메인 contenteditable
   const ceResult = await page.evaluate((htmlContent) => {
     const el = document.querySelector('[contenteditable="true"]');
     if (el) { el.innerHTML = htmlContent; return 'contenteditable'; }
     return null;
   }, html);
   if (ceResult) return ceResult;
-
-  // 4. textarea 직접 입력
-  const textarea = await page.$('textarea[name="content"], #content-area');
-  if (textarea) {
-    await textarea.click();
-    await page.keyboard.press('Control+A');
-    await page.keyboard.type(html, { delay: 0 });
-    return 'textarea';
-  }
 
   return 'none';
 }
@@ -148,13 +164,19 @@ async function publishPost(page, content, blogName) {
     ?? '';
   html = injectYouTubeEmbed(html, youtube_url);
 
-  // HTML 모드 전환 시도
-  const switched = await switchToHtmlMode(page);
-  await page.waitForTimeout(switched ? 1500 : 500);
-
-  // 본문 주입
+  // 본문 주입 (TinyMCE API 우선 — 소스 모드 불필요)
+  // TinyMCE API 시도 전 에디터 초기화 대기
+  await page.waitForTimeout(1000);
   const method = await injectHtmlContent(page, html);
   logger.info(`[blog_publisher] Content injected via: ${method}`);
+
+  // CodeMirror 폴백 시에만 HTML 소스 모드 종료 필요
+  if (method === 'codemirror') {
+    try {
+      await page.click('button:has-text("완료")', { timeout: 5000 });
+      await page.waitForTimeout(1500);
+    } catch { /* 무시 */ }
+  }
 
   // 카테고리 설정 (있을 때만)
   const categoryMap = {
@@ -196,16 +218,11 @@ async function publishPost(page, content, blogName) {
   //   "완료" 클릭 → 우측 사이드바 열림 (선택 안 함더보기, 비공개 저장 등 노출)
   //   → 공개 설정 드롭다운에서 "공개" 선택 → "발행" 버튼 클릭
 
-  // Step 1: "완료" 클릭으로 사이드바 열기 (TinyMCE 소스 모드 종료)
-  await page.click('button:has-text("완료")', { timeout: 10000 });
-  logger.info('[blog_publisher] 완료 clicked — waiting for TinyMCE to process');
-
-  // TinyMCE가 HTML 파싱 완료 후 sidebar 버튼이 enabled 될 때까지 대기
+  // 사이드바 "선택 안 함" 버튼이 enabled 될 때까지 대기
   try {
-    await page.waitForSelector('button:has-text("선택 안 함"):not([disabled])', { timeout: 12000 });
+    await page.waitForSelector('button:has-text("선택 안 함"):not([disabled])', { timeout: 10000 });
     logger.info('[blog_publisher] Sidebar enabled');
   } catch {
-    // disabled 해제 안 돼도 계속 진행
     const btns = await page.evaluate(() =>
       [...document.querySelectorAll('button')].map((b) => b.textContent?.trim()).filter(Boolean)
     );
