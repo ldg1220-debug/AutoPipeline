@@ -218,7 +218,12 @@ async function publishPost(page, content, blogName) {
   //   "완료" 클릭 → 우측 사이드바 열림 (선택 안 함더보기, 비공개 저장 등 노출)
   //   → 공개 설정 드롭다운에서 "공개" 선택 → "발행" 버튼 클릭
 
-  // 사이드바 "선택 안 함" 버튼이 enabled 될 때까지 대기
+  // "완료" 클릭으로 발행 사이드바 열기 (TinyMCE API 주입 후 항상 필요)
+  await page.click('button:has-text("완료")', { timeout: 10000 });
+  logger.info('[blog_publisher] 완료 clicked — opening publish sidebar');
+
+  // 사이드바 "선택 안 함" 버튼이 enabled 상태로 나타날 때까지 대기
+  // (TinyMCE API로 주입했으므로 이번엔 disabled 아님)
   try {
     await page.waitForSelector('button:has-text("선택 안 함"):not([disabled])', { timeout: 10000 });
     logger.info('[blog_publisher] Sidebar enabled');
