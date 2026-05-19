@@ -314,23 +314,28 @@ async function publishPost(page, content, blogName) {
 
       // /manage/newpost/123 형태 (편집 링크)
       const editLinks = allLinks.filter((h) => /\/manage\/newpost\/\d+/.test(h));
-      // ggoondaeng.tistory.com/123 형태 (공개 포스트 URL)
-      const postLinks = allLinks.filter((h) => /tistory\.com\/\d+$/.test(h));
-      // data-post-id 또는 숫자 ID 속성을 가진 요소
-      const dataIds = [...document.querySelectorAll('[data-post-id],[data-id]')]
-        .map((el) => el.dataset.postId ?? el.dataset.id)
-        .filter(Boolean);
+      // 현재 블로그 도메인의 숫자 URL만 (notice.tistory.com 등 제외)
+      const blogHost = window.location.hostname; // ggoondaeng.tistory.com
+      const postLinks = allLinks.filter(
+        (h) => new RegExp(`https://${blogHost}/\\d+$`).test(h)
+      );
+      // 가장 높은 번호 = 최신 포스트
+      const sortedPostLinks = postLinks.sort((a, b) => {
+        const na = parseInt(a.match(/\/(\d+)$/)?.[1] ?? '0');
+        const nb = parseInt(b.match(/\/(\d+)$/)?.[1] ?? '0');
+        return nb - na;
+      });
 
       const firstEdit = editLinks[0] ?? null;
-      const idMatch = firstEdit?.match(/\/manage\/newpost\/(\d+)/)
-                   ?? postLinks[0]?.match(/\/(\d+)$/);
-      const postId = idMatch?.[1] ?? dataIds[0] ?? null;
+      const latestPost = sortedPostLinks[0] ?? null;
+      const postId = firstEdit?.match(/\/manage\/newpost\/(\d+)/)?.[1]
+                  ?? latestPost?.match(/\/(\d+)$/)?.[1]
+                  ?? null;
 
       return {
         postId,
         editLinks: editLinks.slice(0, 3),
-        postLinks: postLinks.slice(0, 5),
-        dataIds: dataIds.slice(0, 3),
+        postLinks: sortedPostLinks.slice(0, 5),
       };
     });
     logger.info(`[blog_publisher] Post info: ${JSON.stringify(postInfo)}`);
@@ -341,34 +346,53 @@ async function publishPost(page, content, blogName) {
       const blogHost = `https://${blogName}.tistory.com`;
       publishedUrl = `${blogHost}/${postInfo.postId}`;
 
-      // 편집 페이지로 이동해서 공개 변경
+      // 편집 페이지에서 공개 전환 (기존 포스트 수정 시 사이드바 즉시 노출)
       try {
         await page.goto(`${blogHost}/manage/newpost/${postInfo.postId}`, {
           waitUntil: 'networkidle', timeout: 20000,
         });
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(2500);
 
-        // 공개 설정 버튼 클릭 (편집 페이지에서는 활성화 상태여야 함)
-        await page.click('button:has-text("완료")', { timeout: 10000 });
-        await page.waitForTimeout(2000);
+        // 편집 페이지에서 "비공개" 상태 버튼 찾아서 공개로 변경
+        // (새 글 쓰기와 달리 사이드바가 항상 열려있고 비공개 상태 표시)
+        const changed = await page.evaluate(() => {
+          // 현재 비공개 상태 버튼 또는 select 탐색
+          const btns = [...document.querySelectorAll('button')];
+          const privBtn = btns.find((b) =>
+            b.textContent?.includes('비공개') || b.textContent?.includes('선택 안 함')
+          );
+          if (privBtn && !privBtn.disabled) {
+            privBtn.disabled = false;
+            privBtn.removeAttribute('disabled');
+            privBtn.click();
+            return 'clicked';
+          }
+          // hidden select 방식
+          const selects = [...document.querySelectorAll('select')];
+          for (const sel of selects) {
+            const pub = [...sel.options].find((o) => o.text.trim() === '공개' || o.value === '0');
+            if (pub) { sel.value = pub.value; sel.dispatchEvent(new Event('change', {bubbles:true})); return 'select'; }
+          }
+          return null;
+        });
+        await page.waitForTimeout(700);
 
-        // 선택 안 함 버튼이 활성화 됐는지 확인
-        const isEnabled = await page.$('button:has-text("선택 안 함"):not([disabled])');
-        if (isEnabled) {
-          await page.click('button:has-text("선택 안 함")', { timeout: 3000 });
-          await page.waitForTimeout(700);
+        if (changed) {
+          // 공개 드롭다운에서 "공개" 옵션 선택
           await page.evaluate(() => {
             const all = [...document.querySelectorAll('li, [role="option"]')];
             const target = all.find((el) => el.textContent?.trim() === '공개' && el.offsetParent !== null);
             if (target) target.click();
           });
           await page.waitForTimeout(500);
-          await page.click('button:has-text("발행"), button:has-text("공개 발행")', { timeout: 5000 });
-          await page.waitForTimeout(3000);
-          logger.info(`[blog_publisher] Post made public: ${publishedUrl}`);
-        } else {
-          logger.warn('[blog_publisher] Visibility button still disabled on edit page — post remains private');
         }
+
+        // 저장 (완료/발행/비공개 저장 중 하나)
+        for (const sel of ['button:has-text("발행")', 'button:has-text("완료")', 'button:has-text("비공개 저장")']) {
+          try { await page.click(sel, { timeout: 4000 }); break; } catch { /* 다음 */ }
+        }
+        await page.waitForTimeout(2000);
+        logger.info(`[blog_publisher] Public conversion attempted: ${changed}`);
       } catch (err) {
         logger.warn(`[blog_publisher] Public conversion failed: ${err.message}`);
       }
