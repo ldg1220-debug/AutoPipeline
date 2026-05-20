@@ -207,10 +207,11 @@ async function generateCharacterImages(keyword, scripts) {
       `Background scene: ${bgList[i]}. ` +
       `Full body character centered, 9:16 portrait composition, high quality.`;
 
-    // dall-e-3 시도 → 권한 없으면 dall-e-2 폴백 (dall-e-2는 1024x1024만 지원)
+    // gpt-image-1 (신규 계정) → dall-e-3 → dall-e-2 순서로 폴백
     const models = [
-      { model: 'dall-e-3', size: '1024x1792', quality: 'standard' },
-      { model: 'dall-e-2', size: '1024x1024', quality: undefined },
+      { model: 'gpt-image-1', size: '1024x1536', quality: 'high' },
+      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
+      { model: 'dall-e-2',    size: '1024x1024', quality: undefined },
     ];
     let imageUrl = null;
     for (const m of models) {
