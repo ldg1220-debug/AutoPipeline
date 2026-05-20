@@ -197,9 +197,15 @@ async function generateSceneImages(keyword, scripts, category) {
     await throttle(300);
     const cachedUrl = await findSimilarImage(keyword, i);
     if (cachedUrl) {
-      logger.info(`[media_generator] Reusing cached scene act${i} (${actLabels[i]}): ${keyword}`);
-      results.push(cachedUrl);
-      continue;
+      // 로컬 파일 경로인 경우 실제 존재 여부 검증 (이전 실행에서 생성 후 삭제된 경우 방지)
+      const isValid = cachedUrl.startsWith('http://') || cachedUrl.startsWith('https://')
+        || await fs.access(cachedUrl).then(() => true).catch(() => false);
+      if (isValid) {
+        logger.info(`[media_generator] Reusing cached scene act${i} (${actLabels[i]}): ${keyword}`);
+        results.push(cachedUrl);
+        continue;
+      }
+      logger.info(`[media_generator] Cached file missing, regenerating act${i}: ${keyword}`);
     }
 
     // 매읽남 캐릭터 + 씬별 포즈 + 씬별 배경 조합
@@ -954,16 +960,18 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
     ],
   };
 
-  const renderResponse = await axios.post(
+  // Shotstack 동시 렌더 제한 대비: 이전 렌더가 타임아웃 후에도 서버에서 돌고 있을 수 있으므로
+  // 제출 전 3초 대기해 슬롯 확보 가능성 높임
+  await throttle(3000);
+
+  const submitRender = () => axios.post(
     `https://api.shotstack.io/${config.shotstack.env}/render`,
     { timeline, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } },
-    {
-      headers: { 'x-api-key': shotstackApiKey, 'Content-Type': 'application/json' },
-      timeout: 30000,
-    }
+    { headers: { 'x-api-key': shotstackApiKey, 'Content-Type': 'application/json' }, timeout: 30000 }
   );
 
-  const renderId = renderResponse.data.response.id;
+  let renderResponse = await submitRender();
+  let renderId = renderResponse.data.response.id;
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
   const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
@@ -981,7 +989,19 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
       logger.info(`[media_generator] Video saved: ${outputPath}`);
       return outputPath;
     }
-    if (status === 'failed') throw new Error(`Shotstack render failed: ${renderId}`);
+    if (status === 'failed') {
+      // 초반(25초 이내) 즉시 실패는 동시 렌더 초과일 가능성이 높음 → 90초 대기 후 1회 재시도
+      if (i < 5) {
+        logger.warn(`[media_generator] Render failed early (poll ${i}). Waiting 90s and retrying...`);
+        await new Promise((r) => setTimeout(r, 90000));
+        renderResponse = await submitRender();
+        renderId = renderResponse.data.response.id;
+        logger.info(`[media_generator] Shotstack render retried: ${renderId}`);
+        i = 0; // 폴링 카운터 리셋
+        continue;
+      }
+      throw new Error(`Shotstack render failed: ${renderId}`);
+    }
   }
   throw new Error(`Shotstack render timed out: ${renderId}`);
 }
@@ -1286,17 +1306,22 @@ async function generateLongFormMedia(content) {
   tracks.push({ clips: imageClips });
   if (audioClips.length)     tracks.push({ clips: audioClips });
 
-  const renderResponse = await axios.post(
+  // 롱폼도 동시 렌더 슬롯 확보를 위해 제출 전 대기
+  await throttle(5000);
+
+  const submitLongRender = () => axios.post(
     `https://api.shotstack.io/${config.shotstack.env}/render`,
     { timeline: { tracks }, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } },
     { headers: { 'x-api-key': config.shotstack.apiKey, 'Content-Type': 'application/json' }, timeout: 30000 }
   );
-  const renderId = renderResponse.data.response.id;
+
+  let renderResponse = await submitLongRender();
+  let renderId = renderResponse.data.response.id;
   logger.info(`[media_generator] Long-form Shotstack render started: ${renderId}`);
 
-  // 롱폼은 렌더링 시간이 길어 180회(15분) 폴링
+  // 롱폼은 섹션 수가 많아 렌더링이 길다 — 240회(20분) 폴링
   const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
-  for (let i = 0; i < 180; i++) {
+  for (let i = 0; i < 240; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await axios.get(pollUrl, { headers: { 'x-api-key': config.shotstack.apiKey }, timeout: 10000 });
     const { status, url } = statusRes.data.response;
@@ -1308,7 +1333,18 @@ async function generateLongFormMedia(content) {
       logger.info(`[media_generator] Long-form video saved: ${videoPath}`);
       return result;
     }
-    if (status === 'failed') throw new Error(`Shotstack long-form render failed: ${renderId}`);
+    if (status === 'failed') {
+      if (i < 5) {
+        logger.warn(`[media_generator] Long-form render failed early (poll ${i}). Waiting 90s and retrying...`);
+        await new Promise((r) => setTimeout(r, 90000));
+        renderResponse = await submitLongRender();
+        renderId = renderResponse.data.response.id;
+        logger.info(`[media_generator] Long-form render retried: ${renderId}`);
+        i = 0;
+        continue;
+      }
+      throw new Error(`Shotstack long-form render failed: ${renderId}`);
+    }
   }
   throw new Error(`Shotstack long-form render timed out: ${renderId}`);
 }
