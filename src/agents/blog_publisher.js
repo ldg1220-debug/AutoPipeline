@@ -337,6 +337,13 @@ export async function publishBlogPosts(contentData) {
 
   const updated = [];
   for (const content of contents) {
+    // 블로그 QA REJECTED 포스트 스킵
+    if (content.blog_qa?.status === 'REJECTED') {
+      logger.warn(`[blog_publisher] Blog QA REJECTED, skipping: ${content.keyword} | ${(content.blog_qa.issues ?? []).join(' / ')}`);
+      updated.push({ ...content, blog_publish: { status: 'skipped_blog_qa' } });
+      continue;
+    }
+
     // 이미 발행된 포스트 스킵
     const existing = db.prepare('SELECT id FROM blog_posts WHERE keyword=? AND status=?')
       .get(content.keyword, 'published');

@@ -7,7 +7,7 @@ import { startScheduler } from './utils/scheduler.js';
 import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
-import { runTextQA, runVisionQA } from './agents/qa_editor.js';
+import { runTextQA, runVisionQA, runBlogQA } from './agents/qa_editor.js';
 import { generateAllMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
@@ -294,6 +294,24 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.error('[app] Blog Part 2 (blog_content_enhancer) failed.', { message: err.message });
     await sendErrorAlert('blog_content_enhancer', err.message);
     return;
+  }
+
+  // ── Blog QA: 본문 품질 검수 (섹션 길이·SEO·가독성) ────────────────────
+  try {
+    draftData = await runBlogQA(draftData);
+    const blogQaRejected = (draftData.contents ?? []).filter(
+      (c) => c.blog_qa?.status === 'REJECTED'
+    );
+    if (blogQaRejected.length > 0) {
+      logger.warn(
+        `[app] Blog QA rejected ${blogQaRejected.length} post(s): ` +
+        blogQaRejected.map((c) => c.keyword).join(', ')
+      );
+    }
+    // REJECTED 포스트는 asset·monetize·publish 단계에서 자동 스킵됨
+    logger.info(`[app] Blog QA complete. Approved: ${(draftData.contents ?? []).filter((c) => c.blog_qa?.status !== 'REJECTED').length}`);
+  } catch (err) {
+    logger.warn('[app] Blog QA failed. Continuing without QA filter.', { message: err.message });
   }
 
   // ── Part 3: Asset Builder ──────────────────────────────────────────────

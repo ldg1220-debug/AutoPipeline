@@ -62,6 +62,49 @@ async function runLLMQA(content) {
   return JSON.parse(response.data.choices[0].message.content);
 }
 
+// ── ① 대본 흐름 QA ────────────────────────────────────────────────────────
+/**
+ * hook → context → insight → summary → cta 흐름이 자연스러운지 검수.
+ * - 훅 흡입력: 시청자가 계속 보고 싶어지는가
+ * - 논리 연결: 각 구간이 자연스럽게 이어지는가
+ * - CTA 명확성: 구독·좋아요·저장 유도가 분명한가
+ * flow_score < 60 이면 REJECTED, 60~74 이면 경고만.
+ */
+async function runScriptFlowQA(content) {
+  const s = content.shortform_script ?? {};
+  const prompt =
+    `당신은 한국 유튜브 숏폼 대본 전문 PD입니다. 아래 대본의 흐름을 평가하고 JSON으로만 응답하세요.\n\n` +
+    `키워드: ${content.keyword}\n` +
+    `[훅] ${s.hook ?? ''}\n` +
+    `[컨텍스트] ${s.context ?? ''}\n` +
+    `[인사이트] ${s.insight ?? ''}\n` +
+    `[요약] ${s.summary ?? ''}\n` +
+    `[CTA] ${s.cta ?? ''}\n\n` +
+    `평가 항목:\n` +
+    `1. hook_score (0~100): 훅이 시청자의 호기심을 즉시 자극하는가. 첫 3초 안에 계속 보게 만드는가.\n` +
+    `2. flow_score (0~100): hook→context→insight→summary 논리 흐름이 자연스럽게 연결되는가.\n` +
+    `3. cta_score (0~100): CTA가 구독/좋아요/저장 중 최소 하나를 명확히 유도하는가.\n` +
+    `4. issues (string[]): 각 항목에서 발견된 구체적 문제점 (없으면 빈 배열).\n` +
+    `5. suggestions (string[]): 개선 제안 (없으면 빈 배열).\n\n` +
+    `JSON만 반환: {"hook_score":0,"flow_score":0,"cta_score":0,"issues":[],"suggestions":[]}`;
+
+  await throttle(2000);
+  const res = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    },
+    {
+      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 30000,
+    }
+  );
+  return JSON.parse(res.data.choices[0].message.content);
+}
+
 function validateSchema(content) {
   const required = ['keyword', 'category', 'series_name', 'shortform_script', 'image_prompt', 'blog_draft'];
   const missing = required.filter((f) => !content[f]);
@@ -184,6 +227,9 @@ export async function runTextQA(contentData) {
     let grammarCheck = 'PASS';
     let llmIssues = '';
 
+    let flowScore = 75, hookScore = 75, ctaScore = 75;
+    let flowIssues = [], flowSuggestions = [];
+
     if (config.openai.apiKey) {
       try {
         const llmResult = await runLLMQA(content);
@@ -193,13 +239,30 @@ export async function runTextQA(contentData) {
       } catch (err) {
         logger.warn(`[qa_editor] LLM QA failed for: ${content.keyword}`, { message: err.message });
       }
+
+      // ① 대본 흐름 QA
+      try {
+        const flowResult = await runScriptFlowQA(content);
+        hookScore  = flowResult.hook_score  ?? 75;
+        flowScore  = flowResult.flow_score  ?? 75;
+        ctaScore   = flowResult.cta_score   ?? 75;
+        flowIssues = flowResult.issues      ?? [];
+        flowSuggestions = flowResult.suggestions ?? [];
+
+        if (flowIssues.length > 0) {
+          logger.warn(`[qa_editor] Script flow issues: ${content.keyword} | ${flowIssues.join(' / ')}`);
+        }
+        if (flowSuggestions.length > 0) {
+          logger.info(`[qa_editor] Script suggestions: ${content.keyword} | ${flowSuggestions.join(' / ')}`);
+        }
+      } catch (err) {
+        logger.warn(`[qa_editor] Script flow QA failed: ${content.keyword}`, { message: err.message });
+      }
     } else {
       logger.warn(`[qa_editor] OPENAI_API_KEY not set. Skipping LLM QA: ${content.keyword}`);
     }
 
     const hookIssues = validateHookQuality(content);
-    // hookIssues는 warn으로만 기록하고 거부 기준으로 쓰지 않는다.
-    // 거부율이 높아지는 것을 방지하고 점진적으로 개선하는 방향.
     if (hookIssues.length > 0) {
       logger.warn(`[qa_editor] Hook quality issue: ${content.keyword} | ${hookIssues.join(', ')}`);
     }
@@ -209,8 +272,9 @@ export async function runTextQA(contentData) {
     if (bannedDetected) reasons.push('금지어 감지됨');
     if (grammarCheck === 'FAIL') reasons.push('문법 오류 감지됨');
     if (factScore < 60) reasons.push(`팩트체크 점수 미달 (${factScore}/100)`);
-    // llmIssues는 리포트에 기록만 하고 거부 기준으로 쓰지 않는다.
-    // 금융 수치(금리, 금액 등)에 LLM이 항상 "확인 필요" 메모를 남겨 전량 REJECT되는 문제 방지.
+    if (flowScore < 60) reasons.push(`대본 흐름 점수 미달 (${flowScore}/100)`);
+    if (hookScore < 60) reasons.push(`훅 흡입력 점수 미달 (${hookScore}/100)`);
+    // llmIssues는 참고용으로만 기록 (금융 수치 "확인 필요" 메모로 전량 REJECT되는 문제 방지)
 
     const approved = reasons.length === 0;
     const report = {
@@ -220,7 +284,12 @@ export async function runTextQA(contentData) {
       fact_check_score: factScore,
       grammar_check: grammarCheck,
       banned_words_detected: bannedDetected,
-      llm_issues: llmIssues,         // 참고용으로만 기록
+      llm_issues: llmIssues,
+      hook_score: hookScore,
+      flow_score: flowScore,
+      cta_score: ctaScore,
+      flow_issues: flowIssues,
+      flow_suggestions: flowSuggestions,
       video_layout_check: 'PENDING',
       audio_sync_check: 'PENDING',
       final_decision: approved ? 'APPROVED' : 'REJECTED',
@@ -276,6 +345,155 @@ export async function runVisionQA(textQaData) {
   }
 
   return { ...textQaData, evaluated_at: new Date().toISOString(), stage: 'vision', reports };
+}
+
+// ─────────────────────────────────────────────────────────────
+// ③ 블로그 본문 QA — blog_content_enhancer 완료 후 실행
+// ─────────────────────────────────────────────────────────────
+const BLOG_MIN_SECTION_CHARS = 200;   // 섹션당 최소 글자 수
+const BLOG_MIN_FAQ_CHARS     = 60;    // FAQ 답변 최소 글자 수
+const BLOG_MIN_SECTION_COUNT = 3;     // 최소 섹션 수
+
+/**
+ * LLM으로 블로그 본문 SEO 품질을 평가한다.
+ * - SEO 키워드가 본문에 자연스럽게 포함됐는가
+ * - 도입부가 독자를 붙잡는가
+ * - 전체 구성이 검색 의도와 맞는가
+ */
+async function runBlogLLMQA(content) {
+  const draft = content.blog_draft ?? {};
+  const sections = draft.sections ?? [];
+  const bodyPreview = sections.slice(0, 3)
+    .map((s) => `[${s.heading}] ${(s.body ?? '').slice(0, 200)}`)
+    .join('\n');
+
+  const prompt =
+    `당신은 한국 경제 블로그 SEO 전문가입니다. 아래 블로그 포스트 초안을 검수하고 JSON으로만 응답하세요.\n\n` +
+    `키워드: ${content.keyword}\n` +
+    `제목: ${draft.title ?? ''}\n` +
+    `메타 설명: ${draft.meta_description ?? ''}\n` +
+    `SEO 키워드: ${(draft.seo_keywords ?? []).join(', ')}\n` +
+    `본문 미리보기:\n${bodyPreview}\n\n` +
+    `평가 항목:\n` +
+    `1. seo_score (0~100): SEO 키워드가 제목·본문에 자연스럽게 포함됐는가.\n` +
+    `2. readability_score (0~100): 독자가 처음 3초 안에 읽고 싶어지는 도입부인가.\n` +
+    `3. structure_score (0~100): H2/H3 구성이 검색 의도에 맞는가.\n` +
+    `4. issues (string[]): 발견된 문제점. 없으면 빈 배열.\n` +
+    `5. suggestions (string[]): 개선 제안. 없으면 빈 배열.\n\n` +
+    `JSON만 반환: {"seo_score":0,"readability_score":0,"structure_score":0,"issues":[],"suggestions":[]}`;
+
+  await throttle(2000);
+  const res = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    },
+    {
+      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 30000,
+    }
+  );
+  return JSON.parse(res.data.choices[0].message.content);
+}
+
+/**
+ * 블로그 본문 규칙 기반 검수.
+ * - 섹션 수 및 섹션별 최소 글자 수
+ * - FAQ 답변 최소 글자 수
+ * - SEO 키워드 본문 포함 여부
+ */
+function validateBlogStructure(content) {
+  const draft  = content.blog_draft ?? {};
+  const sections = draft.sections ?? [];
+  const faq    = draft.faq ?? [];
+  const issues = [];
+
+  if (sections.length < BLOG_MIN_SECTION_COUNT) {
+    issues.push(`섹션 수 부족 (${sections.length}개, 최소 ${BLOG_MIN_SECTION_COUNT}개)`);
+  }
+
+  const shortSections = sections.filter((s) => (s.body ?? '').length < BLOG_MIN_SECTION_CHARS);
+  if (shortSections.length > 0) {
+    issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${BLOG_MIN_SECTION_CHARS}자)`);
+  }
+
+  const shortFaq = faq.filter((f) => (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
+  if (shortFaq.length > 0) {
+    issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
+  }
+
+  const bodyAll = sections.map((s) => s.body ?? '').join(' ');
+  const seoKeywords = draft.seo_keywords ?? [content.keyword];
+  const missingSeo = seoKeywords.filter((kw) => !bodyAll.includes(kw));
+  if (missingSeo.length > 0) {
+    issues.push(`SEO 키워드 본문 미포함: [${missingSeo.join(', ')}]`);
+  }
+
+  return issues;
+}
+
+/**
+ * blog_content_enhancer 완료 후 호출.
+ * 규칙 검수 + LLM 품질 평가를 실행하고 결과를 content에 주입해 반환.
+ * REJECTED 시 blog_qa_status = 'REJECTED' 로 표시 (blog_publisher가 스킵).
+ */
+export async function runBlogQA(contentData) {
+  const contents = contentData?.contents ?? [];
+  if (contents.length === 0) return contentData;
+
+  const reviewed = [];
+  for (const content of contents) {
+    logger.info(`[qa_editor] Blog QA: ${content.keyword}`);
+
+    const structureIssues = validateBlogStructure(content);
+    let seoScore = 75, readabilityScore = 75, structureScore = 75;
+    let llmIssues = [], llmSuggestions = [];
+
+    if (config.openai.apiKey && (content.blog_draft?.sections ?? []).length > 0) {
+      try {
+        const llmResult = await runBlogLLMQA(content);
+        seoScore          = llmResult.seo_score          ?? 75;
+        readabilityScore  = llmResult.readability_score  ?? 75;
+        structureScore    = llmResult.structure_score    ?? 75;
+        llmIssues         = llmResult.issues             ?? [];
+        llmSuggestions    = llmResult.suggestions        ?? [];
+      } catch (err) {
+        logger.warn(`[qa_editor] Blog LLM QA failed: ${content.keyword}`, { message: err.message });
+      }
+    }
+
+    const allIssues = [...structureIssues, ...llmIssues];
+    const hardFail  = structureIssues.length > 0 || seoScore < 50 || readabilityScore < 50;
+    const status    = hardFail ? 'REJECTED' : 'APPROVED';
+
+    if (allIssues.length > 0) {
+      logger.warn(`[qa_editor] Blog QA ${content.keyword} → ${status} | ${allIssues.join(' / ')}`);
+    } else {
+      logger.info(`[qa_editor] Blog QA ${content.keyword} → APPROVED`);
+    }
+
+    if (llmSuggestions.length > 0) {
+      logger.info(`[qa_editor] Blog suggestions: ${content.keyword} | ${llmSuggestions.join(' / ')}`);
+    }
+
+    reviewed.push({
+      ...content,
+      blog_qa: {
+        status,
+        seo_score:         seoScore,
+        readability_score: readabilityScore,
+        structure_score:   structureScore,
+        issues:            allIssues,
+        suggestions:       llmSuggestions,
+        checked_at:        new Date().toISOString(),
+      },
+    });
+  }
+
+  return { ...contentData, blog_qa_at: new Date().toISOString(), contents: reviewed };
 }
 
 // ─────────────────────────────────────────────────────────────

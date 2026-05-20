@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import { throttle } from '../utils/rateLimiter.js';
 
 const require = createRequire(import.meta.url);
 const sharp   = require('sharp');
@@ -37,6 +38,85 @@ const ACT_POSES = [
   'calm wise expression, gentle reassuring smile, ' +
   'one paw raised giving thumbs-up, slightly bowing head',
 ];
+
+// ── ② 이미지 프롬프트 QA + DALL-E 결과 검수 ──────────────────────────────
+/**
+ * image_prompt가 너무 짧거나 추상적이면 GPT-4o-mini로 구체화한다.
+ * 기준: 30자 미만이거나 '경제', '개념' 같은 단어만 있는 경우.
+ */
+async function validateAndEnhancePrompt(imagePrompt, keyword) {
+  const prompt = (imagePrompt ?? '').trim();
+  const isVague = prompt.length < 30 || /^[가-힣a-z\s]{1,20}$/i.test(prompt);
+  if (!isVague) return prompt;
+
+  logger.info(`[media_generator] Image prompt too vague, enhancing: "${prompt}"`);
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content:
+            `다음 한국 경제 유튜브 쇼츠의 DALL-E 3 이미지 프롬프트를 구체적으로 작성해줘.\n` +
+            `키워드: ${keyword}\n현재 프롬프트: ${prompt || '(없음)'}\n\n` +
+            `조건: 영어로, 배경 장면만 묘사, 텍스트/문자 없음, 시각적으로 구체적\n` +
+            `예시: "dramatic red glowing stock market crash screen room, falling numbers reflected on dark walls"\n` +
+            `프롬프트 텍스트만 반환 (JSON 아님):`,
+        }],
+        temperature: 0.7,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      }
+    );
+    return res.data.choices[0].message.content.trim();
+  } catch (err) {
+    logger.warn(`[media_generator] Prompt enhancement failed: ${err.message}`);
+    return prompt || `${keyword} concept korea economic news`;
+  }
+}
+
+/**
+ * DALL-E가 생성한 캐릭터 이미지를 GPT-4o Vision으로 검수한다.
+ * 흰색 고양이 교수 캐릭터가 제대로 생성됐는지, 텍스트가 없는지 확인.
+ * 검수 실패해도 이미 생성된 이미지를 사용한다 (비용 절감).
+ */
+async function verifyCharacterImage(imageUrl, actName) {
+  if (!imageUrl) return { valid: false, reason: 'no image' };
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o',
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                `이 이미지가 한국 유튜브 쇼츠용 캐릭터 이미지로 적합한지 평가해줘.\n` +
+                `기대 조건: 흰색 고양이 교수 캐릭터(안경, 재킷 착용), ${actName} 포즈, 텍스트 없음.\n` +
+                `JSON만 반환: {"valid":true,"reason":""}`,
+            },
+            { type: 'image_url', image_url: { url: imageUrl, detail: 'low' } },
+          ],
+        }],
+        response_format: { type: 'json_object' },
+        max_tokens: 100,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 20000,
+      }
+    );
+    return JSON.parse(res.data.choices[0].message.content);
+  } catch (err) {
+    logger.warn(`[media_generator] Character image verify failed: ${err.message}`);
+    return { valid: true, reason: 'verify_skipped' };
+  }
+}
 
 // ── GPT-4o-mini로 대본 기반 장면 배경 생성 ────────────────────────────────
 /**
@@ -578,13 +658,35 @@ async function generateMedia(content) {
     return result;
   }
 
-  // 2. 매읽남 캐릭터 이미지 3장 생성 (실패 시 Pexels 폴백)
+  // 2. 이미지 프롬프트 QA — 너무 짧거나 추상적이면 GPT-4o-mini로 구체화
+  const enhancedPrompt = await validateAndEnhancePrompt(
+    content.image_prompt, content.keyword
+  );
+  if (enhancedPrompt !== content.image_prompt) {
+    logger.info(`[media_generator] Prompt enhanced: "${enhancedPrompt.slice(0, 60)}..."`);
+    content = { ...content, image_prompt: enhancedPrompt };
+  }
+
+  // 3. 매읽남 캐릭터 이미지 3장 생성 (실패 시 Pexels 폴백)
   let characterUrls;
   try {
     logger.info(`[media_generator] Generating 매읽남 character images (3 poses): ${content.keyword}`);
     characterUrls = await generateCharacterImages(content.keyword, content.shortform_script ?? {});
     const successCount = characterUrls.filter(Boolean).length;
     logger.info(`[media_generator] Character images: ${successCount}/3 generated`);
+
+    // DALL-E 결과 이미지 검수 (경고만, 재생성 없음)
+    const actNames = ['도입(충격)', '본론(설명)', '마무리(정리)'];
+    for (let i = 0; i < characterUrls.length; i++) {
+      if (!characterUrls[i]) continue;
+      await throttle(500);
+      const verify = await verifyCharacterImage(characterUrls[i], actNames[i]);
+      if (!verify.valid) {
+        logger.warn(`[media_generator] Character image ${i + 1} QA failed: ${verify.reason}`);
+      } else {
+        logger.info(`[media_generator] Character image ${i + 1} QA passed`);
+      }
+    }
 
     // 모두 실패 시 Pexels 폴백
     if (successCount === 0) {
@@ -598,7 +700,7 @@ async function generateMedia(content) {
     characterUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 3. 썸네일 생성 (Act 0 캐릭터 이미지 사용)
+  // 4. 썸네일 생성 (Act 0 캐릭터 이미지 사용)
   const thumbCharUrl = characterUrls[0];
   if (thumbCharUrl) {
     try {
@@ -609,7 +711,7 @@ async function generateMedia(content) {
     }
   }
 
-  // 4. 영상 렌더링
+  // 5. 영상 렌더링
   try {
     await renderVideoWithShotstack(content, result.audio, videoPath, characterUrls);
     result.video = videoPath;
