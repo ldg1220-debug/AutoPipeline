@@ -724,6 +724,38 @@ async function generateAudioOpenAI(text, outputPath) {
   return outputPath;
 }
 
+// ── TTS 전달 전 텍스트 정규화 ─────────────────────────────────────────────
+// 한국 금융/뉴스 기사에 자주 쓰이는 한자 약어 → 한국어 변환
+const HANJA_REPLACE = [
+  // 증권사 약어
+  [/NH證/g, 'NH증권'], [/KB證/g, 'KB증권'], [/삼성證/g, '삼성증권'],
+  [/미래에셋證/g, '미래에셋증권'], [/하나證/g, '하나증권'],
+  [/키움證/g, '키움증권'], [/한투證/g, '한국투자증권'],
+  // 기관/수사
+  [/檢/g, '검찰'], [/警/g, '경찰'], [/法院/g, '법원'], [/裁判/g, '재판'],
+  // 국가
+  [/美/g, '미국'], [/韓/g, '한국'], [/日(?!본)/g, '일본'], [/中(?!국)/g, '중국'],
+  [/獨/g, '독일'], [/英/g, '영국'], [/佛/g, '프랑스'],
+  // 금융/경제 일반
+  [/證/g, '증권'], [/株/g, '주가'], [/銀行/g, '은행'], [/銀/g, '은행'],
+  [/債/g, '채권'], [/換/g, '환율'], [/金利/g, '금리'],
+  // 행정/법
+  [/府/g, '정부'], [/院/g, '원'], [/委/g, '위원회'], [/部/g, '부처'],
+  [/長/g, '장관'], [/廳/g, '청'],
+];
+
+function normalizeScriptForTTS(text) {
+  let result = text;
+  for (const [pattern, replacement] of HANJA_REPLACE) {
+    result = result.replace(pattern, replacement);
+  }
+  // 위 목록에 없는 CJK 한자는 공백으로 제거 (TTS가 한자를 잘못 읽는 방지)
+  result = result.replace(/[一-鿿㐀-䶿]/g, '');
+  // 중복 공백 정리
+  result = result.replace(/\s{2,}/g, ' ').trim();
+  return result;
+}
+
 // ── 오디오 생성 (ClovaVoice 우선 → OpenAI 폴백) ───────────────────────────
 async function generateAudio(text, outputPath) {
   const { clientId, clientSecret } = config.clovaVoice;
@@ -823,7 +855,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
   logger.info(`[media_generator] Shotstack render started: ${renderId}`);
 
   const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await axios.get(pollUrl, {
       headers: { 'x-api-key': shotstackApiKey },
@@ -868,7 +900,7 @@ async function generateMedia(content) {
       content.shortform_script?.cta     ?? '',
     ].filter(Boolean);
 
-    let scriptText = parts.join(' ');
+    let scriptText = normalizeScriptForTTS(parts.join(' '));
     if (scriptText.length > 600) scriptText = scriptText.slice(0, 600);
 
     await generateAudio(scriptText, audioPath);
