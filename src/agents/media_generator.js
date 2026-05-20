@@ -230,7 +230,30 @@ async function generateCharacterImages(keyword, scripts) {
   return results;
 }
 
-// Pexels 폴백용 이미지 검색 (캐릭터 생성 실패 시)
+// ── SRT 자막 생성 ─────────────────────────────────────────────────────────
+function formatSRTTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},000`;
+}
+
+/**
+ * buildScenes() 결과를 SRT 형식 문자열로 변환한다.
+ * YouTube 자막 업로드용 (.srt 파일 저장).
+ */
+function buildSRT(scenes) {
+  return scenes
+    .filter((s) => s.text?.trim())
+    .map((scene, i) => {
+      const start = formatSRTTime(scene.start);
+      const end   = formatSRTTime(scene.start + scene.duration);
+      return `${i + 1}\n${start} --> ${end}\n${scene.text}`;
+    })
+    .join('\n\n');
+}
+
+// ── Pexels 폴백용 이미지 검색 (캐릭터 생성 실패 시) ─────────────────────
 const CATEGORY_IMG_QUERY = {
   finance:       'korea money finance stock market business graph',
   economy:       'korea economy news newspaper business people',
@@ -758,10 +781,11 @@ async function generateMedia(content) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const audioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp3`);
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+  const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}.srt`);
 
   const thumbPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_a.jpg`);
   const thumbPathB = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_b.jpg`);
-  const result = { keyword: content.keyword, audio: null, video: null, thumbnail: null, thumbnail_b: null };
+  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_b: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -783,6 +807,30 @@ async function generateMedia(content) {
 
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
+
+    // SRT 생성: 오디오 크기로 총 길이 추정 → 씬 타이밍 계산 → SRT 저장
+    try {
+      const audioStats = await fs.stat(audioPath);
+      const totalDuration = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+      const scenes = buildScenes(
+        {
+          hook:    content.shortform_script?.hook    ?? '',
+          context: content.shortform_script?.context ?? '',
+          insight: content.shortform_script?.insight ?? '',
+          summary: content.shortform_script?.summary ?? '',
+          cta:     content.shortform_script?.cta     ?? '',
+        },
+        totalDuration
+      );
+      const srtContent = buildSRT(scenes);
+      if (srtContent) {
+        await fs.writeFile(srtPath, srtContent, 'utf8');
+        result.srt = srtPath;
+        logger.info(`[media_generator] SRT saved: ${srtPath} (${scenes.length}개 자막)`);
+      }
+    } catch (srtErr) {
+      logger.warn(`[media_generator] SRT generation failed: ${srtErr.message}`);
+    }
   } catch (err) {
     const detail = err.response?.data
       ? Buffer.isBuffer(err.response.data)

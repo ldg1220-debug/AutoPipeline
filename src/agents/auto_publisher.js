@@ -115,8 +115,17 @@ async function publishToYouTube(content, accessToken) {
 
   const videoId = response.data.id;
 
-  // 썸네일 A 업로드 (Variant A = 초기 버전)
+  // 자막(SRT) 업로드
   const mediaDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
+  const srtPath  = path.resolve(mediaDir, `${safeKeyword}.srt`);
+  let captionsUploaded = false;
+  try {
+    captionsUploaded = await uploadYouTubeCaptions(videoId, srtPath, accessToken);
+  } catch (err) {
+    logger.warn(`[auto_publisher] Captions upload failed: ${err.message}`);
+  }
+
+  // 썸네일 A 업로드 (Variant A = 초기 버전)
   const thumbPathA = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
   const thumbPathB = path.resolve(mediaDir, `${safeKeyword}_thumb_b.jpg`);
 
@@ -148,7 +157,59 @@ async function publishToYouTube(content, accessToken) {
     publish_at: publishAt,
     url: `https://youtu.be/${videoId}`,
     thumbnail_uploaded: thumbnailUploaded,
+    captions_uploaded:  captionsUploaded,
   };
+}
+
+/**
+ * YouTube 자막(SRT) 업로드.
+ * captions.insert API: multipart/related (JSON snippet + SRT 텍스트)
+ */
+async function uploadYouTubeCaptions(videoId, srtPath, accessToken) {
+  let srtContent;
+  try {
+    srtContent = await fs.readFile(srtPath, 'utf8');
+  } catch {
+    logger.warn(`[auto_publisher] SRT file not found, skipping: ${srtPath}`);
+    return false;
+  }
+  if (!srtContent.trim()) return false;
+
+  const snippet = JSON.stringify({
+    snippet: {
+      videoId,
+      language: 'ko',
+      name: '한국어',
+      isDraft: false,
+    },
+  });
+
+  const boundary = 'caption_boundary_ap';
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    snippet,
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    srtContent,
+    `--${boundary}--`,
+  ].join('\r\n');
+
+  await axios.post(
+    `https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet`,
+    body,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      timeout: 30000,
+    }
+  );
+  logger.info(`[auto_publisher] Captions uploaded for video: ${videoId}`);
+  return true;
 }
 
 /**
