@@ -7,6 +7,13 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { createTistoryContext, isLoggedIn } from '../utils/playwright_session.js';
 import db from '../db/db.js';
+import {
+  loadTistoryCategories,
+  matchBestCategory,
+  generateBlogTags,
+  setCategoryInEditor,
+  setTagsInEditor,
+} from '../utils/tistoryClassifier.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -178,33 +185,37 @@ async function publishPost(page, content, blogName) {
     } catch { /* 무시 */ }
   }
 
-  // 카테고리 설정 (있을 때만)
-  const categoryMap = {
-    economy:       '경제',
-    finance:       '재테크',
-    realestate:    '부동산',
-    health:        '건강',
-    social:        '사회',
-    entertainment: '연예',
-  };
-  const categoryName = categoryMap[content.category];
-  if (categoryName) {
-    try {
-      await page.click('.category-btn, [data-tistory-react-app="Category"]', { timeout: 3000 });
-      await page.waitForTimeout(500);
-      await page.click(`text="${categoryName}"`, { timeout: 3000 });
-    } catch { /* 카테고리 없으면 무시 */ }
+  // ── 카테고리 자동 분류 ───────────────────────────────────────────────────
+  try {
+    const availableCategories = await loadTistoryCategories(
+      blogName,
+      config.tistory.accessToken,
+      page
+    );
+    const bestCategory = await matchBestCategory(
+      availableCategories,
+      keyword,
+      content.category ?? 'economy'
+    );
+    if (bestCategory) {
+      const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
+      logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
+    }
+  } catch (err) {
+    logger.warn(`[blog_publisher] Category classification failed: ${err.message}`);
   }
 
-  // 태그 입력
-  const tags = blog_draft?.seo_keywords?.slice(0, 5) ?? [keyword];
+  // ── 태그 자동 생성 ──────────────────────────────────────────────────────
   try {
-    const tagInput = await page.$('input[name="tag"], .tag-input, input[placeholder*="태그"]');
-    if (tagInput) {
-      await tagInput.fill(tags.join(','));
-      await tagInput.press('Enter');
-    }
-  } catch { /* 태그 실패해도 계속 */ }
+    const generatedTags = await generateBlogTags(
+      keyword,
+      blog_draft?.seo_keywords ?? [],
+      content.category ?? 'economy'
+    );
+    await setTagsInEditor(page, generatedTags);
+  } catch (err) {
+    logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
+  }
 
   // 썸네일 업로드 (있을 때만)
   if (blog_assets?.thumbnail) {

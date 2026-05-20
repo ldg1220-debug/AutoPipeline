@@ -56,3 +56,14 @@ CREATE TABLE IF NOT EXISTS image_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_image_cache_keyword   ON image_cache(keyword);
 CREATE INDEX IF NOT EXISTS idx_image_cache_act       ON image_cache(act_index);
+
+-- tistory_categories: 카테고리 목록 캐시 (하루 1회 API 갱신)
+CREATE TABLE IF NOT EXISTS tistory_categories (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  blog_name     TEXT    NOT NULL,
+  category_id   TEXT    NOT NULL,
+  category_name TEXT    NOT NULL,
+  parent_name   TEXT,
+  cached_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tistory_cat ON tistory_categories(blog_name, category_id);
