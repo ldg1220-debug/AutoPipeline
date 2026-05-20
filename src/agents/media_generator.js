@@ -433,10 +433,10 @@ function buildTextClips(scenes, seriesName, totalDuration) {
   clips.push({
     asset: {
       type: 'text',
-      text: `📺 ${seriesName}`,
+      text: seriesName,
       width: 900,
       height: 100,
-      font: { family: 'Noto Sans', size: 40, color: '#FFFFFF', weight: '700' },
+      font: { family: 'Noto Sans KR', size: 40, color: '#FFFFFF', weight: '700' },
       alignment: { horizontal: 'center', vertical: 'center' },
       background: { color: '#000000', opacity: 0.85, borderRadius: 8, padding: 16 },
     },
@@ -455,7 +455,7 @@ function buildTextClips(scenes, seriesName, totalDuration) {
         text,
         width: 900,
         height: 440,
-        font: { family: 'Noto Sans', size: 36, color: '#FFFFFF', weight: '700', lineHeight: 1.5 },
+        font: { family: 'Noto Sans KR', size: 36, color: '#FFFFFF', weight: '700', lineHeight: 1.5 },
         alignment: { horizontal: 'center', vertical: 'center' },
         background: { color: '#000000', opacity: 0.82, borderRadius: 14, padding: 24 },
       },
