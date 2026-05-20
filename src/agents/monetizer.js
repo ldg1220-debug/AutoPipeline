@@ -6,6 +6,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
+import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../utils/internalLinks.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +64,7 @@ const BLOG_STYLES = `<style>
 .cta-box h3{margin:0 0 10px;font-size:20px}
 .cta-box p{margin:0;font-size:14px;opacity:.9;line-height:1.7}
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
+${RELATED_POSTS_CSS}
 </style>`;
 
 // ── ① TL;DR 박스 ──────────────────────────────────────────────────────────
@@ -318,6 +320,19 @@ async function monetizeBlogDraft(content) {
     ? `<script type="application/ld+json">${JSON.stringify(blog_draft.json_ld)}</script>`
     : '';
 
+  // 내부 링크: 발행된 관련 포스트 조회 (최대 3개)
+  const currentPostUrl = content.blog_post_url ?? null;
+  let relatedPostsHtml = '';
+  try {
+    const related = await findRelatedPosts(keyword, currentPostUrl);
+    relatedPostsHtml = buildRelatedPostsHtml(related);
+    if (related.length > 0) {
+      logger.info(`[monetizer] Internal links: ${related.length}개 관련 포스트 연결 (${keyword})`);
+    }
+  } catch (err) {
+    logger.warn(`[monetizer] Internal links failed: ${err.message}`);
+  }
+
   const youtubeSection =
     `<h2>📺 관련 영상</h2>\n` +
     `<div class="youtube-embed">{{YOUTUBE_EMBED}}</div>`;
@@ -334,13 +349,14 @@ async function monetizeBlogDraft(content) {
     jsonLdScript,
     adsenseSlot('title_below'),
     `<div class="blog-intro">${blog_draft.meta_description || ''}</div>`,
-    tldrHtml,                                     // ① TL;DR 박스
-    infoCardHtml,                                 // ③ 핵심 수치 인포그래픽
-    sectionsHtml,                                 // ① 섹션 헤더 + 키워드 하이라이트
+    tldrHtml,                                     // TL;DR 박스
+    infoCardHtml,                                 // 핵심 수치 인포그래픽
+    sectionsHtml,                                 // 섹션 헤더 + 키워드 하이라이트
     adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,
-    tagCloudHtml,                                 // ① 키워드 태그 클라우드
+    relatedPostsHtml,                             // 관련 포스트 내부 링크 카드
+    tagCloudHtml,                                 // 키워드 태그 클라우드
     youtubeSection,
     ctaBox,
     adsenseSlot('post_end'),
