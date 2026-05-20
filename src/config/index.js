@@ -79,7 +79,9 @@ export const config = {
     // 지원 모델:
     //   OpenAI   — gpt-4o-mini (기본, 저렴), gpt-4o (정확도 우선)
     //   Anthropic — claude-haiku-4-5 (빠름), claude-sonnet-4-6 (정확도 우선)
-    model: process.env.TOPIC_GROUPER_MODEL || 'gpt-4o-mini',
+    model:           process.env.TOPIC_GROUPER_MODEL || 'gpt-4o-mini',
+    // 검수 점수가 이 값 미만이면 상위 모델로 에스컬레이션
+    reviewThreshold: parseInt(process.env.TOPIC_GROUPER_THRESHOLD || '70', 10),
   },
   runtime: {
     dryRun:       process.env.DRY_RUN === 'true',
