@@ -223,7 +223,8 @@ async function generateCharacterImages(keyword, scripts) {
       // 캐시에 저장 (비동기, 실패해도 무시)
       saveImageToCache(keyword, i, imageUrl).catch(() => {});
     } catch (err) {
-      logger.warn(`[media_generator] DALL-E image ${i + 1} failed: ${err.message}`);
+      const detail = err.response?.data?.error?.message ?? err.message;
+      logger.warn(`[media_generator] DALL-E image ${i + 1} failed: ${detail}`);
       results.push(null);
     }
   }
