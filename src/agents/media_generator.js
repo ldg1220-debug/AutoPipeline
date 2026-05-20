@@ -209,29 +209,40 @@ async function generateCharacterImages(keyword, scripts) {
 
     // gpt-image-1 (신규 계정) → dall-e-3 → dall-e-2 순서로 폴백
     const models = [
-      { model: 'gpt-image-1', size: '1024x1536', quality: 'high' },
-      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
-      { model: 'dall-e-2',    size: '1024x1024', quality: undefined },
+      { model: 'gpt-image-1', size: '1024x1536', quality: 'high',     responseFormat: 'url' },
+      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard', responseFormat: 'url' },
+      { model: 'dall-e-2',    size: '1024x1024', quality: undefined,  responseFormat: 'url' },
     ];
     let imageUrl = null;
     for (const m of models) {
       try {
-        const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size };
+        const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size, response_format: m.responseFormat };
         if (m.quality) body.quality = m.quality;
         const res = await axios.post(
           'https://api.openai.com/v1/images/generations',
           body,
           {
             headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-            timeout: 60000,
+            timeout: 120000,
           }
         );
-        imageUrl = res.data.data[0].url;
-        logger.info(`[media_generator] Character image ${i + 1}/3 done (${actLabels[i]}, ${m.model}): ${keyword}`);
-        break;
+        const item = res.data.data[0];
+        if (item.url) {
+          imageUrl = item.url;
+        } else if (item.b64_json) {
+          // URL 미지원 시 로컬 파일로 저장 후 file 경로 반환
+          const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+          const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_char${i}.png`);
+          await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+          imageUrl = imgPath;
+        }
+        if (imageUrl) {
+          logger.info(`[media_generator] Character image ${i + 1}/3 done (${actLabels[i]}, ${m.model}): ${keyword}`);
+          break;
+        }
       } catch (err) {
         const detail = err.response?.data?.error?.message ?? err.message;
-        logger.warn(`[media_generator] DALL-E ${m.model} image ${i + 1} failed: ${detail}`);
+        logger.warn(`[media_generator] Image ${m.model} ${i + 1} failed: ${detail}`);
       }
     }
     if (imageUrl) {
