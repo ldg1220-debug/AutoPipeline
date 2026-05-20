@@ -76,13 +76,12 @@ async function generateDalleThumbnail(content, destPath) {
   return destPath;
 }
 
-// ── Pexels 이미지 소싱 ─────────────────────────────────────────────────────
+// ── Pexels 이미지 소싱 (카테고리 기반 — 폴백용) ──────────────────────────
 async function fetchPexelsImages(keyword, category, count, destDir) {
   const apiKey = config.pexels.apiKey;
   if (!apiKey) return [];
 
   const query = PEXELS_QUERY[category] ?? `${keyword} korea`;
-
   const res = await axios.get('https://api.pexels.com/v1/search', {
     params: { query, per_page: count + 2, orientation: 'landscape' },
     headers: { Authorization: apiKey },
@@ -91,36 +90,203 @@ async function fetchPexelsImages(keyword, category, count, destDir) {
 
   const photos = res.data.photos ?? [];
   const paths = [];
-
   for (let i = 0; i < Math.min(photos.length, count); i++) {
     const photo = photos[i];
-    const srcUrl = photo.src.large;  // 940×627
+    const srcUrl = photo.src.large;
     const destPath = path.join(destDir, `body_${i + 1}.jpg`);
-
     try {
       await downloadImage(srcUrl, destPath);
-
-      // 블로그 본문 이미지 표준 730×490 리사이즈
       const resizedPath = path.join(destDir, `img_${i + 1}.jpg`);
-      await sharp(destPath)
-        .resize(730, 490, { fit: 'cover' })
-        .jpeg({ quality: 85 })
-        .toFile(resizedPath);
+      await sharp(destPath).resize(730, 490, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(resizedPath);
       await fs.unlink(destPath).catch(() => {});
-
-      paths.push({
-        path: resizedPath,
-        image_url: srcUrl,        // Pexels 직접 URL — HTML <img> 삽입용
-        pexels_id: photo.id,
-        photographer: photo.photographer,
-        pexels_url: photo.url,
-      });
+      paths.push({ path: resizedPath, image_url: srcUrl, pexels_id: photo.id, photographer: photo.photographer, pexels_url: photo.url });
     } catch (err) {
       logger.warn(`[blog_asset_builder] Image download failed: ${srcUrl}`, { message: err.message });
     }
   }
-
   return paths;
+}
+
+// ── ② 섹션별 맞춤 이미지 ──────────────────────────────────────────────────
+
+// 섹션 헤딩 키워드 → Pexels 영어 검색어 매핑 (규칙 기반, API 비용 없음)
+const HEADING_EN_MAP = {
+  '배경': 'history background context',
+  '원인': 'cause factors analysis',
+  '영향': 'impact effect change result',
+  '전망': 'forecast future outlook trend',
+  '대응': 'solution strategy response action',
+  '현황': 'current situation status',
+  '금리': 'interest rate central bank',
+  '부동산': 'real estate property apartment',
+  '주식': 'stock market trading chart',
+  '물가': 'price inflation goods',
+  '고용': 'employment job work office',
+  '성장': 'growth development progress',
+  '위기': 'crisis risk danger warning',
+  '정책': 'policy government regulation',
+  '투자': 'investment portfolio finance',
+};
+
+function buildSectionQuery(keyword, sectionHeading, category) {
+  for (const [kr, en] of Object.entries(HEADING_EN_MAP)) {
+    if ((sectionHeading ?? '').includes(kr)) return `${en} korea business`;
+  }
+  return PEXELS_QUERY[category] ?? `${keyword} korea`;
+}
+
+/**
+ * 섹션 헤딩 기반으로 각 섹션에 맞는 이미지를 검색한다.
+ * 섹션마다 다른 쿼리를 사용해 내용과 관련된 이미지를 가져온다.
+ */
+async function fetchSectionImages(sections, keyword, category, destDir) {
+  const apiKey = config.pexels.apiKey;
+  if (!apiKey || !sections?.length) return [];
+
+  const paths = [];
+  const count = Math.min(sections.length, 3);
+
+  for (let i = 0; i < count; i++) {
+    const section = sections[i];
+    const query = buildSectionQuery(keyword, section.heading ?? '', category);
+    try {
+      await throttle(300);
+      const res = await axios.get('https://api.pexels.com/v1/search', {
+        params: { query, per_page: 5, orientation: 'landscape', page: i + 1 },
+        headers: { Authorization: apiKey },
+        timeout: 10000,
+      });
+
+      const photo = (res.data.photos ?? [])[0];
+      if (!photo) continue;
+
+      const srcUrl = photo.src.large;
+      const destPath = path.join(destDir, `section_${i + 1}_raw.jpg`);
+      const resizedPath = path.join(destDir, `img_${i + 1}.jpg`);
+
+      await downloadImage(srcUrl, destPath);
+      await sharp(destPath).resize(730, 490, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(resizedPath);
+      await fs.unlink(destPath).catch(() => {});
+
+      paths.push({
+        path:            resizedPath,
+        image_url:       srcUrl,
+        section_heading: section.heading,
+        section_index:   i,
+        pexels_id:       photo.id,
+        photographer:    photo.photographer,
+        pexels_url:      photo.url,
+      });
+      logger.info(`[blog_asset_builder] Section img [${section.heading}] ← "${query}"`);
+    } catch (err) {
+      logger.warn(`[blog_asset_builder] Section img failed [${section.heading}]: ${err.message}`);
+    }
+  }
+  return paths;
+}
+
+// ── ③ 인포그래픽 카드 (Playwright 스크린샷) ──────────────────────────────
+
+/**
+ * GPT-4o-mini로 블로그 본문에서 핵심 수치·팩트 3~4개를 추출한다.
+ */
+async function extractKeyStats(content) {
+  if (!config.openai.apiKey) return [];
+  const sections = content.blog_draft?.sections ?? [];
+  if (!sections.length) return [];
+
+  const bodyText = sections
+    .slice(0, 4)
+    .map((s) => `${s.heading}: ${(s.body ?? '').slice(0, 300)}`)
+    .join('\n');
+
+  const prompt =
+    `다음 블로그 본문에서 독자에게 가장 인상적인 핵심 수치나 팩트를 3~4개 추출해줘.\n` +
+    `키워드: ${content.keyword}\n\n${bodyText.slice(0, 1200)}\n\n` +
+    `조건: 숫자·퍼센트가 있으면 우선 선택. 없으면 핵심 팩트 한 줄.\n` +
+    `value는 짧게 (예: "3.5%", "7만원", "역대 최고"), label은 10자 이내.\n` +
+    `JSON만 반환: {"stats":[{"value":"3.5%","label":"기준금리"},{"value":"7%","label":"전세가 하락"},...]}`;
+
+  try {
+    await throttle(1000);
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.3,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      }
+    );
+    return JSON.parse(res.data.choices[0].message.content).stats ?? [];
+  } catch (err) {
+    logger.warn(`[blog_asset_builder] Stat extraction failed: ${err.message}`);
+    return [];
+  }
+}
+
+const CARD_COLORS = {
+  economy:       '#2563eb',
+  finance:       '#d97706',
+  realestate:    '#16a34a',
+  health:        '#0891b2',
+  entertainment: '#9333ea',
+  social:        '#dc2626',
+};
+
+/**
+ * Playwright로 핵심 수치 카드 HTML을 렌더링해 730×200 JPG로 저장한다.
+ * 추가 npm 패키지 없이 이미 설치된 playwright를 활용.
+ */
+async function generateInfoCard(stats, keyword, category, outputPath) {
+  if (!stats?.length) return null;
+
+  const catColor = CARD_COLORS[category] ?? '#2563eb';
+  const cards = stats.slice(0, 4).map((s) =>
+    `<div class="card">
+      <div class="val">${s.value}</div>
+      <div class="lbl">${s.label}</div>
+    </div>`
+  ).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:730px;height:200px;background:linear-gradient(135deg,#0f172a,#1e293b);
+  display:flex;align-items:center;padding:20px 24px;gap:14px;
+  font-family:'Malgun Gothic','맑은 고딕','AppleGothic',sans-serif}
+.title{color:#64748b;font-size:12px;writing-mode:vertical-rl;
+  letter-spacing:3px;flex-shrink:0;white-space:nowrap}
+.cards{display:flex;gap:12px;flex:1}
+.card{flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+  border-radius:12px;padding:18px 10px;text-align:center;border-top:3px solid ${catColor}}
+.val{font-size:26px;font-weight:700;color:#f1f5f9;line-height:1.1;margin-bottom:7px}
+.lbl{font-size:11px;color:#94a3b8;line-height:1.4}
+</style></head><body>
+<div class="title">${keyword.slice(0, 8)}</div>
+<div class="cards">${cards}</div>
+</body></html>`;
+
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await page.setViewportSize({ width: 730, height: 200 });
+    await page.setContent(html, { waitUntil: 'networkidle' });
+    const rawPath = outputPath.replace('.jpg', '_raw.png');
+    await page.screenshot({ path: rawPath });
+    await page.close();
+
+    await sharp(rawPath).jpeg({ quality: 92 }).toFile(outputPath);
+    await fs.unlink(rawPath).catch(() => {});
+    logger.info(`[blog_asset_builder] Info card saved: ${outputPath}`);
+    return outputPath;
+  } finally {
+    await browser.close();
+  }
 }
 
 // ── 단일 콘텐츠 자산 빌드 ─────────────────────────────────────────────────
@@ -130,13 +296,15 @@ async function buildAssets(content) {
   await fs.mkdir(assetDir, { recursive: true });
 
   const result = {
-    keyword: content.keyword,
-    asset_dir: assetDir,
-    thumbnail: null,
+    keyword:     content.keyword,
+    asset_dir:   assetDir,
+    thumbnail:   null,
     body_images: [],
+    info_card:   null,
+    info_stats:  [],
   };
 
-  // 1. 썸네일 — DALL-E 3 우선, 실패 시 Pexels 첫 번째 이미지로 폴백
+  // 1. 썸네일 — DALL-E 3 우선, 실패 시 Pexels 폴백
   if (config.openai.apiKey) {
     try {
       await throttle(1000);
@@ -148,32 +316,47 @@ async function buildAssets(content) {
     }
   }
 
-  // 2. 본문 이미지 — Pexels (3장)
+  // 2. ② 섹션별 맞춤 이미지 — 섹션 헤딩 기반 Pexels 검색
   if (config.pexels.apiKey) {
     try {
       await throttle(500);
-      result.body_images = await fetchPexelsImages(
-        content.keyword,
-        content.category,
-        3,
-        assetDir
-      );
-      logger.info(`[blog_asset_builder] Body images (Pexels ×${result.body_images.length}): ${content.keyword}`);
+      const sections = content.blog_draft?.sections ?? [];
+      if (sections.length > 0) {
+        result.body_images = await fetchSectionImages(sections, content.keyword, content.category, assetDir);
+        logger.info(`[blog_asset_builder] Section images ×${result.body_images.length}: ${content.keyword}`);
+      } else {
+        // 섹션 없으면 카테고리 기반 폴백
+        result.body_images = await fetchPexelsImages(content.keyword, content.category, 3, assetDir);
+        logger.info(`[blog_asset_builder] Category images ×${result.body_images.length}: ${content.keyword}`);
+      }
     } catch (err) {
-      logger.warn(`[blog_asset_builder] Pexels failed: ${err.message}`);
+      logger.warn(`[blog_asset_builder] Section images failed: ${err.message}`);
     }
   }
 
-  // 3. 썸네일 폴백 — DALL-E 실패했고 Pexels 이미지가 있으면 첫 번째를 썸네일로 활용
+  // 3. 썸네일 폴백 — DALL-E 실패했고 Pexels 이미지가 있으면 첫 번째를 활용
   if (!result.thumbnail && result.body_images.length > 0) {
     const fallbackSrc = result.body_images[0].path;
     const thumbPath = path.join(assetDir, 'thumbnail.jpg');
-    await sharp(fallbackSrc)
-      .resize(800, 450, { fit: 'cover' })
-      .jpeg({ quality: 90 })
-      .toFile(thumbPath);
+    await sharp(fallbackSrc).resize(800, 450, { fit: 'cover' }).jpeg({ quality: 90 }).toFile(thumbPath);
     result.thumbnail = thumbPath;
     logger.info(`[blog_asset_builder] Thumbnail (Pexels fallback): ${content.keyword}`);
+  }
+
+  // 4. ③ 인포그래픽 카드 — 핵심 수치 추출 → Playwright 스크린샷
+  if (config.openai.apiKey) {
+    try {
+      await throttle(500);
+      const stats = await extractKeyStats(content);
+      if (stats.length > 0) {
+        const cardPath = path.join(assetDir, 'info_card.jpg');
+        result.info_card  = await generateInfoCard(stats, content.keyword, content.category, cardPath);
+        result.info_stats = stats;
+        logger.info(`[blog_asset_builder] Info card (${stats.length} stats): ${content.keyword}`);
+      }
+    } catch (err) {
+      logger.warn(`[blog_asset_builder] Info card failed: ${err.message}`);
+    }
   }
 
   return result;

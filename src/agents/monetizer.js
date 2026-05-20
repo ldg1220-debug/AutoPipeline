@@ -65,6 +65,47 @@ const BLOG_STYLES = `<style>
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
 </style>`;
 
+// ── ① TL;DR 박스 ──────────────────────────────────────────────────────────
+function buildTldrBox(sections) {
+  const bullets = (sections ?? [])
+    .slice(0, 5)
+    .map((s) => {
+      const first = (s.body ?? '').split(/(?<=[.!?])\s+/)[0].trim();
+      return first ? `<li>${first}</li>` : null;
+    })
+    .filter(Boolean);
+  if (!bullets.length) return '';
+  return (
+    `<div class="tldr-box">\n` +
+    `<h4>📋 핵심 요약 (TL;DR)</h4>\n` +
+    `<ul>\n${bullets.join('\n')}\n</ul>\n` +
+    `</div>`
+  );
+}
+
+// ── ① 키워드 하이라이트 (각 키워드 첫 등장만) ─────────────────────────────
+function highlightKeywords(text, keywords) {
+  if (!keywords?.length || !text) return text;
+  let result = text;
+  for (const kw of keywords) {
+    if (kw.length < 2) continue;
+    const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 첫 등장만 하이라이트 — 과도한 마킹 방지
+    result = result.replace(new RegExp(esc), `<span class="keyword-mark">${kw}</span>`);
+  }
+  return result;
+}
+
+// ── ① 키워드 태그 클라우드 ────────────────────────────────────────────────
+function buildKeywordTags(keywords) {
+  if (!keywords?.length) return '';
+  const tags = keywords
+    .slice(0, 10)
+    .map((kw) => `<span class="keyword-tag">#${kw}</span>`)
+    .join('\n');
+  return `<div class="keyword-tags">\n${tags}\n</div>`;
+}
+
 // 애드센스 슬롯 HTML — 실제 슬롯 ID는 .env에서 주입
 function adsenseSlot(position) {
   const clientId = process.env.ADSENSE_CLIENT_ID || 'ca-pub-XXXXXXXXXX';
@@ -153,39 +194,47 @@ function buildAffiliateBlock(products, anchorText) {
 const SECTION_LABELS = ['① 핵심 정보', '② 자세히 보기', '③ 심층 분석', '④ 실전 적용', '⑤ 마무리'];
 
 /**
- * @param {Array} sections
- * @param {Object} affiliateMap - position별 제휴 HTML
- * @param {Array} bodyImages    - blog_assets.body_images (image_url, photographer 포함)
+ * @param {Array}  sections
+ * @param {Object} affiliateMap  - position별 제휴 HTML
+ * @param {Array}  bodyImages    - blog_assets.body_images
+ * @param {Array}  seoKeywords   - 하이라이트할 키워드 목록
+ * @param {string} catColor      - 카테고리 색상 hex
  */
-function renderSections(sections, affiliateMap, bodyImages = []) {
+function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb') {
   return sections
     .map((s, i) => {
       const tag = s.level === 'h3' ? 'h3' : 'h2';
       const hookKey = `section${i + 1}_end`;
       const affiliateHtml = affiliateMap[hookKey] ?? '';
 
-      // 섹션마다 이미지 1장씩 순환 삽입 (이미지 있을 때만)
-      const imgData = bodyImages[i % bodyImages.length];
+      // 섹션 인덱스와 일치하는 이미지 우선, 없으면 순환
+      const imgData = bodyImages.length > 0
+        ? (bodyImages.find((img) => img.section_index === i) ?? bodyImages[i % bodyImages.length])
+        : null;
       const imageHtml = imgData?.image_url
-        ? `<div class="blog-img-wrap">` +
-          `<img src="${imgData.image_url}" alt="${s.heading}" loading="lazy" />` +
-          `<p class="photo-credit">Photo by ${imgData.photographer ?? 'Pexels'} on Pexels</p>` +
+        ? `<div class="blog-img-wrap">\n` +
+          `<img src="${imgData.image_url}" alt="${s.heading}" loading="lazy" />\n` +
+          `<p class="photo-credit">Photo by ${imgData.photographer ?? 'Pexels'} on Pexels</p>\n` +
           `</div>`
         : '';
 
+      // 키워드 하이라이트 적용
+      const bodyHighlighted = highlightKeywords(s.body ?? '', seoKeywords);
+
       // 첫 문장을 callout 박스로 강조
-      const firstSentence = (s.body ?? '').split(/(?<=[.!?。])\s/)[0].trim();
+      const firstSentence = (s.body ?? '').split(/(?<=[.!?])\s+/)[0].trim();
       const calloutHtml = firstSentence
-        ? `<div class="callout"><b>핵심 포인트:</b> ${firstSentence}</div>`
+        ? `<div class="callout"><b>핵심:</b> ${firstSentence}</div>`
         : '';
 
-      const label = SECTION_LABELS[i] ?? `${i + 1}번째 섹션`;
-
       return (
-        `${imageHtml}` +
-        `<span class="section-label">${label}</span>` +
+        // ① 섹션 헤더: 번호 뱃지 + 카테고리 색상
+        `<div class="section-hdr" style="--cat-color:${catColor}">\n` +
+        `<span class="s-num">${i + 1}</span>\n` +
         `<${tag}>${s.heading}</${tag}>\n` +
-        `<p>${s.body ?? ''}</p>\n` +
+        `</div>\n` +
+        `${imageHtml}\n` +
+        `<p>${bodyHighlighted}</p>\n` +
         `${calloutHtml}${affiliateHtml}`
       );
     })
@@ -221,11 +270,13 @@ async function monetizeBlogDraft(content) {
     return content;
   }
 
+  const seoKeywords = blog_draft.seo_keywords ?? [keyword];
+  const catColor    = CATEGORY_COLOR[content.category] ?? '#2563eb';
+
   const affiliateHooks = blog_draft.affiliate_hooks ?? [];
   const affiliateMap = {};
   let hasAffiliate = false;
 
-  // 쿠팡 상품 검색 → position별 HTML 빌드
   for (const hook of affiliateHooks) {
     const products = await searchCoupangProducts(hook.product_category ?? keyword);
     if (products.length > 0) {
@@ -234,26 +285,43 @@ async function monetizeBlogDraft(content) {
     }
   }
 
-  // conclusion_top 처리 (섹션 렌더링 후 삽입 예정)
   const conclusionAffiliate = affiliateMap['conclusion_top'] ?? '';
-
-  // Pexels 본문 이미지 목록 (blog_asset_builder가 image_url 포함하여 저장)
   const bodyImages = blog_assets?.body_images ?? [];
 
-  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages);
+  // ① TL;DR 박스
+  const tldrHtml     = buildTldrBox(blog_draft.sections);
+
+  // ① 키워드 태그 클라우드
+  const tagCloudHtml = buildKeywordTags(seoKeywords);
+
+  // ③ 인포그래픽 카드 (blog_asset_builder가 생성한 로컬 파일 → base64 인라인)
+  let infoCardHtml = '';
+  if (blog_assets?.info_card) {
+    try {
+      const { readFile } = await import('fs/promises');
+      const cardBuf = await readFile(blog_assets.info_card);
+      const b64 = cardBuf.toString('base64');
+      infoCardHtml =
+        `<div class="blog-img-wrap">\n` +
+        `<img src="data:image/jpeg;base64,${b64}" alt="${keyword} 핵심 지표" loading="lazy" />\n` +
+        `</div>`;
+    } catch (err) {
+      logger.warn(`[monetizer] Info card embed failed: ${err.message}`);
+    }
+  }
+
+  // ① 섹션 HTML (키워드 하이라이트 + 섹션 헤더 + 섹션별 이미지)
+  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor);
   const faqHtml      = renderFaq(blog_draft.faq);
 
-  // JSON-LD 스키마
   const jsonLdScript = blog_draft.json_ld
     ? `<script type="application/ld+json">${JSON.stringify(blog_draft.json_ld)}</script>`
     : '';
 
-  // 유튜브 임베드 플레이스홀더 → 실제 ID는 auto_publisher가 교체
   const youtubeSection =
     `<h2>📺 관련 영상</h2>\n` +
     `<div class="youtube-embed">{{YOUTUBE_EMBED}}</div>`;
 
-  // 유튜브 아래 구독 CTA 박스
   const ctaBox =
     `<div class="cta-box">` +
     `<h3>📌 매일읽어주는남자</h3>` +
@@ -261,20 +329,22 @@ async function monetizeBlogDraft(content) {
     `유튜브 <strong>구독 &amp; 🔔 알림 설정</strong>으로 놓치지 마세요!</p>` +
     `</div>`;
 
-  // 최종 HTML 조립
   const html = [
     BLOG_STYLES,
     jsonLdScript,
-    adsenseSlot('title_below'),                   // 제목 아래 광고
+    adsenseSlot('title_below'),
     `<div class="blog-intro">${blog_draft.meta_description || ''}</div>`,
-    sectionsHtml,
-    adsenseSlot('mid_content'),                   // 본문 중간 광고
+    tldrHtml,                                     // ① TL;DR 박스
+    infoCardHtml,                                 // ③ 핵심 수치 인포그래픽
+    sectionsHtml,                                 // ① 섹션 헤더 + 키워드 하이라이트
+    adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,
+    tagCloudHtml,                                 // ① 키워드 태그 클라우드
     youtubeSection,
-    ctaBox,                                       // YouTube 아래 CTA
-    adsenseSlot('post_end'),                      // 본문 끝 광고
-    hasAffiliate ? PARTNERS_DISCLOSURE : '',      // 제휴 고지 (링크 있을 때만)
+    ctaBox,
+    adsenseSlot('post_end'),
+    hasAffiliate ? PARTNERS_DISCLOSURE : '',
   ]
     .filter(Boolean)
     .join('\n\n');
