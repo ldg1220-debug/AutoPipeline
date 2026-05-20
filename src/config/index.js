@@ -93,6 +93,10 @@ export const config = {
     // 검수 점수가 이 값 미만이면 상위 모델로 에스컬레이션
     reviewThreshold: parseInt(process.env.TOPIC_GROUPER_THRESHOLD || '70', 10),
   },
+  competitor: {
+    maxChannels: parseInt(process.env.COMPETITOR_MAX_CHANNELS || '3', 10),
+    maxVideos:   parseInt(process.env.COMPETITOR_MAX_VIDEOS   || '10', 10),
+  },
   runtime: {
     dryRun:       process.env.DRY_RUN === 'true',
     cronSchedule: process.env.CRON_SCHEDULE || '0 6 * * *',

@@ -18,6 +18,7 @@ import { monetizeAll } from './agents/monetizer.js';
 import { publishBlogPosts, editBlogPosts } from './agents/blog_publisher.js';
 import { runBlogAnalytics, identifyUnderperformers } from './agents/blog_analytics.js';
 import { groupSimilarTopics } from './agents/topic_grouper.js';
+import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -282,6 +283,14 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.warn('[app] Topic grouping failed. Continuing with original keywords.', {
       message: err.message,
     });
+  }
+
+  // ── 경쟁 채널 분석 (주 1회 — 인사이트 7일 캐시) ─────────────────────────
+  try {
+    await analyzeCompetitors();
+    logger.info('[app] Competitor analysis complete (insights cached).');
+  } catch (err) {
+    logger.warn('[app] Competitor analysis failed. Continuing without insights.', { message: err.message });
   }
 
   // ── Part 2: Blog Content Enhancer ──────────────────────────────────────

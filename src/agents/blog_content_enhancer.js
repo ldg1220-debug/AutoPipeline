@@ -6,6 +6,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
+import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -226,8 +227,20 @@ async function enhanceBlogDraft(content) {
     logger.info(`[blog_content_enhancer] Benchmark rules injected (${benchmarkRules.based_on_posts}개 분석 기반)`);
   }
 
+  // 경쟁 채널 인사이트 로드 (7일 캐시 사용, 없으면 조용히 스킵)
+  let competitorCtx = '';
+  try {
+    const insights = await loadCompetitorInsights(category);
+    competitorCtx = formatInsightsForPrompt(insights);
+    if (competitorCtx) logger.info(`[blog_content_enhancer] Competitor insights injected for: ${category}`);
+  } catch {
+    // 인사이트 없으면 스킵
+  }
+
+  const combinedCtx = benchmarkCtx + competitorCtx;
+
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
-  const intent = await pass1Intent(keyword, category, benchmarkCtx);
+  const intent = await pass1Intent(keyword, category, combinedCtx);
 
   logger.info(`[blog_content_enhancer] Pass 2 (outline): ${keyword}`);
   const outline = await pass2Outline(
@@ -235,7 +248,7 @@ async function enhanceBlogDraft(content) {
     category,
     intent,
     shortform_script?.hook ?? '',
-    benchmarkCtx
+    combinedCtx
   );
 
   // H2/H3 섹션만 추출 (FAQ 제외)

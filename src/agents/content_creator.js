@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
+import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,7 +23,7 @@ const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
  * 영상 퀄리티가 최우선 — "나한테 왜 중요한가"가 모든 내용의 중심이어야 한다.
  */
 
-async function generateContent(item) {
+async function generateContent(item, competitorCtx = '') {
   const seriesName = item.series ?? '오늘의 이슈';
 
   const contentPrompt = `당신은 한국 경제 유튜브 채널 "매일읽어주는남자"의 수석 콘텐츠 전문가입니다.
@@ -68,7 +69,7 @@ async function generateContent(item) {
    - 예) 훅 "대출이자 또 올라?" → CTA "이 질문, 내일도 드릴게요. 구독해두세요"
    - 30자 이내
 
-━━━━━━━━━━━━━━━━━━━━━━━
+${competitorCtx}━━━━━━━━━━━━━━━━━━━━━━━
 JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
 ━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -120,6 +121,19 @@ export async function createContents(trendData) {
     return { generated_at: new Date().toISOString(), contents: [] };
   }
 
+  // 카테고리별 경쟁 채널 인사이트 사전 로드 (7일 캐시 사용)
+  const competitorInsightsCache = {};
+  const loadInsights = async (category) => {
+    if (competitorInsightsCache[category] !== undefined) return competitorInsightsCache[category];
+    try {
+      const insights = await loadCompetitorInsights(category);
+      competitorInsightsCache[category] = formatInsightsForPrompt(insights);
+    } catch {
+      competitorInsightsCache[category] = '';
+    }
+    return competitorInsightsCache[category];
+  };
+
   const contents = [];
 
   for (const item of items) {
@@ -132,8 +146,9 @@ export async function createContents(trendData) {
         continue;
       }
 
+      const competitorCtx = await loadInsights(item.category);
       await throttle(2000);
-      const generated = await generateContent(item);
+      const generated = await generateContent(item, competitorCtx);
       contents.push({
         keyword: item.keyword,
         category: item.category,
