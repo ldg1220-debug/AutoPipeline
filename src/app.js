@@ -61,6 +61,12 @@ async function runPipeline() {
     return;
   }
 
+  // TEST_LIMIT: 테스트 시 처리 개수 제한 (토큰 절약)
+  if (config.runtime.testLimit) {
+    trendData.selected_items = trendData.selected_items.slice(0, config.runtime.testLimit);
+    logger.info(`[app] TEST_LIMIT=${config.runtime.testLimit} — processing ${trendData.selected_items.length} item(s) only`);
+  }
+
   // ── Agent 2: Content Creator ────────────────────────────────────────────
   let contentData;
   try {

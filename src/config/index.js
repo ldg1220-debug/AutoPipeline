@@ -113,6 +113,7 @@ export const config = {
     cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 14 * * 2,4,6',
     blogCronSchedule:  process.env.BLOG_CRON_SCHEDULE  || '0 13 * * 1,3,5,0',
     blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 15 * * 2,4,6',
+    testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
     blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '2', 10),
   },

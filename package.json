@@ -13,6 +13,7 @@
     "agent:publish": "node src/agents/auto_publisher.js",
     "agent:media": "node src/agents/media_generator.js",
     "dry-run": "cross-env DRY_RUN=true node src/app.js",
+    "test-run": "cross-env DRY_RUN=true TEST_LIMIT=1 node src/app.js",
     "validate": "node scripts/validate-env.js",
     "status": "node scripts/check-status.js",
     "estimate": "node scripts/estimate-cost.js",
