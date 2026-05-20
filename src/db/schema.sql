@@ -67,3 +67,15 @@ CREATE TABLE IF NOT EXISTS tistory_categories (
   cached_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tistory_cat ON tistory_categories(blog_name, category_id);
+
+-- blog_rewrites: 성과 부진 포스트 재작성 이력
+CREATE TABLE IF NOT EXISTS blog_rewrites (
+  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id                 INTEGER NOT NULL REFERENCES blog_posts(id),
+  rewritten_at            TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+  reason                  TEXT,                  -- 재작성 사유 (CTR 낮음 등)
+  impressions_at_rewrite  INTEGER DEFAULT 0,
+  clicks_at_rewrite       INTEGER DEFAULT 0,
+  ctr_at_rewrite          REAL    DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_blog_rewrites_post ON blog_rewrites(post_id);

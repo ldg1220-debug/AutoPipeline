@@ -12,11 +12,11 @@ import { generateAllMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
 import { mineKeywords } from './agents/keyword_miner.js';
-import { enhanceAllBlogDrafts } from './agents/blog_content_enhancer.js';
+import { enhanceAllBlogDrafts, rewriteUnderperformers } from './agents/blog_content_enhancer.js';
 import { buildAllAssets } from './agents/blog_asset_builder.js';
 import { monetizeAll } from './agents/monetizer.js';
-import { publishBlogPosts } from './agents/blog_publisher.js';
-import { runBlogAnalytics } from './agents/blog_analytics.js';
+import { publishBlogPosts, editBlogPosts } from './agents/blog_publisher.js';
+import { runBlogAnalytics, identifyUnderperformers } from './agents/blog_analytics.js';
 import { groupSimilarTopics } from './agents/topic_grouper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -349,13 +349,34 @@ async function runBlogPipeline(youtubeResults = null) {
   }
 
   // ── Part 6: Analytics + 벤치마킹 (매일 실행, 룰은 7일 캐시) ─────────────
-  // 성공 포스트 구조 분석 → output/benchmark/rules.json 갱신
-  // blog_content_enhancer가 다음 실행 시 자동으로 주입
   try {
     await runBlogAnalytics();
     logger.info('[app] Blog Part 6 complete (analytics + benchmark).');
   } catch (err) {
     logger.warn('[app] Blog Part 6 (blog_analytics) failed.', { message: err.message });
+  }
+
+  // ── Part 7: 성과 부진 포스트 자동 재작성 ──────────────────────────────
+  // 기준: 발행 60일 초과 + impressions≥10 + clicks<3 + 최근 60일 미재작성
+  try {
+    const underperformers = identifyUnderperformers();
+    if (underperformers.length === 0) {
+      logger.info('[app] Blog Part 7: no underperformers to rewrite.');
+    } else {
+      logger.info(`[app] Blog Part 7: ${underperformers.length} underperformers found. Rewriting…`);
+      const rewrites = await rewriteUnderperformers(underperformers);
+      if (rewrites.length > 0) {
+        const editResults = await editBlogPosts(rewrites);
+        const editedCount = editResults.filter((r) => r.edit_status === 'edited').length;
+        logger.info(`[app] Blog Part 7 complete. Rewritten: ${editedCount}/${rewrites.length}`);
+        await writeJSON(
+          path.resolve(__dirname, `../output/analytics/rewrites_${date}.json`),
+          { rewritten_at: new Date().toISOString(), results: editResults }
+        );
+      }
+    }
+  } catch (err) {
+    logger.warn('[app] Blog Part 7 (rewrite) failed.', { message: err.message });
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

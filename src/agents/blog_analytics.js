@@ -318,11 +318,18 @@ async function generateBenchmarkRules(structures, queryGaps) {
 }
 
 // ── 성과 하위 포스트 식별 ─────────────────────────────────────────────────
-function identifyUnderperformers() {
-  // 최근 수집 기준: impressions >= 100이지만 CTR < 0.02 (2% 미만)
+/**
+ * 재작성 대상 기준:
+ *   - 발행 60일 이상 경과 (Google 평가 충분히 기다린 후)
+ *   - impressions >= 10 (인덱싱은 됐지만 클릭을 못 받는 경우만 대상)
+ *     (impressions 0 = 인덱싱 문제 → 재작성으로 해결 불가)
+ *   - clicks < 3 (실제 유입이 거의 없음)
+ *   - 최근 60일 내에 이미 재작성된 포스트 제외 (과도한 수정 방지)
+ */
+export function identifyUnderperformers() {
   const rows = db.prepare(`
     SELECT
-      bp.id, bp.keyword, bp.title, bp.post_url,
+      bp.id, bp.keyword, bp.title, bp.post_url, bp.published_at,
       bm.impressions, bm.clicks, bm.avg_position,
       CASE WHEN bm.impressions > 0
            THEN CAST(bm.clicks AS REAL) / bm.impressions
@@ -330,12 +337,18 @@ function identifyUnderperformers() {
     FROM blog_posts bp
     JOIN blog_metrics bm ON bm.post_id = bp.id
     WHERE bp.status = 'published'
-      AND bm.impressions >= 100
+      AND bp.published_at <= datetime('now', 'localtime', '-60 days')
+      AND bm.impressions >= 10
+      AND bm.clicks < 3
+      AND bp.id NOT IN (
+        SELECT post_id FROM blog_rewrites
+        WHERE rewritten_at >= datetime('now', 'localtime', '-60 days')
+      )
     ORDER BY bm.collected_at DESC
     LIMIT 100
   `).all();
 
-  // 키워드당 최신 지표 1건만
+  // 포스트당 최신 지표 1건만
   const seen = new Set();
   const latest = [];
   for (const row of rows) {
@@ -345,7 +358,7 @@ function identifyUnderperformers() {
     }
   }
 
-  return latest.filter((r) => r.ctr < 0.02 && r.avg_position <= 20);
+  return latest;
 }
 
 // ── 주간 요약 리포트 ──────────────────────────────────────────────────────

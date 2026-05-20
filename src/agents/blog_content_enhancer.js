@@ -281,6 +281,163 @@ async function enhanceBlogDraft(content) {
   };
 }
 
+// ── 성과 부진 포스트 재작성 ───────────────────────────────────────────────
+/**
+ * CTR이 낮은 포스트를 타겟 개선한다.
+ * 전체 재작성(비용 큼)이 아닌 CTR 직접 영향 요소만 개선:
+ *   1. 제목 클릭 유인 강화 (GPT-4o-mini)
+ *   2. 메타 디스크립션 개선 (GPT-4o-mini)
+ *   3. FAQ 2~3개 추가 (GPT-4o-mini) — Featured Snippet 노림
+ *   4. 보강 섹션 1개 추가 (GPT-4o) — 정보량 증가, Freshness 신호
+ *
+ * @param {{ id, keyword, title, post_url, impressions, clicks, avg_position }} post
+ * @returns {{ post_id, keyword, post_url, improved_title, improved_meta, additional_html }}
+ */
+async function rewriteUnderperformer(post) {
+  const { id: post_id, keyword, title, post_url, impressions, clicks, avg_position } = post;
+
+  logger.info(`[blog_content_enhancer] Rewriting: "${keyword}" (노출 ${impressions}, 클릭 ${clicks}, ${avg_position?.toFixed(1)}위)`);
+
+  const reason = `노출 ${impressions}회, 클릭 ${clicks}회 (CTR ${impressions > 0 ? ((clicks / impressions) * 100).toFixed(1) : 0}%), ${avg_position?.toFixed(1)}위`;
+
+  // 1. 제목 + 메타 개선
+  await throttle(1000);
+  let improved_title = title;
+  let improved_meta  = '';
+
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content:
+            `다음 티스토리 블로그 포스트의 제목과 메타 디스크립션을 개선해줘.\n` +
+            `현재 제목: ${title}\n` +
+            `키워드: ${keyword}\n` +
+            `현재 성과: ${reason}\n\n` +
+            `개선 목표: 클릭률(CTR) 향상\n` +
+            `조건:\n` +
+            `- 제목: 숫자·감탄·질문·혜택 포함, 40자 이내, 검색 키워드 포함\n` +
+            `- 메타: 120자 이내, 핵심 정보 + 클릭 유인 문구\n` +
+            `JSON만 반환: {"title":"...","meta":"..."}`,
+        }],
+        response_format: { type: 'json_object' },
+        temperature: 0.8,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      }
+    );
+    const parsed = JSON.parse(res.data.choices[0].message.content);
+    improved_title = parsed.title || title;
+    improved_meta  = parsed.meta  || '';
+    logger.info(`[blog_content_enhancer] New title: "${improved_title}"`);
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] Title/meta improve failed: ${err.message}`);
+  }
+
+  // 2. FAQ 2~3개 추가
+  await throttle(1000);
+  let faqHtml = '';
+  try {
+    const faqRes = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content:
+            `"${keyword}" 주제의 블로그 포스트에 추가할 FAQ 3개를 작성해줘.\n` +
+            `- 실제 독자가 검색할 법한 구체적 질문\n` +
+            `- 답변: 80~120자, 핵심만 간결하게\n` +
+            `- Featured Snippet 노릴 수 있는 형태\n` +
+            `JSON만 반환: {"faq":[{"q":"...","a":"..."}]}`,
+        }],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 20000,
+      }
+    );
+    const { faq = [] } = JSON.parse(faqRes.data.choices[0].message.content);
+    if (faq.length > 0) {
+      const items = faq.map((f) =>
+        `<div class="faq-item"><div class="faq-q">Q. ${f.q}</div><div class="faq-a">${f.a}</div></div>`
+      ).join('\n');
+      faqHtml = `<h2>자주 묻는 질문 (FAQ) 추가</h2>\n<div class="faq-wrap">\n${items}\n</div>`;
+    }
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] FAQ rewrite failed: ${err.message}`);
+  }
+
+  // 3. 보강 섹션 1개 추가 (정보량 증가 + Freshness 신호)
+  await throttle(2000);
+  let sectionHtml = '';
+  try {
+    const secRes = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o',
+        messages: [{
+          role: 'user',
+          content:
+            `"${keyword}" 블로그 포스트에 추가할 심화 섹션 1개를 작성해줘.\n` +
+            `- 기존 포스트에 없을 법한 새로운 각도 (최신 동향, 실전 팁, 사례)\n` +
+            `- 300~500자\n` +
+            `- HTML로 반환: <h2>섹션 제목</h2><p>본문...</p>`,
+        }],
+        temperature: 0.7,
+        max_tokens: 600,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 30000,
+      }
+    );
+    sectionHtml = secRes.data.choices[0].message.content.trim();
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] Section rewrite failed: ${err.message}`);
+  }
+
+  const additional_html = [sectionHtml, faqHtml].filter(Boolean).join('\n\n');
+
+  return {
+    post_id,
+    keyword,
+    post_url,
+    improved_title,
+    improved_meta,
+    additional_html,
+    impressions,
+    clicks,
+    avg_position,
+    reason,
+  };
+}
+
+export async function rewriteUnderperformers(underperformers) {
+  if (!underperformers?.length) return [];
+  if (!config.openai.apiKey) {
+    logger.warn('[blog_content_enhancer] OPENAI_API_KEY not set. Skipping rewrite.');
+    return [];
+  }
+
+  const results = [];
+  for (const post of underperformers) {
+    try {
+      results.push(await rewriteUnderperformer(post));
+    } catch (err) {
+      logger.error(`[blog_content_enhancer] Rewrite failed: ${post.keyword}`, { message: err.message });
+    }
+  }
+  return results;
+}
+
 export async function enhanceAllBlogDrafts(contentData) {
   const contents = contentData?.contents ?? [];
 

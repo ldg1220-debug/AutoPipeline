@@ -297,6 +297,154 @@ async function publishPost(page, content, blogName) {
   return publishedUrl;
 }
 
+// ── 기존 포스트 수정 (재작성) ──────────────────────────────────────────────
+/**
+ * 발행된 포스트를 Playwright로 수정한다.
+ * - 제목 교체 + 기존 본문 끝에 additional_html 추가
+ * - URL은 유지 (SEO 신호 보존)
+ */
+async function editExistingPost(page, rewrite, blogName) {
+  const { post_url, improved_title, additional_html } = rewrite;
+
+  // URL에서 포스트 ID 추출: https://blog.tistory.com/123 → 123
+  const postId = post_url?.match(/\/(\d+)\/?$/)?.[1];
+  if (!postId) throw new Error(`Cannot extract post ID from URL: ${post_url}`);
+
+  const editUrl = `https://${blogName}.tistory.com/manage/post/${postId}/`;
+  await page.goto(editUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 15000 });
+
+  // 제목 교체
+  if (improved_title) {
+    await page.fill('#post-title-inp, input[name="title"]', improved_title);
+  }
+
+  // 기존 본문 끝에 additional_html 추가 (TinyMCE API)
+  if (additional_html) {
+    await page.waitForTimeout(1000);
+    const appended = await page.evaluate((html) => {
+      const ed = window.tinyMCE?.activeEditor ?? window.tinyMCE?.editors?.[0];
+      if (ed) {
+        ed.setContent(ed.getContent() + '\n\n' + html);
+        ed.fire('change');
+        return true;
+      }
+      return false;
+    }, additional_html);
+
+    if (!appended) {
+      // iframe 내부 TinyMCE 시도
+      for (const frame of page.frames()) {
+        try {
+          const found = await frame.evaluate((html) => {
+            const ed = window.tinyMCE?.activeEditor ?? window.tinyMCE?.editors?.[0];
+            if (ed) { ed.setContent(ed.getContent() + '\n\n' + html); ed.fire('change'); return true; }
+            return false;
+          }, additional_html);
+          if (found) break;
+        } catch { /* 다음 frame */ }
+      }
+    }
+  }
+
+  // page.route로 visibility 공개 유지하며 저장
+  let saved = false;
+  await page.route('**/manage/post.json', async (route) => {
+    let data = {};
+    try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
+    data.visibility = 20;
+    try {
+      const resp = await route.fetch({ postData: JSON.stringify(data) });
+      saved = true;
+      await route.fulfill({ response: resp });
+    } catch {
+      await route.continue({ postData: JSON.stringify(data) });
+    }
+  });
+
+  // "완료" → "발행" 클릭
+  try {
+    await page.click('button:has-text("완료")', { timeout: 10000 });
+    await page.waitForTimeout(2000);
+    for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")']) {
+      try {
+        await page.click(sel, { timeout: 5000 });
+        break;
+      } catch { /* 다음 시도 */ }
+    }
+    await page.waitForTimeout(3000);
+  } finally {
+    await page.unroute('**/manage/post.json');
+  }
+
+  logger.info(`[blog_publisher] Edited post: ${post_url} (${saved ? 'saved' : 'fallback'})`);
+  return saved;
+}
+
+function saveRewriteResult(post_id, reason, impressions, clicks, ctr) {
+  db.prepare(`
+    INSERT INTO blog_rewrites (post_id, reason, impressions_at_rewrite, clicks_at_rewrite, ctr_at_rewrite)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(post_id, reason, impressions, clicks, ctr);
+}
+
+export async function editBlogPosts(rewrites) {
+  if (!rewrites?.length) return [];
+
+  const blogName = config.tistory?.blogName;
+  if (!blogName || !config.tistoryBlog?.sessionCookie) {
+    logger.warn('[blog_publisher] Tistory config missing. Skipping edits.');
+    return rewrites.map((r) => ({ ...r, edit_status: 'skipped_no_config' }));
+  }
+  if (config.runtime.dryRun) {
+    logger.info('[blog_publisher] DRY_RUN — skipping edits.');
+    return rewrites.map((r) => ({ ...r, edit_status: 'dry_run' }));
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  const context  = await createTistoryContext(browser);
+  if (!context) {
+    await browser.close();
+    logger.error('[blog_publisher] Session invalid for edit. Run npm run blog:login.');
+    return rewrites.map((r) => ({ ...r, edit_status: 'session_error' }));
+  }
+
+  const page = await context.newPage();
+  const results = [];
+
+  for (const rewrite of rewrites) {
+    try {
+      logger.info(`[blog_publisher] Editing: "${rewrite.keyword}" → ${rewrite.post_url}`);
+      const ok = await editExistingPost(page, rewrite, blogName);
+
+      if (ok) {
+        saveRewriteResult(
+          rewrite.post_id,
+          rewrite.reason,
+          rewrite.impressions,
+          rewrite.clicks,
+          rewrite.impressions > 0 ? rewrite.clicks / rewrite.impressions : 0
+        );
+        logger.info(`[blog_publisher] Rewrite saved: "${rewrite.improved_title}"`);
+        results.push({ ...rewrite, edit_status: 'edited' });
+      } else {
+        results.push({ ...rewrite, edit_status: 'edit_fallback' });
+      }
+    } catch (err) {
+      logger.error(`[blog_publisher] Edit failed: ${rewrite.keyword}`, { message: err.message });
+      results.push({ ...rewrite, edit_status: 'failed', error: err.message });
+    }
+
+    // 수정 간 딜레이 (스팸 방지)
+    if (rewrite !== rewrites[rewrites.length - 1]) {
+      await randomDelay(20000, 40000);
+    }
+  }
+
+  await browser.close();
+  return results;
+}
+
 // ── DB 업데이트 ────────────────────────────────────────────────────────────
 function savePublishResult(keyword, title, slug, postUrl, youtubeUrl) {
   const stmt = db.prepare(`
