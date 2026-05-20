@@ -5,6 +5,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,16 +105,31 @@ async function publishToYouTube(content, accessToken) {
 
   const videoId = response.data.id;
 
-  // 썸네일 업로드 (output/media/<keyword>_thumb.jpg)
-  const thumbPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    `../../output/media/${safeKeyword}_thumb.jpg`
-  );
+  // 썸네일 A 업로드 (Variant A = 초기 버전)
+  const mediaDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
+  const thumbPathA = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
+  const thumbPathB = path.resolve(mediaDir, `${safeKeyword}_thumb_b.jpg`);
+
   let thumbnailUploaded = false;
   try {
-    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
+    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPathA, accessToken);
   } catch (err) {
     logger.warn(`[auto_publisher] Thumbnail upload failed: ${err.message}`);
+  }
+
+  // A/B 테스트 레코드 저장 (Variant B가 있을 때만)
+  if (thumbnailUploaded) {
+    try {
+      const bExists = await fs.access(thumbPathB).then(() => true).catch(() => false);
+      db.prepare(`
+        INSERT INTO thumbnail_ab_tests (keyword, video_id, thumb_a_path, thumb_b_path)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(video_id) DO NOTHING
+      `).run(content.keyword, videoId, thumbPathA, bExists ? thumbPathB : null);
+      logger.info(`[auto_publisher] A/B test registered: ${videoId} (B variant: ${bExists ? 'ready' : 'not generated'})`);
+    } catch (err) {
+      logger.warn(`[auto_publisher] A/B test record failed: ${err.message}`);
+    }
   }
 
   return {
@@ -128,8 +144,9 @@ async function publishToYouTube(content, accessToken) {
 /**
  * 업로드된 YouTube 영상에 썸네일을 설정한다.
  * thumbnails.set API는 multipart/form-data로 이미지를 전송한다.
+ * swap-thumbnails.js 스크립트에서도 재사용하기 위해 export.
  */
-async function uploadYouTubeThumbnail(videoId, thumbnailPath, accessToken) {
+export async function uploadYouTubeThumbnail(videoId, thumbnailPath, accessToken) {
   let imageData;
   try {
     imageData = await fs.readFile(thumbnailPath);

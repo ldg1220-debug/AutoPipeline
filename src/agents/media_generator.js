@@ -454,6 +454,72 @@ async function generateThumbnailTitle(keyword, hook) {
   }
 }
 
+// ── 썸네일 Variant B: 캐릭터 풀블리드 + 오버레이 텍스트 ───────────────────
+/**
+ * Variant B 레이아웃:
+ *   캐릭터 이미지를 전체 배경으로 채우고,
+ *   좌측 60% 위에 반투명 다크 그라디언트 + 오렌지 강조 제목.
+ *   → 임팩트·긴박감 강조 (Variant A의 '정보형'과 대비)
+ */
+async function generateThumbnailB(content, charImageUrl, outputPath) {
+  const hook = content.shortform_script?.hook ?? content.keyword;
+  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
+
+  const W = 1280, H = 720;
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+
+  // 캐릭터 이미지 전체 배경으로 리사이즈
+  const charRes = await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 });
+  const charBuf = await sharp(Buffer.from(charRes.data))
+    .resize(W, H, { fit: 'cover', position: 'top' })
+    .png()
+    .toBuffer();
+
+  // 좌측 그라디언트 오버레이 SVG (투명→다크)
+  const gradientOverlay = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"  stop-color="#000000" stop-opacity="0.88"/>
+          <stop offset="60%" stop-color="#000000" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.05"/>
+        </linearGradient>
+      </defs>
+      <rect width="${W}" height="${H}" fill="url(#g)"/>
+    </svg>`
+  );
+
+  // 텍스트 레이어 SVG
+  const textSvg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <text x="52" y="260" font-family="${FONT}" font-size="96" font-weight="bold" fill="#FCD34D">${esc(line1)}</text>
+      ${line2 ? `<text x="52" y="376" font-family="${FONT}" font-size="96" font-weight="bold" fill="#FFFFFF">${esc(line2)}</text>` : ''}
+      <text x="52" y="510" font-family="${FONT}" font-size="32" fill="#FDA97A">📺 매일읽어주는남자</text>
+      <rect x="52" y="546" width="120" height="5" rx="3" fill="#f97316"/>
+    </svg>`
+  );
+
+  // 하단 오렌지 액센트 바
+  const accentBar = await sharp({
+    create: { width: W, height: 8, channels: 4, background: { r: 249, g: 115, b: 22, alpha: 1 } },
+  }).png().toBuffer();
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+  await sharp(charBuf)
+    .composite([
+      { input: gradientOverlay },
+      { input: textSvg },
+      { input: accentBar, left: 0, top: H - 8 },
+    ])
+    .jpeg({ quality: 95 })
+    .toFile(outputPath);
+
+  logger.info(`[media_generator] Thumbnail B saved: ${outputPath}`);
+  return outputPath;
+}
+
 // ── 썸네일 이미지 합성 (1280×720) ────────────────────────────────────────
 /**
  * 레이아웃:
@@ -693,8 +759,9 @@ async function generateMedia(content) {
   const audioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp3`);
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
 
-  const thumbPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
-  const result = { keyword: content.keyword, audio: null, video: null, thumbnail: null };
+  const thumbPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_a.jpg`);
+  const thumbPathB = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_b.jpg`);
+  const result = { keyword: content.keyword, audio: null, video: null, thumbnail: null, thumbnail_b: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -768,14 +835,25 @@ async function generateMedia(content) {
     characterUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 생성 (Act 0 캐릭터 이미지 사용)
+  // 4. 썸네일 A·B 동시 생성 (Act 0 캐릭터 이미지 사용)
   const thumbCharUrl = characterUrls[0];
   if (thumbCharUrl) {
     try {
       await generateThumbnail(content, thumbCharUrl, thumbPath);
       result.thumbnail = thumbPath;
+      logger.info(`[media_generator] Thumbnail A saved`);
     } catch (err) {
-      logger.warn(`[media_generator] Thumbnail generation failed: ${err.message}`);
+      logger.warn(`[media_generator] Thumbnail A failed: ${err.message}`);
+    }
+
+    try {
+      // Variant B는 Act 1(본론) 캐릭터로 변화를 줌 — 없으면 Act 0 재사용
+      const thumbBCharUrl = characterUrls[1] ?? thumbCharUrl;
+      await generateThumbnailB(content, thumbBCharUrl, thumbPathB);
+      result.thumbnail_b = thumbPathB;
+      logger.info(`[media_generator] Thumbnail B saved`);
+    } catch (err) {
+      logger.warn(`[media_generator] Thumbnail B failed: ${err.message}`);
     }
   }
 

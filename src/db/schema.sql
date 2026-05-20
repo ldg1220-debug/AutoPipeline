@@ -79,3 +79,18 @@ CREATE TABLE IF NOT EXISTS blog_rewrites (
   ctr_at_rewrite          REAL    DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_blog_rewrites_post ON blog_rewrites(post_id);
+
+-- thumbnail_ab_tests: 썸네일 A/B 테스트 추적
+-- current_variant: 'A'(초기) → 'B'(7일 후 자동 교체)
+CREATE TABLE IF NOT EXISTS thumbnail_ab_tests (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  keyword              TEXT    NOT NULL,
+  video_id             TEXT    NOT NULL UNIQUE,
+  thumb_a_path         TEXT    NOT NULL,
+  thumb_b_path         TEXT,
+  current_variant      TEXT    NOT NULL DEFAULT 'A',
+  variant_a_uploaded_at TEXT   NOT NULL DEFAULT (datetime('now','localtime')),
+  variant_b_uploaded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_thumb_ab_video ON thumbnail_ab_tests(video_id);
+CREATE INDEX IF NOT EXISTS idx_thumb_ab_variant ON thumbnail_ab_tests(current_variant);
