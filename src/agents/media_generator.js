@@ -1114,6 +1114,207 @@ async function generateMedia(content) {
   return result;
 }
 
+// ── 롱폼 영상 미디어 생성 ─────────────────────────────────────────────────
+/**
+ * 콘텐츠 삼각형의 롱폼 영상(5~8분) 미디어를 제작한다.
+ *
+ * 처리 흐름:
+ *   1. sections[] 각각 TTS 생성 (ClovaVoice → OpenAI 폴백)
+ *   2. 섹션별 오디오 크기로 길이 추정 → 타임스탬프 계산
+ *   3. 섹션별 캐릭터 이미지 생성 (key_point 기반, gpt-image-1 → Pexels 폴백)
+ *   4. 이미지·오디오 tmpfiles.org 업로드 (병렬)
+ *   5. 섹션 제목·요점 자막 PNG 렌더링 + 업로드
+ *   6. Shotstack으로 롱폼 영상 렌더링 (섹션별 오디오 클립 + 이미지 전환)
+ */
+async function generateLongFormMedia(content) {
+  const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  const videoPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
+  const result = { keyword: content.keyword, video: null };
+
+  const sections = content.long_video?.sections ?? [];
+  if (!config.openai.apiKey || sections.length === 0) {
+    logger.warn(`[media_generator] Long-form skipped (no sections or API key): "${content.keyword}"`);
+    return result;
+  }
+  if (!config.shotstack.apiKey) {
+    logger.warn('[media_generator] Long-form skipped — SHOTSTACK_API_KEY not set');
+    return result;
+  }
+
+  // ── 1. 섹션별 TTS 생성 ─────────────────────────────────────────────────
+  const sectionAudioPaths = [];
+  for (let i = 0; i < sections.length; i++) {
+    const audioPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_s${i}.mp3`);
+    const scriptText = normalizeScriptForTTS((sections[i].script ?? '').slice(0, 2000));
+    await throttle(500);
+    try {
+      await generateAudio(scriptText, audioPath);
+      sectionAudioPaths.push(audioPath);
+      logger.info(`[media_generator] Long-form TTS ${i + 1}/${sections.length}: ${content.keyword}`);
+    } catch (err) {
+      logger.warn(`[media_generator] Long-form TTS section ${i} failed: ${err.message}`);
+      sectionAudioPaths.push(null);
+    }
+  }
+
+  // ── 2. 섹션별 오디오 길이 추정 (bytes ÷ 24000 ≈ mp3 초 수) ─────────────
+  const sectionDurations = await Promise.all(
+    sectionAudioPaths.map(async (p, i) => {
+      if (!p) return sections[i]?.duration_seconds ?? 60;
+      try {
+        const stats = await fs.stat(p);
+        return Math.max(10, Math.ceil(stats.size / 24000) + 1);
+      } catch {
+        return sections[i]?.duration_seconds ?? 60;
+      }
+    })
+  );
+  const sectionStarts = sectionDurations.reduce((acc, dur, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + sectionDurations[i - 1]);
+    return acc;
+  }, []);
+  const totalDuration = sectionStarts[sectionStarts.length - 1] + sectionDurations[sectionDurations.length - 1];
+  logger.info(`[media_generator] Long-form total: ${totalDuration}s, sections: ${sections.length}`);
+
+  // ── 3. 섹션별 캐릭터 이미지 생성 ──────────────────────────────────────
+  const sectionImageUrls = [];
+  for (let i = 0; i < sections.length; i++) {
+    await throttle(300);
+    const keyPoint = sections[i].key_point ?? sections[i].name ?? content.keyword;
+    const pose = i === 0 ? 'dramatic urgent expression, arms raised in surprise'
+      : i === sections.length - 1 ? 'calm warm smile, thumbs up, slight bow'
+      : 'explaining confidently, pointing at invisible chart, professional gesture';
+    const imagePrompt =
+      `${MAEILNAMJA_BASE}. Character action: ${pose}. ` +
+      `Background scene: professional environment relevant to "${keyPoint}". ` +
+      `Full body visible, 9:16 portrait, vibrant illustration.`;
+
+    let imageUrl = null;
+    try {
+      const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'medium' };
+      const res = await axios.post(
+        'https://api.openai.com/v1/images/generations', body,
+        { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
+      );
+      const item = res.data.data[0];
+      if (item.url) {
+        imageUrl = item.url;
+      } else if (item.b64_json) {
+        const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_img${i}.png`);
+        await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+        imageUrl = imgPath;
+      }
+    } catch (err) {
+      logger.warn(`[media_generator] Long-form image s${i} failed: ${err.message}. Using Pexels.`);
+      const pexels = await searchPexelsImages(content.keyword, content.category, 1);
+      imageUrl = pexels[0] || null;
+    }
+    sectionImageUrls.push(imageUrl);
+  }
+  logger.info(`[media_generator] Long-form images: ${sectionImageUrls.filter(Boolean).length}/${sections.length}`);
+
+  // ── 4. 이미지·오디오 tmpfiles.org 업로드 (병렬) ──────────────────────
+  const FALLBACK_IMG = 'https://placehold.co/1080x1920/1a1a2e/1a1a2e.png';
+  const [hostedImageUrls, hostedAudioUrls] = await Promise.all([
+    Promise.all(sectionImageUrls.map(async (url) => {
+      if (!url) return FALLBACK_IMG;
+      if (url.startsWith('http')) return url;
+      try { return await uploadImageForShotstack(url); } catch { return FALLBACK_IMG; }
+    })),
+    Promise.all(sectionAudioPaths.map(async (p, i) => {
+      if (!p) return null;
+      try { return await uploadAudioForShotstack(p); }
+      catch (err) { logger.warn(`[media_generator] Long-form audio upload s${i}: ${err.message}`); return null; }
+    })),
+  ]);
+
+  // ── 5. 자막 PNG 렌더링 + 업로드 ──────────────────────────────────────
+  let textTrackClips = [];
+  try {
+    const labelPath     = path.resolve(__dirname, `../../output/media/label_long_${safeKeyword}.png`);
+    const subtitlePaths = sections.map((_, i) =>
+      path.resolve(__dirname, `../../output/media/sub_long_${safeKeyword}_${i}.png`)
+    );
+    await Promise.all([
+      renderLabelPng(content.long_video.youtube_title ?? content.keyword, labelPath),
+      ...sections.map((s, i) =>
+        renderSubtitlePng(`${s.name}  ${s.key_point ?? ''}`.slice(0, 60), subtitlePaths[i])
+      ),
+    ]);
+    const [hostedLabel, ...hostedSubs] = await Promise.all([
+      uploadImageForShotstack(labelPath),
+      ...subtitlePaths.map((p) => uploadImageForShotstack(p)),
+    ]);
+    textTrackClips.push({ asset: { type: 'image', src: hostedLabel }, start: 0, length: totalDuration, fit: 'cover' });
+    sections.forEach((_, i) => {
+      textTrackClips.push({
+        asset: { type: 'image', src: hostedSubs[i] },
+        start: sectionStarts[i], length: sectionDurations[i],
+        fit: 'cover', transition: { in: 'fade', out: 'fade' },
+      });
+    });
+    await Promise.allSettled([fs.unlink(labelPath), ...subtitlePaths.map((p) => fs.unlink(p))]);
+    logger.info(`[media_generator] Long-form text PNGs done: ${textTrackClips.length} clips`);
+  } catch (err) {
+    logger.warn(`[media_generator] Long-form text PNG failed: ${err.message}. Skipping text overlays.`);
+  }
+
+  // ── 6. Shotstack 타임라인 조립 ────────────────────────────────────────
+  const imageClips = sections.map((_, i) => ({
+    asset: { type: 'image', src: hostedImageUrls[i] },
+    start:  sectionStarts[i],
+    length: sectionDurations[i],
+    fit:    'cover',
+    effect: i % 2 === 0 ? 'zoomIn' : 'zoomOut',
+    transition: { in: 'fade', out: 'fade' },
+  }));
+  const audioClips = hostedAudioUrls
+    .map((url, i) => url ? {
+      asset: { type: 'audio', src: url, volume: 1 },
+      start:  sectionStarts[i],
+      length: sectionDurations[i],
+    } : null)
+    .filter(Boolean);
+  const overlayClip = {
+    asset: { type: 'image', src: FALLBACK_IMG },
+    start: 0, length: totalDuration, opacity: 0.2, fit: 'cover',
+  };
+
+  const tracks = [];
+  if (textTrackClips.length) tracks.push({ clips: textTrackClips });
+  tracks.push({ clips: [overlayClip] });
+  tracks.push({ clips: imageClips });
+  if (audioClips.length)     tracks.push({ clips: audioClips });
+
+  const renderResponse = await axios.post(
+    `https://api.shotstack.io/${config.shotstack.env}/render`,
+    { timeline: { tracks }, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } },
+    { headers: { 'x-api-key': config.shotstack.apiKey, 'Content-Type': 'application/json' }, timeout: 30000 }
+  );
+  const renderId = renderResponse.data.response.id;
+  logger.info(`[media_generator] Long-form Shotstack render started: ${renderId}`);
+
+  // 롱폼은 렌더링 시간이 길어 180회(15분) 폴링
+  const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
+  for (let i = 0; i < 180; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const statusRes = await axios.get(pollUrl, { headers: { 'x-api-key': config.shotstack.apiKey }, timeout: 10000 });
+    const { status, url } = statusRes.data.response;
+    if (status === 'done' && url) {
+      const videoRes = await axios.get(url, { responseType: 'arraybuffer', timeout: 300000 });
+      await fs.mkdir(path.dirname(videoPath), { recursive: true });
+      await fs.writeFile(videoPath, Buffer.from(videoRes.data));
+      result.video = videoPath;
+      logger.info(`[media_generator] Long-form video saved: ${videoPath}`);
+      return result;
+    }
+    if (status === 'failed') throw new Error(`Shotstack long-form render failed: ${renderId}`);
+  }
+  throw new Error(`Shotstack long-form render timed out: ${renderId}`);
+}
+
+export { generateLongFormMedia };
+
 export async function generateAllMedia(contentData) {
   const contents = contentData?.contents ?? [];
   if (contents.length === 0) {

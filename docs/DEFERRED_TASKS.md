@@ -65,3 +65,6 @@
 | 2026-05-20 | P2: YouTube 설명란·태그·제목 SEO 최적화 |
 | 2026-05-20 | P2: SRT 자막 자동 생성 |
 | 2026-05-20 | P4: 경쟁 채널 분석 에이전트 + 파이프라인 통합 |
+| 2026-05-20 | 영상 한국어 텍스트 깨짐 수정 (Shotstack text → Sharp PNG 오버레이) |
+| 2026-05-20 | 콘텐츠 삼각형 파이프라인 (long_form_creator + runUnifiedPipeline) |
+| 2026-05-20 | 롱폼 영상 미디어 제작 (generateLongFormMedia — 섹션별 TTS + Shotstack) |

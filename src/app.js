@@ -8,7 +8,7 @@ import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
 import { runTextQA, runVisionQA, runBlogQA } from './agents/qa_editor.js';
-import { generateAllMedia } from './agents/media_generator.js';
+import { generateAllMedia, generateLongFormMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
 import { mineKeywords } from './agents/keyword_miner.js';
@@ -557,13 +557,35 @@ export async function runUnifiedPipeline() {
   );
   logger.info(`[app] Unified Step 3 complete. ${triangleContents.length} items`);
 
-  // ── Step 4: Shorts Media Production ────────────────────────────────────────
+  // ── Step 4a: 숏폼 미디어 제작 ─────────────────────────────────────────────
   try {
     const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: triangleContents });
     await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
-    logger.info(`[app] Unified Step 4 complete. Media: ${mediaResult.results?.length ?? 0}`);
+    logger.info(`[app] Unified Step 4a (shorts media) complete. Media: ${mediaResult.results?.length ?? 0}`);
   } catch (err) {
-    logger.warn('[app] Unified Step 4 (media) failed.', { message: err.message });
+    logger.warn('[app] Unified Step 4a (shorts media) failed.', { message: err.message });
+  }
+
+  // ── Step 4b: 롱폼 영상 미디어 제작 ────────────────────────────────────────
+  const longFormResults = [];
+  for (const tc of triangleContents) {
+    if (!tc.long_video?.sections?.length) continue;
+    try {
+      logger.info(`[app] Unified Step 4b: long-form video for "${tc.keyword}"`);
+      const longResult = await generateLongFormMedia(tc);
+      longFormResults.push(longResult);
+    } catch (err) {
+      logger.warn(`[app] Unified Step 4b long-form failed for "${tc.keyword}": ${err.message}`);
+    }
+  }
+  if (longFormResults.length > 0) {
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/unified_longform_${date}.json`),
+      { generated_at: new Date().toISOString(), results: longFormResults }
+    );
+    logger.info(`[app] Unified Step 4b complete. Long-form videos: ${longFormResults.filter((r) => r.video).length}/${longFormResults.length}`);
+  } else {
+    logger.info('[app] Unified Step 4b: no long-form items to produce.');
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
