@@ -208,16 +208,18 @@ async function generateCharacterImages(keyword, scripts) {
       `Full body character centered, 9:16 portrait composition, high quality.`;
 
     // gpt-image-1 (신규 계정) → dall-e-3 → dall-e-2 순서로 폴백
+    // gpt-image-1은 response_format 파라미터 미지원, 항상 b64_json 반환
     const models = [
-      { model: 'gpt-image-1', size: '1024x1536', quality: 'high',     responseFormat: 'url' },
-      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard', responseFormat: 'url' },
-      { model: 'dall-e-2',    size: '1024x1024', quality: undefined,  responseFormat: 'url' },
+      { model: 'gpt-image-1', size: '1024x1536', quality: 'high',     supportsResponseFormat: false },
+      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard', supportsResponseFormat: true },
+      { model: 'dall-e-2',    size: '1024x1024', quality: undefined,  supportsResponseFormat: true },
     ];
     let imageUrl = null;
     for (const m of models) {
       try {
-        const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size, response_format: m.responseFormat };
+        const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size };
         if (m.quality) body.quality = m.quality;
+        if (m.supportsResponseFormat) body.response_format = 'url';
         const res = await axios.post(
           'https://api.openai.com/v1/images/generations',
           body,
