@@ -69,7 +69,7 @@ async function generateContent(item, competitorCtx = '') {
    - 예) 훅 "대출이자 또 올라?" → CTA "이 질문, 내일도 드릴게요. 구독해두세요"
    - 30자 이내
 
-${competitorCtx}━━━━━━━━━━━━━━━━━━━━━━━
+${competitorCtx}${item.director_brief ? `━━━━━━━━━━━━━━━━━━━━━━━\n【디렉터 브리프 — 최우선 준수】\n${item.director_brief}\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━
 JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
 ━━━━━━━━━━━━━━━━━━━━━━━
 

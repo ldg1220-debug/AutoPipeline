@@ -19,6 +19,7 @@ import { publishBlogPosts, editBlogPosts } from './agents/blog_publisher.js';
 import { runBlogAnalytics, identifyUnderperformers } from './agents/blog_analytics.js';
 import { groupSimilarTopics } from './agents/topic_grouper.js';
 import { analyzeCompetitors } from './agents/competitor_analyzer.js';
+import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +68,22 @@ async function runPipeline() {
     logger.info(`[app] TEST_LIMIT=${config.runtime.testLimit} — processing ${trendData.selected_items.length} item(s) only`);
   }
 
+  // ── Director Step 1: 아이템별 콘텐츠 브리프 생성 ──────────────────────
+  const briefMap = {};
+  try {
+    for (const item of trendData.selected_items) {
+      briefMap[item.keyword] = await createContentBrief(item);
+    }
+    logger.info(`[app] Director briefs created: ${Object.keys(briefMap).length} items`);
+  } catch (err) {
+    logger.warn('[app] Director brief generation failed. Continuing without briefs.', { message: err.message });
+  }
+  // 브리프를 trend item에 주입 (content_creator가 competitorCtx와 같은 방식으로 수신)
+  trendData.selected_items = trendData.selected_items.map((item) => ({
+    ...item,
+    director_brief: briefMap[item.keyword] ?? '',
+  }));
+
   // ── Agent 2: Content Creator ────────────────────────────────────────────
   let contentData;
   try {
@@ -78,6 +95,41 @@ async function runPipeline() {
     logger.error('[app] Agent 2 (content_creator) failed. Aborting.', { message: err.message });
     await sendErrorAlert('content_creator', err.message);
     return;
+  }
+
+  // ── Director Step 2: 콘텐츠 품질 검수 + 미달 시 1회 재생성 ────────────
+  try {
+    const reviewResults = [];
+    for (const content of contentData.contents) {
+      const brief = briefMap[content.keyword] ?? '';
+      const review = await reviewContent(content, brief);
+      reviewResults.push({ keyword: content.keyword, ...review });
+
+      if (!review.pass) {
+        logger.info(`[app] Director: re-generating "${content.keyword}" (score ${review.score})`);
+        try {
+          const retryItem = trendData.selected_items.find((i) => i.keyword === content.keyword);
+          if (retryItem) {
+            // 피드백을 브리프에 추가해 재생성 지시
+            const retryBrief = `${brief}\n\n[재생성 지시] ${review.feedback}`;
+            const retryTrend = { selected_items: [{ ...retryItem, director_brief: retryBrief }] };
+            const retryContent = await createContents(retryTrend);
+            const regenerated = retryContent.contents?.[0];
+            if (regenerated) {
+              const idx = contentData.contents.findIndex((c) => c.keyword === content.keyword);
+              if (idx !== -1) contentData.contents[idx] = regenerated;
+              logger.info(`[app] Director: re-generation complete for "${content.keyword}"`);
+            }
+          }
+        } catch (retryErr) {
+          logger.warn(`[app] Director re-generation failed: ${retryErr.message}. Using original.`);
+        }
+      }
+    }
+    const passCount = reviewResults.filter((r) => r.pass).length;
+    logger.info(`[app] Director Step 2 complete. Pass: ${passCount}/${reviewResults.length}`);
+  } catch (err) {
+    logger.warn('[app] Director content review failed. Continuing.', { message: err.message });
   }
 
   // ── Agent 2.1: PD Reviewer ──────────────────────────────────────────────
@@ -195,6 +247,30 @@ async function runPipeline() {
     logger.error('[app] Agent 3b (vision QA) failed. Aborting.', { message: err.message });
     await sendErrorAlert('qa_editor_vision', err.message);
     return;
+  }
+
+  // ── Director Step 3: 최종 발행 승인 게이트 ─────────────────────────────
+  try {
+    const directorRejected = [];
+    for (const report of finalQaData.reports) {
+      if (report.final_decision !== 'APPROVED') continue;
+      const content = contentData.contents.find((c) => c.keyword === report.keyword);
+      const approval = await finalApproval(report, content);
+      if (!approval.approved) {
+        report.final_decision = 'REJECTED';
+        report.director_reject_reason = approval.reason;
+        directorRejected.push(report.keyword);
+        skippedCount++;
+      }
+    }
+    if (directorRejected.length > 0) {
+      logger.warn(`[app] Director Step 3: ${directorRejected.length} item(s) rejected before publish`);
+    } else {
+      logger.info('[app] Director Step 3: all items cleared for publish');
+    }
+    finalApprovedCount = finalQaData.reports.filter((r) => r.final_decision === 'APPROVED').length;
+  } catch (err) {
+    logger.warn('[app] Director final approval failed. Continuing.', { message: err.message });
   }
 
   // ── Agent 4: Auto Publisher ─────────────────────────────────────────────
