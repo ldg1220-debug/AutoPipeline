@@ -6,6 +6,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import db from '../db/db.js';
+import { generateYouTubeDescription, generateYouTubeTags, generateYouTubeTitle } from '../utils/youtubeSEO.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,27 +52,36 @@ async function publishToYouTube(content, accessToken) {
     return { platform: 'youtube', status: 'skipped_no_video_file' };
   }
 
-  const publishAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-
+  const publishAt  = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
   const seriesName = content.series_name ?? '매일읽어주는남자';
 
-  const description = content.youtube_description
-    ?? [
-        `[${seriesName}] ${content.shortform_script?.hook ?? ''}`,
-        '',
-        content.shortform_script?.insight ?? content.shortform_script?.context ?? '',
-        '',
-        content.shortform_script?.cta ?? '',
-        '',
-        `#매일읽어주는남자 #${content.category} #숏폼 #${content.keyword.replace(/\s/g, '')}`,
-      ].join('\n');
+  // 블로그 포스트 URL (발행 결과가 있으면 설명란에 삽입)
+  const blogPostUrl = content.blog_publish?.url ?? content.blog_post_url ?? null;
+
+  // SEO 최적화: 설명·태그·제목 (GPT-4o-mini, 실패 시 폴백)
+  const [description, tags, optimizedTitle] = await Promise.all([
+    generateYouTubeDescription(content, blogPostUrl),
+    generateYouTubeTags(
+      content.keyword,
+      content.category,
+      content.blog_draft?.seo_keywords ?? []
+    ),
+    generateYouTubeTitle(
+      content.keyword,
+      content.shortform_script?.hook,
+      content.youtube_title
+    ),
+  ]);
+
+  logger.info(`[auto_publisher] SEO — title: "${optimizedTitle}" | tags: ${tags.length}개 | desc: ${description.length}자`);
 
   const metadata = JSON.stringify({
     snippet: {
-      title: content.youtube_title ?? `[${seriesName}] ${content.keyword}`,
+      title: optimizedTitle,
       description,
-      tags: [seriesName, content.keyword, content.category, '매일읽어주는남자', '숏폼', '트렌드'],
+      tags,
       categoryId: '22',
+      defaultLanguage: 'ko',
     },
     status: {
       privacyStatus: 'private',
