@@ -10,10 +10,50 @@ import { throttle } from '../utils/rateLimiter.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PROMPTS_DIR = path.resolve(__dirname, '../../prompts');
+const PROMPTS_DIR      = path.resolve(__dirname, '../../prompts');
+const BENCHMARK_PATH   = path.resolve(__dirname, '../../output/benchmark/rules.json');
+const BENCHMARK_MAX_AGE_DAYS = 7;
 
 async function loadPrompt(name) {
   return fs.readFile(path.join(PROMPTS_DIR, name), 'utf8');
+}
+
+/**
+ * 최신 벤치마크 룰을 로드한다.
+ * 7일 이상 지난 룰은 무시 (오래된 데이터로 잘못된 방향 유도 방지).
+ */
+async function loadBenchmarkRules() {
+  try {
+    const raw  = await fs.readFile(BENCHMARK_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data.rules?.length) return null;
+    const ageDays = (Date.now() - new Date(data.generated_at).getTime()) / 86_400_000;
+    if (ageDays > BENCHMARK_MAX_AGE_DAYS) {
+      logger.info('[blog_content_enhancer] Benchmark rules too old (>7d). Skipping injection.');
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 벤치마크 룰을 프롬프트에 추가할 컨텍스트 문자열로 변환.
+ */
+function formatBenchmarkContext(rules) {
+  if (!rules) return '';
+  const lines = [
+    `\n[성공 포스트 벤치마크 — ${rules.based_on_posts ?? 0}개 분석 기반]`,
+    ...(rules.rules ?? []).slice(0, 8).map((r) => `- ${r}`),
+  ];
+  if (rules.min_sections) lines.push(`- H2 섹션 최소 ${rules.min_sections}개`);
+  if (rules.min_words)    lines.push(`- 본문 최소 ${rules.min_words}자`);
+  if (rules.require_faq)  lines.push(`- FAQ 섹션 필수 포함`);
+  if (rules.priority_topics?.length) {
+    lines.push(`- 우선 다뤄야 할 주제: ${rules.priority_topics.slice(0, 5).join(', ')}`);
+  }
+  return lines.join('\n');
 }
 
 function fillTemplate(template, vars) {
@@ -67,17 +107,17 @@ async function callGPT4oMini(prompt) {
 }
 
 // ── Pass 1: 검색 의도 분석 ──────────────────────────────────────────────────
-async function pass1Intent(keyword, category) {
+async function pass1Intent(keyword, category, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass1_intent.md');
-  const prompt = fillTemplate(template, { keyword, category });
+  const prompt   = fillTemplate(template, { keyword, category }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
 }
 
 // ── Pass 2: H2/H3 아웃라인 + FAQ 생성 ─────────────────────────────────────
-async function pass2Outline(keyword, category, intent, hook) {
+async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass2_outline.md');
-  const prompt = fillTemplate(template, {
+  const prompt   = fillTemplate(template, {
     keyword,
     category,
     search_intent:        intent.search_intent,
@@ -85,7 +125,7 @@ async function pass2Outline(keyword, category, intent, hook) {
     competitor_structure: JSON.stringify(intent.competitor_structure),
     unique_angle:         intent.unique_angle,
     youtube_hook:         hook,
-  });
+  }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
 }
@@ -179,15 +219,23 @@ async function enhanceBlogDraft(content) {
     return content;
   }
 
+  // 벤치마크 룰 로드 (있으면 Pass1·2 프롬프트에 주입)
+  const benchmarkRules = await loadBenchmarkRules();
+  const benchmarkCtx   = formatBenchmarkContext(benchmarkRules);
+  if (benchmarkCtx) {
+    logger.info(`[blog_content_enhancer] Benchmark rules injected (${benchmarkRules.based_on_posts}개 분석 기반)`);
+  }
+
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
-  const intent = await pass1Intent(keyword, category);
+  const intent = await pass1Intent(keyword, category, benchmarkCtx);
 
   logger.info(`[blog_content_enhancer] Pass 2 (outline): ${keyword}`);
   const outline = await pass2Outline(
     keyword,
     category,
     intent,
-    shortform_script?.hook ?? ''
+    shortform_script?.hook ?? '',
+    benchmarkCtx
   );
 
   // H2/H3 섹션만 추출 (FAQ 제외)

@@ -348,15 +348,14 @@ async function runBlogPipeline(youtubeResults = null) {
     await sendErrorAlert('blog_publisher', err.message);
   }
 
-  // ── Part 6: Analytics (주간 수집 — 금요일만 실행) ─────────────────────
-  const dayOfWeek = new Date().getDay();
-  if (dayOfWeek === 5) {
-    try {
-      await runBlogAnalytics();
-      logger.info('[app] Blog Part 6 complete.');
-    } catch (err) {
-      logger.warn('[app] Blog Part 6 (blog_analytics) failed.', { message: err.message });
-    }
+  // ── Part 6: Analytics + 벤치마킹 (매일 실행, 룰은 7일 캐시) ─────────────
+  // 성공 포스트 구조 분석 → output/benchmark/rules.json 갱신
+  // blog_content_enhancer가 다음 실행 시 자동으로 주입
+  try {
+    await runBlogAnalytics();
+    logger.info('[app] Blog Part 6 complete (analytics + benchmark).');
+  } catch (err) {
+    logger.warn('[app] Blog Part 6 (blog_analytics) failed.', { message: err.message });
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
