@@ -17,9 +17,17 @@ const __dirname  = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// act별 분위기 가이드 (buildSceneBackgrounds 프롬프트에 활용)
+// ── 매읽남 캐릭터 공통 설명 ──────────────────────────────────────────────
+const MAEILNAMJA_BASE =
+  'Chibi kawaii anime-style white Persian cat professor character, ' +
+  'wearing beige/tan blazer with dark navy necktie, small round gold-rim glasses, ' +
+  'extremely fluffy white fur, adorable chubby proportions, full body visible, ' +
+  'expressive large eyes, Korean YouTube Shorts educational content style, ' +
+  'vibrant clean illustration, absolutely no text or letters anywhere in the image';
+
+// act별 분위기 가이드
 const ACT_MOODS = [
-  'dramatic, urgent, shocking, high-tension atmosphere',   // Act 0 도입
+  'dramatic, urgent, shocking, high-tension atmosphere',     // Act 0 도입
   'informative, analytical, clear, professional atmosphere', // Act 1 본론
   'calm, conclusive, forward-looking, hopeful atmosphere',   // Act 2 마무리
 ];
@@ -127,16 +135,22 @@ async function buildSceneBackgrounds(keyword, scripts) {
     `[도입/Hook]: ${actTexts[0]}\n` +
     `[본론/Body]: ${actTexts[1]}\n` +
     `[마무리/Close]: ${actTexts[2]}\n\n` +
-    `Generate a visually specific SCENE IMAGE prompt in English for each section.\n` +
-    `Rules:\n` +
-    `- Describe a cinematic photo/illustration that DIRECTLY REPRESENTS the script content\n` +
-    `- Act 0 mood: ${ACT_MOODS[0]}\n` +
-    `- Act 1 mood: ${ACT_MOODS[1]}\n` +
-    `- Act 2 mood: ${ACT_MOODS[2]}\n` +
-    `- Real-world scenes: courtrooms, trading floors, offices, charts, money, news rooms\n` +
-    `- NO cartoon characters, NO text, NO people's faces, NO numbers\n` +
-    `- Each prompt under 180 chars\n` +
-    `Return JSON: {"hook_bg":"...","body_bg":"...","close_bg":"..."}`;
+    `For each section, generate:\n` +
+    `1. "bg": background scene (the environment/setting relevant to the script)\n` +
+    `2. "pose": character action/pose for the chibi cat professor (매읽남) in that scene\n\n` +
+    `Rules for bg:\n` +
+    `- Directly relevant to the script content (courtroom, trading floor, office, etc.)\n` +
+    `- No text, no numbers\n` +
+    `Rules for pose (character action, not background):\n` +
+    `- Act 0 mood: ${ACT_MOODS[0]} — e.g. gasping, pointing at screen in shock\n` +
+    `- Act 1 mood: ${ACT_MOODS[1]} — e.g. holding document, gesturing at chart\n` +
+    `- Act 2 mood: ${ACT_MOODS[2]} — e.g. thumbs up, calm smile, bowing slightly\n` +
+    `- Each bg/pose under 120 chars\n` +
+    `Return JSON: {\n` +
+    `  "hook":  {"bg":"...","pose":"..."},\n` +
+    `  "body":  {"bg":"...","pose":"..."},\n` +
+    `  "close": {"bg":"...","pose":"..."}\n` +
+    `}`;
 
   try {
     const res = await axios.post(
@@ -156,9 +170,9 @@ async function buildSceneBackgrounds(keyword, scripts) {
   } catch (err) {
     logger.warn(`[media_generator] Scene background generation failed: ${err.message}. Using defaults.`);
     return {
-      hook_bg:  'dramatic dark room with large red falling arrow graphs on glowing screens, spotlight',
-      body_bg:  'bright lecture classroom with economic charts on whiteboard, warm lighting, bookshelves',
-      close_bg: 'cozy library with warm golden sunlight through window, stacked books, calm atmosphere',
+      hook:  { bg: 'dramatic dark room with large red falling arrow graphs on glowing screens, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
+      body:  { bg: 'bright lecture classroom with economic charts on whiteboard, warm lighting',            pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
+      close: { bg: 'cozy library with warm golden sunlight through window, stacked books',                  pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
     };
   }
 }
@@ -172,8 +186,8 @@ async function buildSceneBackgrounds(keyword, scripts) {
 async function generateSceneImages(keyword, scripts, category) {
   if (!config.openai.apiKey) return [null, null, null];
 
-  const backgrounds = await buildSceneBackgrounds(keyword, scripts ?? {});
-  const bgList = [backgrounds.hook_bg, backgrounds.body_bg, backgrounds.close_bg];
+  const scenes = await buildSceneBackgrounds(keyword, scripts ?? {});
+  const sceneList = [scenes.hook, scenes.body, scenes.close];
   logger.info(`[media_generator] Scene prompts ready for: ${keyword}`);
 
   const actLabels = ['도입', '본론', '마무리'];
@@ -188,15 +202,17 @@ async function generateSceneImages(keyword, scripts, category) {
       continue;
     }
 
-    // 씬 자체를 묘사하는 이미지 프롬프트 (캐릭터 없음)
+    // 매읽남 캐릭터 + 씬별 포즈 + 씬별 배경 조합
+    const { bg, pose } = sceneList[i] ?? { bg: '', pose: '' };
     const imagePrompt =
-      `${bgList[i]}, ` +
-      `Korean news visual style, cinematic photography, 9:16 portrait, ` +
-      `dramatic lighting, high detail, no text, no visible faces`;
+      `${MAEILNAMJA_BASE}. ` +
+      `Character action: ${pose}. ` +
+      `Background scene: ${bg}. ` +
+      `Full body character centered, 9:16 portrait composition, high quality, vibrant illustration.`;
 
     let imageUrl = null;
     for (const m of [
-      { model: 'gpt-image-1', size: '1024x1536', quality: 'medium' },
+      { model: 'gpt-image-1', size: '1024x1536', quality: 'high' },
       { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
     ]) {
       try {
