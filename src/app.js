@@ -594,26 +594,30 @@ export async function runUnifiedPipeline() {
 }
 
 // ── 스케줄러 / 단독 실행 ──────────────────────────────────────────────────
-// DRY_RUN 시에는 스케줄러 없이 1회 실행 후 종료
-if (config.runtime.dryRun) {
-  logger.info('[app] DRY_RUN mode — running once and exiting.');
-  runPipeline().then(() => process.exit(0));
-} else {
-  // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
-  startScheduler(runPipeline, config.runtime.cronSchedule);
-  startScheduler(runPipeline, config.runtime.cronScheduleB);
-  // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
-  startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
-  startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+// import()로 불러올 때는 실행하지 않고, node src/app.js 직접 실행 시에만 동작한다.
+// (run-unified-pipeline.js 등 외부 스크립트가 import해도 스케줄러가 뜨지 않는다)
+const _isDirectEntry = fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '');
+if (_isDirectEntry) {
+  if (config.runtime.dryRun) {
+    logger.info('[app] DRY_RUN mode — running once and exiting.');
+    runPipeline().then(() => process.exit(0));
+  } else {
+    // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
+    startScheduler(runPipeline, config.runtime.cronSchedule);
+    startScheduler(runPipeline, config.runtime.cronScheduleB);
+    // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
+    startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
+    startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
 
-  // 최초 기동 시 두 파이프라인 모두 순차 실행
-  // YouTube 완료 후 publish 결과를 블로그에 전달 (youtube_url 임베드)
-  (async () => {
-    try {
-      const youtubeResult = await runPipeline();
-      await runBlogPipeline(youtubeResult);
-    } catch (err) {
-      logger.error('[app] Initial run failed', { message: err.message });
-    }
-  })();
+    // 최초 기동 시 두 파이프라인 모두 순차 실행
+    // YouTube 완료 후 publish 결과를 블로그에 전달 (youtube_url 임베드)
+    (async () => {
+      try {
+        const youtubeResult = await runPipeline();
+        await runBlogPipeline(youtubeResult);
+      } catch (err) {
+        logger.error('[app] Initial run failed', { message: err.message });
+      }
+    })();
+  }
 }

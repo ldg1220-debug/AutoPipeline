@@ -35,8 +35,8 @@
     "competitor:analyze": "node src/agents/competitor_analyzer.js",
     "youtube:auth:health": "node scripts/get-youtube-health-token.js",
     "director:strategy": "node src/agents/pipeline_director.js",
-    "unified": "cross-env DRY_RUN=false node -e \"import('./src/app.js').then(m => m.runUnifiedPipeline())\"",
-    "unified:dry": "cross-env DRY_RUN=true node -e \"import('./src/app.js').then(m => m.runUnifiedPipeline())\""
+    "unified": "node scripts/run-unified-pipeline.js",
+    "unified:dry": "cross-env DRY_RUN=true node scripts/run-unified-pipeline.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
