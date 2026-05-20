@@ -437,15 +437,15 @@ function buildTextClips(scenes, seriesName, totalDuration) {
       type: 'text',
       text: `📺 ${seriesName}`,
       width: 900,
-      height: 70,
-      font: { family: 'Noto Sans', size: 26, color: '#FFFFFF', weight: '700' },
+      height: 100,
+      font: { family: 'Noto Sans', size: 40, color: '#FFFFFF', weight: '700' },
       alignment: { horizontal: 'center', vertical: 'center' },
-      background: { color: '#000000', opacity: 0.80, borderRadius: 6, padding: 12 },
+      background: { color: '#000000', opacity: 0.85, borderRadius: 8, padding: 16 },
     },
     start: 0,
     length: totalDuration,
     position: 'top',
-    offset: { x: 0, y: -0.05 },
+    offset: { x: 0, y: -0.04 },
   });
 
   // 씬별 자막 — 하단 1/3 영역에 배치해 캐릭터가 상단에 잘 보이도록

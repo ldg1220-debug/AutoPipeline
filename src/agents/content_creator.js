@@ -24,7 +24,7 @@ const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
  */
 
 async function generateContent(item, competitorCtx = '') {
-  const seriesName = item.series ?? '오늘의 이슈';
+  const seriesName = item.series ?? '오늘 읽는 핫이슈';
 
   const contentPrompt = `당신은 한국 경제 유튜브 채널 "매일읽어주는남자"의 수석 콘텐츠 전문가입니다.
 이 채널은 매일 경제 뉴스를 "나에게 어떤 영향을 주는가"로 풀어서 55초 숏폼으로 전달합니다.
@@ -152,7 +152,7 @@ export async function createContents(trendData) {
       contents.push({
         keyword: item.keyword,
         category: item.category,
-        series_name: generated.series_name ?? item.series ?? '오늘의 이슈',
+        series_name: generated.series_name ?? item.series ?? '오늘 읽는 핫이슈',
         shortform_script: generated.shortform_script ?? {},
         youtube_title: generated.youtube_title ?? item.keyword,
         youtube_description: generated.youtube_description ?? '',
@@ -172,7 +172,7 @@ function buildPlaceholder(item) {
   return {
     keyword: item.keyword,
     category: item.category,
-    series_name: item.series ?? '오늘의 이슈',
+    series_name: item.series ?? '오늘 읽는 핫이슈',
     shortform_script: {
       hook: `${item.keyword.slice(0, 10)}?`,
       context: `[PLACEHOLDER] ${item.keyword} 관련 현황과 나에게 미치는 영향`,

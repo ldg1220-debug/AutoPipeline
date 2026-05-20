@@ -13,12 +13,12 @@ const MOCK_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 // 카테고리 → 매일읽어주는남자 시리즈명 매핑
 const SERIES_MAP = {
-  finance:       '오늘의 경제 용어',
-  economy:       '오늘의 경제 용어',
-  realestate:    '부동산 한 줄',
-  health:        '건강 팩트체크',
-  entertainment: '오늘의 이슈',
-  social:        '오늘의 이슈',
+  finance:       '오늘 읽는 경제뉴스',
+  economy:       '오늘 읽는 경제뉴스',
+  realestate:    '오늘 읽는 부동산',
+  health:        '오늘 읽는 건강뉴스',
+  entertainment: '오늘 읽는 핫이슈',
+  social:        '오늘 읽는 핫이슈',
 };
 
 const RSS_SOURCES = [
