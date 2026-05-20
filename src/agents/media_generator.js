@@ -207,24 +207,36 @@ async function generateCharacterImages(keyword, scripts) {
       `Background scene: ${bgList[i]}. ` +
       `Full body character centered, 9:16 portrait composition, high quality.`;
 
-    try {
-      const res = await axios.post(
-        'https://api.openai.com/v1/images/generations',
-        { model: 'dall-e-3', prompt: dallePrompt, n: 1, size: '1024x1792', quality: 'standard' },
-        {
-          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-          timeout: 60000,
-        }
-      );
-      const imageUrl = res.data.data[0].url;
+    // dall-e-3 시도 → 권한 없으면 dall-e-2 폴백 (dall-e-2는 1024x1024만 지원)
+    const models = [
+      { model: 'dall-e-3', size: '1024x1792', quality: 'standard' },
+      { model: 'dall-e-2', size: '1024x1024', quality: undefined },
+    ];
+    let imageUrl = null;
+    for (const m of models) {
+      try {
+        const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size };
+        if (m.quality) body.quality = m.quality;
+        const res = await axios.post(
+          'https://api.openai.com/v1/images/generations',
+          body,
+          {
+            headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+            timeout: 60000,
+          }
+        );
+        imageUrl = res.data.data[0].url;
+        logger.info(`[media_generator] Character image ${i + 1}/3 done (${actLabels[i]}, ${m.model}): ${keyword}`);
+        break;
+      } catch (err) {
+        const detail = err.response?.data?.error?.message ?? err.message;
+        logger.warn(`[media_generator] DALL-E ${m.model} image ${i + 1} failed: ${detail}`);
+      }
+    }
+    if (imageUrl) {
       results.push(imageUrl);
-      logger.info(`[media_generator] Character image ${i + 1}/3 done (${actLabels[i]}): ${keyword}`);
-
-      // 캐시에 저장 (비동기, 실패해도 무시)
       saveImageToCache(keyword, i, imageUrl).catch(() => {});
-    } catch (err) {
-      const detail = err.response?.data?.error?.message ?? err.message;
-      logger.warn(`[media_generator] DALL-E image ${i + 1} failed: ${detail}`);
+    } else {
       results.push(null);
     }
   }
