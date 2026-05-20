@@ -37,6 +37,16 @@ export const config = {
     apiKey: process.env.ELEVENLABS_API_KEY,
     voiceId: process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM',
   },
+  clovaVoice: {
+    // Naver Cloud Platform → AI·Application Services → Clova Voice
+    clientId:     process.env.NAVER_CLOVA_CLIENT_ID,
+    clientSecret: process.env.NAVER_CLOVA_CLIENT_SECRET,
+    // 추천: nara_call (콜센터 여성, 밝고 명료) | nara (일반 여성) | kyunghun (남성)
+    speaker:      process.env.CLOVA_VOICE_SPEAKER || 'nara_call',
+    speed:        parseInt(process.env.CLOVA_VOICE_SPEED  || '0', 10),   // -5~5
+    pitch:        parseInt(process.env.CLOVA_VOICE_PITCH  || '2', 10),   // -5~5, +2=약간 높고 귀여운 음조
+    volume:       parseInt(process.env.CLOVA_VOICE_VOLUME || '0', 10),
+  },
   shotstack: {
     apiKey: process.env.SHOTSTACK_API_KEY,
     env: process.env.SHOTSTACK_ENV === 'production' ? 'v1' : 'stage',

@@ -7,6 +7,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
+import { findSimilarImage, saveImageToCache, pruneImageCache } from '../utils/imageCache.js';
 
 const require = createRequire(import.meta.url);
 const sharp   = require('sharp');
@@ -187,9 +188,19 @@ async function generateCharacterImages(keyword, scripts) {
 
   logger.info(`[media_generator] Scene backgrounds generated for: ${keyword}`);
 
-  // 2. 포즈 + 배경을 합쳐 DALL-E 3 이미지 3장 생성
+  // 2. 포즈 + 배경을 합쳐 DALL-E 3 이미지 3장 생성 (캐시 우선)
+  const actLabels = ['도입', '본론', '마무리'];
   const results = [];
   for (let i = 0; i < 3; i++) {
+    // 캐시 조회: 유사 키워드가 같은 act_index로 이미 생성한 이미지가 있으면 재사용
+    await throttle(300);
+    const cachedUrl = await findSimilarImage(keyword, i);
+    if (cachedUrl) {
+      logger.info(`[media_generator] Reusing cached image act${i} (${actLabels[i]}): ${keyword}`);
+      results.push(cachedUrl);
+      continue;
+    }
+
     const dallePrompt =
       `${MAEILNAMJA_BASE}. ` +
       `Character pose: ${ACT_POSES[i]}. ` +
@@ -205,8 +216,12 @@ async function generateCharacterImages(keyword, scripts) {
           timeout: 60000,
         }
       );
-      results.push(res.data.data[0].url);
-      logger.info(`[media_generator] Character image ${i + 1}/3 done (${['도입', '본론', '마무리'][i]}): ${keyword}`);
+      const imageUrl = res.data.data[0].url;
+      results.push(imageUrl);
+      logger.info(`[media_generator] Character image ${i + 1}/3 done (${actLabels[i]}): ${keyword}`);
+
+      // 캐시에 저장 (비동기, 실패해도 무시)
+      saveImageToCache(keyword, i, imageUrl).catch(() => {});
     } catch (err) {
       logger.warn(`[media_generator] DALL-E image ${i + 1} failed: ${err.message}`);
       results.push(null);
@@ -513,8 +528,46 @@ async function uploadAudioForShotstack(audioPath) {
   return uploadedUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
 }
 
-// ── OpenAI TTS 오디오 생성 ─────────────────────────────────────────────────
-async function generateAudio(text, outputPath) {
+// ── Naver ClovaVoice TTS ──────────────────────────────────────────────────
+/**
+ * Naver ClovaVoice Premium TTS.
+ * 한국어 원어민 품질. 월 10만 자 무료 (API Gateway → Clova Voice Premium).
+ * speaker: nara_call(밝고 명료), nara(일반), kyunghun(남성)
+ */
+async function generateAudioClovaVoice(text, outputPath) {
+  const { clientId, clientSecret, speaker, speed, pitch, volume } = config.clovaVoice;
+
+  const params = new URLSearchParams({
+    speaker,
+    volume: String(volume),
+    speed:  String(speed),
+    pitch:  String(pitch),
+    format: 'mp3',
+    text:   text.slice(0, 2000), // ClovaVoice 최대 2000자
+  });
+
+  const response = await axios.post(
+    'https://naveropenapi.apigw.ntruss.com/tts-premium/v1/tts',
+    params.toString(),
+    {
+      headers: {
+        'X-NCP-APIGW-API-KEY-ID': clientId,
+        'X-NCP-APIGW-API-KEY':    clientSecret,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      responseType: 'arraybuffer',
+      timeout: 60000,
+    }
+  );
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, Buffer.from(response.data));
+  logger.info(`[media_generator] ClovaVoice audio saved: ${outputPath}`);
+  return outputPath;
+}
+
+// ── OpenAI TTS 폴백 ────────────────────────────────────────────────────────
+async function generateAudioOpenAI(text, outputPath) {
   const voice = process.env.OPENAI_TTS_VOICE || 'nova';
   const response = await axios.post(
     'https://api.openai.com/v1/audio/speech',
@@ -527,8 +580,23 @@ async function generateAudio(text, outputPath) {
   );
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, Buffer.from(response.data));
-  logger.info(`[media_generator] Audio saved: ${outputPath}`);
+  logger.info(`[media_generator] OpenAI TTS audio saved: ${outputPath}`);
   return outputPath;
+}
+
+// ── 오디오 생성 (ClovaVoice 우선 → OpenAI 폴백) ───────────────────────────
+async function generateAudio(text, outputPath) {
+  const { clientId, clientSecret } = config.clovaVoice;
+
+  if (clientId && clientSecret) {
+    try {
+      return await generateAudioClovaVoice(text, outputPath);
+    } catch (err) {
+      logger.warn(`[media_generator] ClovaVoice failed (${err.message}), falling back to OpenAI TTS`);
+    }
+  }
+
+  return generateAudioOpenAI(text, outputPath);
 }
 
 // ── Shotstack 영상 렌더링 ──────────────────────────────────────────────────
@@ -731,6 +799,9 @@ export async function generateAllMedia(contentData) {
     logger.warn('[media_generator] No contents to process.');
     return { generated_at: new Date().toISOString(), results: [] };
   }
+
+  // 30일 이상 미사용 캐시 정리 (주기적 housekeeping)
+  pruneImageCache(30);
 
   const results = [];
   for (const content of contents) {

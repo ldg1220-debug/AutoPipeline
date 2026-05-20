@@ -42,3 +42,17 @@ CREATE INDEX IF NOT EXISTS idx_keywords_status   ON keywords(status);
 CREATE INDEX IF NOT EXISTS idx_keywords_score    ON keywords(score DESC);
 CREATE INDEX IF NOT EXISTS idx_blog_posts_status ON blog_posts(status);
 CREATE INDEX IF NOT EXISTS idx_blog_metrics_post ON blog_metrics(post_id);
+
+-- image_cache: DALL-E 생성 이미지 + 키워드 임베딩 캐시 (유사 키워드 재사용으로 비용 절감)
+CREATE TABLE IF NOT EXISTS image_cache (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  keyword      TEXT    NOT NULL,
+  act_index    INTEGER NOT NULL DEFAULT 0,   -- 0=도입, 1=본론, 2=마무리
+  image_url    TEXT    NOT NULL,
+  embedding    TEXT    NOT NULL,             -- JSON float array (text-embedding-3-small, 1536dim)
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+  used_count   INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_image_cache_keyword   ON image_cache(keyword);
+CREATE INDEX IF NOT EXISTS idx_image_cache_act       ON image_cache(act_index);
