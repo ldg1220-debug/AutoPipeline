@@ -17,27 +17,11 @@ const __dirname  = path.dirname(__filename);
 
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
-// ── 매읽남 캐릭터 공통 설명 (DALL-E 프롬프트 고정 파트) ──────────────────
-const MAEILNAMJA_BASE =
-  'Chibi kawaii anime-style white Persian cat professor character, ' +
-  'wearing beige/tan blazer with dark navy necktie, small round gold-rim glasses, ' +
-  'extremely fluffy white fur, adorable chubby proportions, full body visible, ' +
-  'expressive large eyes, Korean YouTube Shorts educational content style, ' +
-  'vibrant clean illustration, absolutely no text or letters anywhere in the image';
-
-// act별 고정 포즈 (배경은 GPT-4o-mini가 대본 기반으로 동적 생성)
-const ACT_POSES = [
-  // Act 0 도입: 시청자를 훅하는 충격·긴장 포즈
-  'alarmed shocked expression, both arms raised dramatically, ' +
-  'mouth wide open, eyebrows furrowed upward, leaning forward with urgency',
-
-  // Act 1 본론: 자신감 있게 설명하는 포즈
-  'pointing confidently with a wooden pointer stick, ' +
-  'open mouth explaining, determined serious eyebrows, one paw gesturing',
-
-  // Act 2 마무리: 차분하게 정리하는 포즈
-  'calm wise expression, gentle reassuring smile, ' +
-  'one paw raised giving thumbs-up, slightly bowing head',
+// act별 분위기 가이드 (buildSceneBackgrounds 프롬프트에 활용)
+const ACT_MOODS = [
+  'dramatic, urgent, shocking, high-tension atmosphere',   // Act 0 도입
+  'informative, analytical, clear, professional atmosphere', // Act 1 본론
+  'calm, conclusive, forward-looking, hopeful atmosphere',   // Act 2 마무리
 ];
 
 // ── ② 이미지 프롬프트 QA + DALL-E 결과 검수 ──────────────────────────────
@@ -137,18 +121,21 @@ async function buildSceneBackgrounds(keyword, scripts) {
   ].map((t) => t.slice(0, 150));
 
   const prompt =
-    `You are a creative director for a Korean economic YouTube Shorts channel featuring a cute cat professor character named 매읽남.\n` +
+    `You are a visual director for a Korean economic YouTube Shorts channel.\n` +
     `Topic: "${keyword}"\n\n` +
     `Script sections (Korean):\n` +
     `[도입/Hook]: ${actTexts[0]}\n` +
     `[본론/Body]: ${actTexts[1]}\n` +
     `[마무리/Close]: ${actTexts[2]}\n\n` +
-    `Generate a visually specific BACKGROUND SCENE description in English for each section.\n` +
+    `Generate a visually specific SCENE IMAGE prompt in English for each section.\n` +
     `Rules:\n` +
-    `- Describe ONLY the background/environment, NOT the cat character\n` +
-    `- Make it directly relevant to the script content (e.g., if hook mentions falling stocks → dramatic red falling chart room)\n` +
-    `- Cinematic, vivid, specific details\n` +
-    `- No text/numbers visible in scene\n` +
+    `- Describe a cinematic photo/illustration that DIRECTLY REPRESENTS the script content\n` +
+    `- Act 0 mood: ${ACT_MOODS[0]}\n` +
+    `- Act 1 mood: ${ACT_MOODS[1]}\n` +
+    `- Act 2 mood: ${ACT_MOODS[2]}\n` +
+    `- Real-world scenes: courtrooms, trading floors, offices, charts, money, news rooms\n` +
+    `- NO cartoon characters, NO text, NO people's faces, NO numbers\n` +
+    `- Each prompt under 180 chars\n` +
     `Return JSON: {"hook_bg":"...","body_bg":"...","close_bg":"..."}`;
 
   try {
@@ -176,52 +163,44 @@ async function buildSceneBackgrounds(keyword, scripts) {
   }
 }
 
-// ── DALL-E 3 캐릭터 이미지 생성 ───────────────────────────────────────────
+// ── 씬 이미지 3컷 생성 ────────────────────────────────────────────────────
 /**
- * 매읽남 캐릭터 이미지 3장 생성.
- * - 포즈: act별 고정 (도입=충격, 본론=설명, 마무리=정리)
- * - 배경: GPT-4o-mini가 실제 대본 내용 기반으로 동적 생성
- * - 크기: 1024×1792 (9:16 portrait)
+ * 대본 내용 기반 씬 이미지 3컷 생성 (도입/본론/마무리).
+ * 캐릭터 없이 콘텐츠와 직결된 시네마틱 장면으로 컷 전환 연출.
+ * gpt-image-1 → Pexels 순으로 폴백.
  */
-async function generateCharacterImages(keyword, scripts) {
+async function generateSceneImages(keyword, scripts, category) {
   if (!config.openai.apiKey) return [null, null, null];
 
-  // 1. 대본 기반 장면 배경 생성
   const backgrounds = await buildSceneBackgrounds(keyword, scripts ?? {});
   const bgList = [backgrounds.hook_bg, backgrounds.body_bg, backgrounds.close_bg];
+  logger.info(`[media_generator] Scene prompts ready for: ${keyword}`);
 
-  logger.info(`[media_generator] Scene backgrounds generated for: ${keyword}`);
-
-  // 2. 포즈 + 배경을 합쳐 DALL-E 3 이미지 3장 생성 (캐시 우선)
   const actLabels = ['도입', '본론', '마무리'];
   const results = [];
+
   for (let i = 0; i < 3; i++) {
-    // 캐시 조회: 유사 키워드가 같은 act_index로 이미 생성한 이미지가 있으면 재사용
     await throttle(300);
     const cachedUrl = await findSimilarImage(keyword, i);
     if (cachedUrl) {
-      logger.info(`[media_generator] Reusing cached image act${i} (${actLabels[i]}): ${keyword}`);
+      logger.info(`[media_generator] Reusing cached scene act${i} (${actLabels[i]}): ${keyword}`);
       results.push(cachedUrl);
       continue;
     }
 
-    const dallePrompt =
-      `${MAEILNAMJA_BASE}. ` +
-      `Character pose: ${ACT_POSES[i]}. ` +
-      `Background scene: ${bgList[i]}. ` +
-      `Full body character centered, 9:16 portrait composition, high quality.`;
+    // 씬 자체를 묘사하는 이미지 프롬프트 (캐릭터 없음)
+    const imagePrompt =
+      `${bgList[i]}, ` +
+      `Korean news visual style, cinematic photography, 9:16 portrait, ` +
+      `dramatic lighting, high detail, no text, no visible faces`;
 
-    // gpt-image-1 (신규 계정) → dall-e-3 → dall-e-2 순서로 폴백
-    // gpt-image-1은 response_format 파라미터 미지원, 항상 b64_json 반환
-    const models = [
-      { model: 'gpt-image-1', size: '1024x1536', quality: 'high' },
-      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
-      { model: 'dall-e-2',    size: '1024x1024', quality: undefined  },
-    ];
     let imageUrl = null;
-    for (const m of models) {
+    for (const m of [
+      { model: 'gpt-image-1', size: '1024x1536', quality: 'medium' },
+      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
+    ]) {
       try {
-        const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size };
+        const body = { model: m.model, prompt: imagePrompt, n: 1, size: m.size };
         if (m.quality) body.quality = m.quality;
         const res = await axios.post(
           'https://api.openai.com/v1/images/generations',
@@ -235,27 +214,30 @@ async function generateCharacterImages(keyword, scripts) {
         if (item.url) {
           imageUrl = item.url;
         } else if (item.b64_json) {
-          // URL 미지원 시 로컬 파일로 저장 후 file 경로 반환
           const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-          const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_char${i}.png`);
+          const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         }
         if (imageUrl) {
-          logger.info(`[media_generator] Character image ${i + 1}/3 done (${actLabels[i]}, ${m.model}): ${keyword}`);
+          logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, ${m.model}): ${keyword}`);
           break;
         }
       } catch (err) {
         const detail = err.response?.data?.error?.message ?? err.message;
-        logger.warn(`[media_generator] Image ${m.model} ${i + 1} failed: ${detail}`);
+        logger.warn(`[media_generator] Scene image ${m.model} act${i} failed: ${detail}`);
       }
     }
-    if (imageUrl) {
-      results.push(imageUrl);
-      saveImageToCache(keyword, i, imageUrl).catch(() => {});
-    } else {
-      results.push(null);
+
+    // Pexels 폴백
+    if (!imageUrl) {
+      const pexels = await searchPexelsImages(keyword, category, 1);
+      imageUrl = pexels[0] || null;
+      if (imageUrl) logger.info(`[media_generator] Scene image act${i} → Pexels fallback`);
     }
+
+    results.push(imageUrl ?? null);
+    if (imageUrl) saveImageToCache(keyword, i, imageUrl).catch(() => {});
   }
   return results;
 }
@@ -948,44 +930,30 @@ async function generateMedia(content) {
     content = { ...content, image_prompt: enhancedPrompt };
   }
 
-  // 3. 매읽남 캐릭터 이미지 3장 생성 (실패 시 Pexels 폴백)
-  let characterUrls;
+  // 3. 씬 이미지 3컷 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
+  let sceneUrls;
   try {
-    logger.info(`[media_generator] Generating 매읽남 character images (3 poses): ${content.keyword}`);
-    characterUrls = await generateCharacterImages(content.keyword, content.shortform_script ?? {});
-    const successCount = characterUrls.filter(Boolean).length;
-    logger.info(`[media_generator] Character images: ${successCount}/3 generated`);
+    logger.info(`[media_generator] Generating scene images (3 cuts): ${content.keyword}`);
+    sceneUrls = await generateSceneImages(content.keyword, content.shortform_script ?? {}, content.category);
+    const successCount = sceneUrls.filter(Boolean).length;
+    logger.info(`[media_generator] Scene images: ${successCount}/3 generated`);
 
-    // DALL-E 결과 이미지 검수 (경고만, 재생성 없음)
-    const actNames = ['도입(충격)', '본론(설명)', '마무리(정리)'];
-    for (let i = 0; i < characterUrls.length; i++) {
-      if (!characterUrls[i]) continue;
-      await throttle(500);
-      const verify = await verifyCharacterImage(characterUrls[i], actNames[i]);
-      if (!verify.valid) {
-        logger.warn(`[media_generator] Character image ${i + 1} QA failed: ${verify.reason}`);
-      } else {
-        logger.info(`[media_generator] Character image ${i + 1} QA passed`);
-      }
-    }
-
-    // 모두 실패 시 Pexels 폴백
     if (successCount === 0) {
-      logger.warn('[media_generator] All DALL-E failed. Falling back to Pexels.');
+      logger.warn('[media_generator] All scene images failed. Falling back to Pexels.');
       const pexels = await searchPexelsImages(content.keyword, content.category, 3);
-      characterUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
+      sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
     }
   } catch (err) {
-    logger.warn(`[media_generator] Character image error: ${err.message}. Falling back to Pexels.`);
+    logger.warn(`[media_generator] Scene image error: ${err.message}. Falling back to Pexels.`);
     const pexels = await searchPexelsImages(content.keyword, content.category, 3);
-    characterUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
+    sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 A·B 동시 생성 (Act 0 캐릭터 이미지 사용)
-  const thumbCharUrl = characterUrls[0];
-  if (thumbCharUrl) {
+  // 4. 썸네일 A·B 생성 (Act 0 = 도입 씬 이미지 사용)
+  const thumbSceneUrl = sceneUrls[0];
+  if (thumbSceneUrl) {
     try {
-      await generateThumbnail(content, thumbCharUrl, thumbPath);
+      await generateThumbnail(content, thumbSceneUrl, thumbPath);
       result.thumbnail = thumbPath;
       logger.info(`[media_generator] Thumbnail A saved`);
     } catch (err) {
@@ -993,9 +961,8 @@ async function generateMedia(content) {
     }
 
     try {
-      // Variant B는 Act 1(본론) 캐릭터로 변화를 줌 — 없으면 Act 0 재사용
-      const thumbBCharUrl = characterUrls[1] ?? thumbCharUrl;
-      await generateThumbnailB(content, thumbBCharUrl, thumbPathB);
+      // Variant B는 Act 1(본론) 씬 이미지로 변화를 줌 — 없으면 Act 0 재사용
+      await generateThumbnailB(content, sceneUrls[1] ?? thumbSceneUrl, thumbPathB);
       result.thumbnail_b = thumbPathB;
       logger.info(`[media_generator] Thumbnail B saved`);
     } catch (err) {
@@ -1005,7 +972,7 @@ async function generateMedia(content) {
 
   // 5. 영상 렌더링
   try {
-    await renderVideoWithShotstack(content, result.audio, videoPath, characterUrls);
+    await renderVideoWithShotstack(content, result.audio, videoPath, sceneUrls);
     result.video = videoPath;
   } catch (err) {
     const detail = err.response?.data
