@@ -398,10 +398,12 @@ if (config.runtime.dryRun) {
   logger.info('[app] DRY_RUN mode — running once and exiting.');
   runPipeline().then(() => process.exit(0));
 } else {
-  // YouTube 파이프라인: 매일 06:00
+  // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
   startScheduler(runPipeline, config.runtime.cronSchedule);
-  // 블로그 파이프라인: 매일 08:00 (06시 YouTube 결과를 youtube_url로 수신)
+  startScheduler(runPipeline, config.runtime.cronScheduleB);
+  // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
   startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
+  startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
 
   // 최초 기동 시 두 파이프라인 모두 순차 실행
   // YouTube 완료 후 publish 결과를 블로그에 전달 (youtube_url 임베드)

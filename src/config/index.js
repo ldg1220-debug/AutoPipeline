@@ -52,9 +52,18 @@ export const config = {
     env: process.env.SHOTSTACK_ENV === 'production' ? 'v1' : 'stage',
   },
   youtube: {
-    clientId: process.env.YOUTUBE_CLIENT_ID,
+    clientId:     process.env.YOUTUBE_CLIENT_ID,
     clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
     refreshToken: process.env.YOUTUBE_REFRESH_TOKEN,
+  },
+  // 카테고리별 별도 YouTube 채널 (없으면 default youtube 채널 사용)
+  youtubeChannels: {
+    health: {
+      clientId:     process.env.YOUTUBE_HEALTH_CLIENT_ID,
+      clientSecret: process.env.YOUTUBE_HEALTH_CLIENT_SECRET,
+      refreshToken: process.env.YOUTUBE_HEALTH_REFRESH_TOKEN,
+      seriesName:   process.env.YOUTUBE_HEALTH_SERIES_NAME || '매일읽어주는건강',
+    },
   },
   tistory: {
     accessToken: process.env.TISTORY_ACCESS_TOKEN,
@@ -98,10 +107,13 @@ export const config = {
     maxVideos:   parseInt(process.env.COMPETITOR_MAX_VIDEOS   || '10', 10),
   },
   runtime: {
-    dryRun:       process.env.DRY_RUN === 'true',
-    cronSchedule: process.env.CRON_SCHEDULE || '0 6 * * *',
-    blogCronSchedule: process.env.BLOG_CRON_SCHEDULE || '0 8 * * *',
-    maxRetry:     parseInt(process.env.MAX_RETRY || '1', 10),
-    blogPostsPerDay: parseInt(process.env.BLOG_POSTS_PER_DAY || '2', 10),
+    dryRun:           process.env.DRY_RUN === 'true',
+    // A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
+    cronSchedule:     process.env.CRON_SCHEDULE      || '0 12 * * 1,3,5,0',
+    cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 14 * * 2,4,6',
+    blogCronSchedule:  process.env.BLOG_CRON_SCHEDULE  || '0 13 * * 1,3,5,0',
+    blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 15 * * 2,4,6',
+    maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '2', 10),
   },
 };

@@ -12,18 +12,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * 카테고리에 맞는 YouTube 채널 설정을 반환한다.
+ * 카테고리별 전용 채널 credentials가 설정된 경우 그것을, 없으면 기본 채널을 사용한다.
+ */
+function getYouTubeChannelConfig(category) {
+  const channelOverride = config.youtubeChannels?.[category];
+  if (channelOverride?.refreshToken) return channelOverride;
+  return config.youtube;
+}
+
+/**
  * refresh_token으로 YouTube access_token을 갱신한다.
  * google-auth-library 없이 axios 직접 호출 방식을 사용한다.
  * 토큰 값은 로그에 절대 출력하지 않는다.
  */
-async function refreshYouTubeAccessToken() {
+async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
   const response = await axios.post(
     'https://oauth2.googleapis.com/token',
     new URLSearchParams({
-      client_id: config.youtube.clientId,
-      client_secret: config.youtube.clientSecret,
-      refresh_token: config.youtube.refreshToken,
-      grant_type: 'refresh_token',
+      client_id:     channelConfig.clientId,
+      client_secret: channelConfig.clientSecret,
+      refresh_token: channelConfig.refreshToken,
+      grant_type:    'refresh_token',
     }).toString(),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
   );
@@ -52,8 +62,9 @@ async function publishToYouTube(content, accessToken) {
     return { platform: 'youtube', status: 'skipped_no_video_file' };
   }
 
-  const publishAt  = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-  const seriesName = content.series_name ?? '매일읽어주는남자';
+  const publishAt    = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const channelCfg   = getYouTubeChannelConfig(content.category);
+  const seriesName   = content.series_name ?? channelCfg.seriesName ?? '매일읽어주는남자';
 
   // 블로그 포스트 URL (발행 결과가 있으면 설명란에 삽입)
   const blogPostUrl = content.blog_publish?.url ?? content.blog_post_url ?? null;
@@ -284,12 +295,14 @@ export async function publishContents(qaData, contentData) {
 
     const result = { keyword: content.keyword, dry_run: false };
 
-    // YouTube 발행
+    // YouTube 발행 (카테고리별 채널 선택)
     try {
-      if (!config.youtube.clientId || !config.youtube.refreshToken) {
+      const channelCfg = getYouTubeChannelConfig(content.category);
+      if (!channelCfg.clientId || !channelCfg.refreshToken) {
         throw new Error('YouTube credentials not configured');
       }
-      const accessToken = await refreshYouTubeAccessToken();
+      const accessToken = await refreshYouTubeAccessToken(channelCfg);
+      logger.info(`[auto_publisher] Using ${content.category === 'health' && config.youtubeChannels?.health?.refreshToken ? 'health' : 'default'} channel for: ${content.keyword}`);
       result.youtube = await publishToYouTube(content, accessToken);
       logger.info(`[auto_publisher] YouTube upload success: ${result.youtube.url}`);
     } catch (err) {

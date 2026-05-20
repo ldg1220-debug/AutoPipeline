@@ -90,4 +90,37 @@
 
 ---
 
+---
+
+### D-009: 업로드 스케줄 — 매일 06:00 고정 → 12:00/14:00 교대
+- **결정**: A슬롯(월·수·금·일 12:00) / B슬롯(화·목·토 14:00) 교대 운영
+- **버린 대안**: 매일 06:00 고정
+- **근거**:
+  - 경쟁 채널 분석 결과: economy 최적 시간 12:00, social 14:00
+  - 아침 06:00는 경쟁 채널 대비 최소 6시간 이른 시간대 → 알고리즘 노출 겹침 적음
+  - 블로그는 YouTube 완료 1시간 후 (13:00 / 15:00) 자동 실행
+- **관련 파일**: `src/app.js`, `src/config/index.js`
+- **환경변수**: `CRON_SCHEDULE`, `CRON_SCHEDULE_B`, `BLOG_CRON_SCHEDULE`, `BLOG_CRON_SCHEDULE_B`
+
+---
+
+### D-010: YouTube 멀티채널 — 카테고리별 별도 채널 vs 단일 채널
+- **결정**: health 카테고리만 별도 YouTube 채널 분리, 나머지는 기존 채널 유지
+- **버린 대안**: 모든 카테고리를 하나의 채널에 발행
+- **근거**:
+  - 건강 콘텐츠는 타깃 시청자(시니어·가족) 와 경제 콘텐츠 시청자(직장인 재테크)가 달라 채널 색깔 희석 우려
+  - 블로그는 반대로 단일 Tistory + 카테고리 분리가 SEO 도메인 점수 집중에 유리
+  - health 채널 OAuth 미설정 시 기본 채널로 fallback (graceful degradation)
+- **관련 파일**: `src/agents/auto_publisher.js`, `src/config/index.js`
+- **환경변수**: `YOUTUBE_HEALTH_CLIENT_ID/SECRET/REFRESH_TOKEN`, `YOUTUBE_HEALTH_SERIES_NAME`
+
+---
+
+### D-011: health 카테고리 추가 결정
+- **결정**: 키워드 시드에 `건강정보,다이어트,생활건강` 추가, health 카테고리 전 파이프라인 활성화
+- **근거**: 경쟁 채널 분석 결과 health 평균 조회수 303,609 — 6개 카테고리 중 1위
+- **관련 파일**: `.env.example`, `src/utils/youtubeSEO.js`(해시태그), `src/utils/tistoryClassifier.js`(카테고리 매핑)
+
+---
+
 *새 결정 발생 시 위 포맷에 맞춰 즉시 추가*
