@@ -20,6 +20,7 @@ import { runBlogAnalytics, identifyUnderperformers } from './agents/blog_analyti
 import { groupSimilarTopics } from './agents/topic_grouper.js';
 import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
+import { createLongFormAndShorts } from './agents/long_form_creator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -472,6 +473,102 @@ async function runBlogPipeline(youtubeResults = null) {
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   logger.info(`[app] ===== Blog Pipeline finished in ${elapsed}s =====`);
+}
+
+// ── Unified Pipeline (Content Triangle) ──────────────────────────────────────
+/**
+ * 콘텐츠 삼각형 파이프라인:
+ *   1. 트렌드 수집
+ *   2. 블로그 초안 작성 (blog_content_enhancer)
+ *   3. long_form_creator: 블로그 → 롱폼 스크립트 + 숏폼 추출
+ *   4. 숏폼 미디어 제작 (media_generator)
+ *   5. 블로그 + 롱폼 + 숏폼 발행
+ *
+ * 세 콘텐츠 모두 cross_refs로 서로를 링크한다.
+ */
+export async function runUnifiedPipeline() {
+  const startTime = Date.now();
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  logger.info('[app] ===== Unified Pipeline (Content Triangle) started =====');
+
+  // ── Step 1: Trend Scraper ──────────────────────────────────────────────────
+  let trendData;
+  try {
+    trendData = await fetchTrends();
+    await writeJSON(path.resolve(__dirname, `../output/scripts/trend_${date}.json`), trendData);
+    logger.info(`[app] Unified Step 1 complete. Items: ${trendData.selected_items?.length ?? 0}`);
+  } catch (err) {
+    logger.error('[app] Unified Step 1 (trend) failed.', { message: err.message });
+    return;
+  }
+
+  if (config.runtime.testLimit) {
+    trendData.selected_items = trendData.selected_items.slice(0, config.runtime.testLimit);
+  }
+
+  // ── Step 2: Blog Draft Creation ────────────────────────────────────────────
+  let blogDraftData;
+  try {
+    const keywordInput = {
+      contents: trendData.selected_items.map((item) => ({
+        keyword: item.keyword,
+        category: item.category,
+        related_keywords: [],
+        search_volume: 0,
+      })),
+    };
+    blogDraftData = await enhanceAllBlogDrafts(keywordInput);
+    await writeJSON(path.resolve(__dirname, `../output/blog/unified_draft_${date}.json`), blogDraftData);
+    logger.info(`[app] Unified Step 2 complete. Blog drafts: ${blogDraftData.contents?.length ?? 0}`);
+  } catch (err) {
+    logger.warn('[app] Unified Step 2 (blog draft) failed. Continuing with empty drafts.', { message: err.message });
+    blogDraftData = { contents: trendData.selected_items.map((i) => ({ keyword: i.keyword, category: i.category, blog_draft: null })) };
+  }
+
+  // ── Step 3: Long-form + Shorts Creation ────────────────────────────────────
+  const triangleContents = [];
+  for (const item of trendData.selected_items) {
+    const blogContent = blogDraftData.contents?.find((c) => c.keyword === item.keyword);
+    try {
+      const triangle = await createLongFormAndShorts(item, blogContent?.blog_draft ?? null);
+      triangleContents.push({
+        keyword: item.keyword,
+        category: item.category,
+        series_name: item.series ?? '오늘 읽는 핫이슈',
+        // Shorts content (for media_generator compatibility)
+        shortform_script: triangle.shorts,
+        youtube_title: triangle.shorts.hook ? `${item.keyword}: ${triangle.shorts.hook}` : `${item.keyword} 핵심 정리`,
+        youtube_description: triangle.long_video.youtube_description ?? '',
+        image_prompt: `${item.keyword} korean economic news concept illustration`,
+        // Long-form data
+        long_video: triangle.long_video,
+        cross_refs: triangle.cross_refs,
+        blog_draft: blogContent?.blog_draft ?? null,
+      });
+      logger.info(`[app] Unified Step 3 done: "${item.keyword}"`);
+    } catch (err) {
+      logger.warn(`[app] Unified Step 3 failed for "${item.keyword}": ${err.message}`);
+    }
+  }
+
+  await writeJSON(
+    path.resolve(__dirname, `../output/scripts/unified_content_${date}.json`),
+    { generated_at: new Date().toISOString(), contents: triangleContents }
+  );
+  logger.info(`[app] Unified Step 3 complete. ${triangleContents.length} items`);
+
+  // ── Step 4: Shorts Media Production ────────────────────────────────────────
+  try {
+    const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: triangleContents });
+    await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
+    logger.info(`[app] Unified Step 4 complete. Media: ${mediaResult.results?.length ?? 0}`);
+  } catch (err) {
+    logger.warn('[app] Unified Step 4 (media) failed.', { message: err.message });
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  logger.info(`[app] ===== Unified Pipeline finished in ${elapsed}s =====`);
+  return triangleContents;
 }
 
 // ── 스케줄러 / 단독 실행 ──────────────────────────────────────────────────

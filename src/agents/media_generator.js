@@ -326,6 +326,27 @@ function splitText(text, maxLen = 45) {
   return result;
 }
 
+function wrapTextKorean(text, maxCharsPerLine = 22) {
+  const t = (text ?? '').trim();
+  if (!t) return [t || ''];
+  const lines = [];
+  let current = '';
+  let lineWidth = 0;
+  for (const ch of [...t]) {
+    const charWidth = /[가-힯　-鿿]/.test(ch) ? 1.0 : 0.6;
+    if (lineWidth + charWidth > maxCharsPerLine && current.trim()) {
+      lines.push(current.trim());
+      current = ch;
+      lineWidth = charWidth;
+    } else {
+      current += ch;
+      lineWidth += charWidth;
+    }
+  }
+  if (current.trim()) lines.push(current.trim());
+  return lines.length ? lines : [t];
+}
+
 // ── 씬 리스트 생성 ─────────────────────────────────────────────────────────
 /**
  * 스크립트 5구간을 45자 단위로 분할, 글자 수 비례로 타이밍 배분.
@@ -467,6 +488,71 @@ function buildTextClips(scenes, seriesName, totalDuration) {
     });
   }
 
+  return clips;
+}
+
+async function renderSubtitlePng(text, outputPath) {
+  const W = 1080, H = 1920;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const fontSize = 36;
+  const lineH = Math.ceil(fontSize * 1.6);
+  const padding = 24;
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = wrapTextKorean(text, 22);
+  const boxH = lines.length * lineH + padding * 2;
+  const boxX = 90, boxW = 900;
+  const boxY = H - boxH - 115;
+  const textElems = lines.map((line, i) => {
+    const y = boxY + padding + (i + 0.8) * lineH;
+    return `<text x="${W / 2}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(line)}</text>`;
+  }).join('\n');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="14" fill="#000000" fill-opacity="0.82"/>
+    ${textElems}
+  </svg>`;
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await sharp(Buffer.from(svg)).png().toFile(outputPath);
+  return outputPath;
+}
+
+async function renderLabelPng(seriesName, outputPath) {
+  const W = 1080, H = 1920;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const fontSize = 40;
+  const boxH = 72;
+  const boxX = 90, boxW = 900;
+  const boxY = 52;
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="8" fill="#000000" fill-opacity="0.85"/>
+    <text x="${W / 2}" y="${boxY + Math.round(boxH / 2 + fontSize * 0.36)}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(seriesName)}</text>
+  </svg>`;
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await sharp(Buffer.from(svg)).png().toFile(outputPath);
+  return outputPath;
+}
+
+function buildTextImageClips(scenes, subtitleUrls, labelUrl, totalDuration) {
+  const clips = [];
+  if (labelUrl) {
+    clips.push({
+      asset: { type: 'image', src: labelUrl },
+      start: 0,
+      length: totalDuration,
+      fit: 'cover',
+    });
+  }
+  for (let i = 0; i < scenes.length; i++) {
+    const url = subtitleUrls[i];
+    if (!url) continue;
+    clips.push({
+      asset: { type: 'image', src: url },
+      start: scenes[i].start,
+      length: scenes[i].duration,
+      fit: 'cover',
+      transition: { in: 'fade', out: 'fade' },
+    });
+  }
   return clips;
 }
 
@@ -824,7 +910,35 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
     })
   );
   const imageClips = buildImageClips(hostedImageUrls, scenes, TOTAL_DURATION);
-  const textClips  = buildTextClips(scenes, seriesName, TOTAL_DURATION);
+
+  // Render text as transparent PNGs (fixes Korean garbling in Shotstack cloud renderer)
+  // Falls back to Shotstack native text clips if Sharp PNG rendering fails
+  let textTrackClips;
+  try {
+    const safeKw = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    const labelPath = path.resolve(__dirname, `../../output/media/label_${safeKw}.png`);
+    const subtitlePaths = scenes.map((_, i) =>
+      path.resolve(__dirname, `../../output/media/sub_${safeKw}_${i}.png`)
+    );
+    await Promise.all([
+      renderLabelPng(seriesName, labelPath),
+      ...scenes.map((s, i) => renderSubtitlePng(s.text, subtitlePaths[i])),
+    ]);
+    logger.info(`[media_generator] Text PNGs rendered (${scenes.length + 1} files). Uploading...`);
+    const [hostedLabelUrl, ...hostedSubUrls] = await Promise.all([
+      uploadImageForShotstack(labelPath),
+      ...subtitlePaths.map((p) => uploadImageForShotstack(p)),
+    ]);
+    textTrackClips = buildTextImageClips(scenes, hostedSubUrls, hostedLabelUrl, TOTAL_DURATION);
+    await Promise.allSettled([
+      fs.unlink(labelPath),
+      ...subtitlePaths.map((p) => fs.unlink(p)),
+    ]);
+    logger.info(`[media_generator] Text PNG overlays ready: ${textTrackClips.length} clips`);
+  } catch (err) {
+    logger.warn(`[media_generator] Text PNG rendering failed (${err.message}). Using Shotstack text clips.`);
+    textTrackClips = buildTextClips(scenes, seriesName, TOTAL_DURATION);
+  }
 
   const overlayClip = {
     asset: { type: 'image', src: 'https://placehold.co/1080x1920/000000/000000.png' },
@@ -834,7 +948,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
   const timeline = {
     soundtrack: { src: audioUrl, effect: 'fadeOut' },
     tracks: [
-      { clips: textClips },
+      { clips: textTrackClips },
       { clips: [overlayClip] },
       { clips: imageClips },
     ],
