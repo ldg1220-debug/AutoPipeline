@@ -86,6 +86,10 @@ async function validateAndEnhancePrompt(imagePrompt, keyword) {
  */
 async function verifyCharacterImage(imageUrl, actName) {
   if (!imageUrl) return { valid: false, reason: 'no image' };
+  // 로컬 파일 경로는 Vision API에 전달 불가 → 검수 스킵
+  if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+    return { valid: true, reason: 'local file — skipped' };
+  }
   try {
     const res = await axios.post(
       'https://api.openai.com/v1/chat/completions',
@@ -210,16 +214,15 @@ async function generateCharacterImages(keyword, scripts) {
     // gpt-image-1 (신규 계정) → dall-e-3 → dall-e-2 순서로 폴백
     // gpt-image-1은 response_format 파라미터 미지원, 항상 b64_json 반환
     const models = [
-      { model: 'gpt-image-1', size: '1024x1536', quality: 'high',     supportsResponseFormat: false },
-      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard', supportsResponseFormat: true },
-      { model: 'dall-e-2',    size: '1024x1024', quality: undefined,  supportsResponseFormat: true },
+      { model: 'gpt-image-1', size: '1024x1536', quality: 'high' },
+      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
+      { model: 'dall-e-2',    size: '1024x1024', quality: undefined  },
     ];
     let imageUrl = null;
     for (const m of models) {
       try {
         const body = { model: m.model, prompt: dallePrompt, n: 1, size: m.size };
         if (m.quality) body.quality = m.quality;
-        if (m.supportsResponseFormat) body.response_format = 'url';
         const res = await axios.post(
           'https://api.openai.com/v1/images/generations',
           body,
@@ -519,9 +522,11 @@ async function generateThumbnailB(content, charImageUrl, outputPath) {
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
 
-  // 캐릭터 이미지 전체 배경으로 리사이즈
-  const charRes = await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 });
-  const charBuf = await sharp(Buffer.from(charRes.data))
+  // 캐릭터 이미지 전체 배경으로 리사이즈 (로컬 파일 또는 URL 모두 지원)
+  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
+    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
+    : await fs.readFile(charImageUrl);
+  const charBuf = await sharp(charRaw)
     .resize(W, H, { fit: 'cover', position: 'top' })
     .png()
     .toBuffer();
@@ -602,9 +607,11 @@ async function generateThumbnail(content, charImageUrl, outputPath) {
     </svg>`
   );
 
-  // 캐릭터 이미지 다운로드 & 우측 크롭
-  const charRes = await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 });
-  const charBuf = await sharp(Buffer.from(charRes.data))
+  // 캐릭터 이미지 다운로드 & 우측 크롭 (로컬 파일 또는 URL 모두 지원)
+  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
+    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
+    : await fs.readFile(charImageUrl);
+  const charBuf = await sharp(charRaw)
     .resize(RIGHT, H, { fit: 'cover', position: 'top' })
     .png()
     .toBuffer();
@@ -629,6 +636,21 @@ async function generateThumbnail(content, charImageUrl, outputPath) {
 
   logger.info(`[media_generator] Thumbnail saved: ${outputPath}`);
   return outputPath;
+}
+
+// ── 이미지 임시 업로드 (로컬 파일 → 공개 URL) ────────────────────────────
+async function uploadImageForShotstack(imagePath) {
+  const fileBuffer = await fs.readFile(imagePath);
+  const ext = path.extname(imagePath).toLowerCase() || '.png';
+  const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+  const blob = new Blob([fileBuffer], { type: mime });
+  const formData = new FormData();
+  formData.append('file', blob, path.basename(imagePath));
+
+  const res = await axios.post('https://tmpfiles.org/api/v1/upload', formData, { timeout: 60000 });
+  const uploadedUrl = res.data?.data?.url;
+  if (!uploadedUrl) throw new Error('tmpfiles.org did not return a URL');
+  return uploadedUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
 }
 
 // ── 오디오 임시 업로드 ─────────────────────────────────────────────────────
@@ -754,7 +776,22 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
   );
   logger.info(`[media_generator] Scenes: ${scenes.length}개`);
 
-  const imageClips = buildImageClips(characterImageUrls, scenes, TOTAL_DURATION);
+  // 로컬 파일 경로는 Shotstack(클라우드)이 접근 불가 → tmpfiles.org 업로드 후 HTTP URL로 교체
+  const hostedImageUrls = await Promise.all(
+    characterImageUrls.map(async (url) => {
+      if (!url) return null;
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+      try {
+        const hosted = await uploadImageForShotstack(url);
+        logger.info(`[media_generator] Uploaded local image → ${hosted}`);
+        return hosted;
+      } catch (err) {
+        logger.warn(`[media_generator] Image upload failed: ${err.message}`);
+        return null;
+      }
+    })
+  );
+  const imageClips = buildImageClips(hostedImageUrls, scenes, TOTAL_DURATION);
   const textClips  = buildTextClips(scenes, seriesName, TOTAL_DURATION);
 
   const overlayClip = {
