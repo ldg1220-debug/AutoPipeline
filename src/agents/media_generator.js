@@ -431,14 +431,14 @@ function buildImageClips(imageUrls, scenes, totalDuration) {
 function buildTextClips(scenes, seriesName, totalDuration) {
   const clips = [];
 
-  // 상단 시리즈 레이블
+  // 상단 시리즈 레이블 (1080px 기준)
   clips.push({
     asset: {
       type: 'text',
       text: `📺 ${seriesName}`,
-      width: 800,
+      width: 900,
       height: 70,
-      font: { family: 'Noto Sans', size: 24, color: '#FFFFFF', weight: '700' },
+      font: { family: 'Noto Sans', size: 26, color: '#FFFFFF', weight: '700' },
       alignment: { horizontal: 'center', vertical: 'center' },
       background: { color: '#000000', opacity: 0.80, borderRadius: 6, padding: 12 },
     },
@@ -449,14 +449,15 @@ function buildTextClips(scenes, seriesName, totalDuration) {
   });
 
   // 씬별 자막 — 하단 1/3 영역에 배치해 캐릭터가 상단에 잘 보이도록
+  // width 900: 1080px 영상에서 양쪽 90px 여백 확보
   for (const { text, start, duration } of scenes) {
     clips.push({
       asset: {
         type: 'text',
         text,
-        width: 860,
-        height: 420,
-        font: { family: 'Noto Sans', size: 40, color: '#FFFFFF', weight: '700', lineHeight: 1.5 },
+        width: 900,
+        height: 440,
+        font: { family: 'Noto Sans', size: 36, color: '#FFFFFF', weight: '700', lineHeight: 1.5 },
         alignment: { horizontal: 'center', vertical: 'center' },
         background: { color: '#000000', opacity: 0.82, borderRadius: 14, padding: 24 },
       },
@@ -706,7 +707,8 @@ async function generateAudioClovaVoice(text, outputPath) {
 
 // ── OpenAI TTS 폴백 ────────────────────────────────────────────────────────
 async function generateAudioOpenAI(text, outputPath) {
-  const voice = process.env.OPENAI_TTS_VOICE || 'nova';
+  // 기본값 onyx(남성 저음) — 매일읽어주는남자 채널 톤에 적합
+  const voice = process.env.OPENAI_TTS_VOICE || 'onyx';
   const response = await axios.post(
     'https://api.openai.com/v1/audio/speech',
     { model: 'tts-1', input: text, voice },
@@ -810,7 +812,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
 
   const renderResponse = await axios.post(
     `https://api.shotstack.io/${config.shotstack.env}/render`,
-    { timeline, output: { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 } },
+    { timeline, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } },
     {
       headers: { 'x-api-key': shotstackApiKey, 'Content-Type': 'application/json' },
       timeout: 30000,
