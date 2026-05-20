@@ -80,7 +80,7 @@ export async function findSimilarImage(keyword, actIndex, threshold = DEFAULT_TH
       `[imageCache] Cache HIT act${actIndex} "${keyword}" ← "${best.keyword}" (similarity=${bestScore.toFixed(3)})`
     );
     // 사용 횟수 업데이트
-    db.prepare('UPDATE image_cache SET used_count = used_count + 1, last_used_at = datetime("now","localtime") WHERE id = ?')
+    db.prepare("UPDATE image_cache SET used_count = used_count + 1, last_used_at = datetime('now','localtime') WHERE id = ?")
       .run(best.id);
     return best.image_url;
   }
