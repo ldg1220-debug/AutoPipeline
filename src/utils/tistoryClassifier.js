@@ -253,47 +253,97 @@ export async function generateBlogTags(keyword, seoKeywords = [], internalCatego
 // ── Playwright로 카테고리 선택 ─────────────────────────────────────────────
 /**
  * 에디터 사이드바의 카테고리를 동적으로 선택한다.
- * id 기반 select, 이름 텍스트 클릭, option select 순으로 시도.
+ * ReactModalPortal 내부여서 pointer-events가 가로채질 수 있으므로
+ * force:true 클릭 + JavaScript evaluate 다중 폴백.
  */
 export async function setCategoryInEditor(page, categoryId, categoryName) {
   if (!categoryId && !categoryName) return false;
 
-  // 1. <select name="categoryId"> 직접 선택 (가장 안전 — 페이지 이동 없음)
-  try {
-    if (categoryId) {
-      await page.selectOption('select[name="categoryId"]', { value: String(categoryId) }, { timeout: 3000 });
+  const idStr = categoryId ? String(categoryId) : '';
+
+  // 1. layer_publish 내 <select> 직접 선택 (가장 안전)
+  for (const sel of ['.layer_publish select[name="categoryId"]', 'select[name="categoryId"]']) {
+    try {
+      if (idStr) {
+        await page.selectOption(sel, { value: idStr }, { timeout: 2000 });
+      } else {
+        await page.selectOption(sel, { label: categoryName }, { timeout: 2000 });
+      }
+      logger.info(`[tistoryClassifier] Category selected via selectOption: "${categoryName}"`);
       return true;
-    }
-    await page.selectOption('select[name="categoryId"]', { label: categoryName }, { timeout: 3000 });
-    return true;
-  } catch { /* 다음 방식 시도 */ }
+    } catch { /* 다음 시도 */ }
+  }
 
-  // 2. React 드롭다운 버튼 — class 기반만 사용 (has-text("카테고리")는 관리 페이지로 이동 위험)
-  try {
-    await page.click('.category-btn, [data-tistory-react-app="Category"]', { timeout: 3000 });
-    await page.waitForTimeout(500);
-    if (categoryId) {
-      const clicked = await page.click(`[data-id="${categoryId}"], li[value="${categoryId}"]`, { timeout: 2000 })
-        .then(() => true).catch(() => false);
-      if (clicked) return true;
-    }
-    await page.click(`text="${categoryName}"`, { timeout: 2000 });
-    return true;
-  } catch { /* 다음 방식 시도 */ }
-
-  // 3. JavaScript로 React state 우회 설정
+  // 2. JavaScript로 숨겨진 select 직접 조작 (React 래핑 select에 유효)
   try {
     const set = await page.evaluate(({ id, name }) => {
-      const select = document.querySelector('select[name="categoryId"]');
-      if (select) {
-        select.value = id;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+      // select[name="categoryId"] 우선, 없으면 layer_publish 내 select
+      const select =
+        document.querySelector('.layer_publish select[name="categoryId"]') ??
+        document.querySelector('select[name="categoryId"]') ??
+        document.querySelector('.layer_publish select');
+      if (!select) return false;
+      const opt = id
+        ? [...select.options].find((o) => o.value === id)
+        : [...select.options].find((o) => o.text === name);
+      if (!opt) return false;
+      select.value = opt.value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    }, { id: idStr, name: categoryName ?? '' });
+    if (set) {
+      logger.info(`[tistoryClassifier] Category set via JS evaluate: "${categoryName}"`);
+      return true;
+    }
+  } catch { /* 다음 시도 */ }
+
+  // 3. React 드롭다운 버튼 force-click → 옵션 force-click
+  // has-text("카테고리") 셀렉터는 관리 페이지로 이동 위험 — class 기반만 사용
+  try {
+    // 드롭다운 열기 — layer_publish 내 버튼 우선
+    const dropdownBtns = [
+      '.layer_publish .category-btn',
+      '.layer_publish [class*="category"]',
+      '.category-btn',
+      '[data-tistory-react-app="Category"]',
+    ];
+    for (const btnSel of dropdownBtns) {
+      const btn = await page.$(btnSel);
+      if (!btn) continue;
+      await btn.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(400);
+      break;
+    }
+
+    // 옵션 선택
+    if (idStr) {
+      const optSels = [
+        `.layer_publish [data-id="${idStr}"]`,
+        `.layer_publish li[value="${idStr}"]`,
+        `[data-id="${idStr}"]`,
+        `li[value="${idStr}"]`,
+      ];
+      for (const optSel of optSels) {
+        const opt = await page.$(optSel);
+        if (!opt) continue;
+        await opt.click({ force: true }).catch(() => {});
+        logger.info(`[tistoryClassifier] Category clicked via dropdown: "${categoryName}"`);
         return true;
       }
-      return false;
-    }, { id: String(categoryId), name: categoryName });
-    return set;
-  } catch { return false; }
+    }
+    // id 매칭 실패 시 텍스트로 클릭
+    const textEl = await page.$(`.layer_publish :text-is("${categoryName}")`).catch(() => null)
+      ?? await page.$(`text="${categoryName}"`).catch(() => null);
+    if (textEl) {
+      await textEl.click({ force: true });
+      logger.info(`[tistoryClassifier] Category clicked via text: "${categoryName}"`);
+      return true;
+    }
+  } catch { /* 실패 */ }
+
+  logger.warn(`[tistoryClassifier] Category set failed: "${categoryName}" (${idStr})`);
+  return false;
 }
 
 // ── Playwright로 태그 입력 ─────────────────────────────────────────────────

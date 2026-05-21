@@ -297,7 +297,10 @@ async function publishPost(page, content, blogName, context) {
     logger.error(`[blog_publisher] 발행 사이드바 버튼을 찾지 못했습니다. 스크린샷: ${screenshotPath}`);
     throw new Error('발행 사이드바를 열 수 없음 — 스크린샷 확인 요망');
   }
-  await page.waitForTimeout(2000);
+  // 사이드바(layer_publish) 마운트 대기 — React Portal은 비동기 렌더링
+  await page.waitForSelector('.layer_publish, .publish-layer, #publish-layer', {
+    timeout: 5000,
+  }).catch(() => page.waitForTimeout(2000));
 
   // 사이드바 열린 후: 카테고리 + 태그 설정 (새 에디터는 사이드바 안에 위치)
   if (bestCategory) {
