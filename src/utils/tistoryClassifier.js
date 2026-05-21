@@ -312,7 +312,12 @@ export async function setTagsInEditor(page, tags) {
     'input[name="tag"]',
     '.tag-input input',
     'input[placeholder*="태그"]',
+    'input[placeholder*="tag"]',
     '.tt-tag-input input',
+    '#tagInput',
+    '.tag_input input',
+    '[class*="tag"] input',
+    '[class*="Tag"] input',
   ];
 
   let tagInput = null;

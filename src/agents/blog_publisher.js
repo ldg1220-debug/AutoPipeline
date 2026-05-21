@@ -242,13 +242,46 @@ async function publishPost(page, content, blogName) {
     }
   });
 
-  // "완료" 클릭으로 사이드바 열기
-  await page.click('button:has-text("완료")', { timeout: 10000 });
+  // 사이드바/모달 열기 — 에디터 버전마다 버튼 텍스트가 다름
+  const sidebarBtns = [
+    'button:has-text("완료")',
+    'button:has-text("발행")',
+    'button[data-btn="publish"]',
+    'button[class*="publish"]',
+    'button[class*="Publish"]',
+    '#publish-layer-btn',
+  ];
+  let sidebarOpened = false;
+  for (const sel of sidebarBtns) {
+    try {
+      await page.click(sel, { timeout: 5000 });
+      logger.info(`[blog_publisher] Sidebar opened via: ${sel}`);
+      sidebarOpened = true;
+      break;
+    } catch { /* 다음 시도 */ }
+  }
+  if (!sidebarOpened) {
+    const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    logger.error(`[blog_publisher] 발행 사이드바 버튼을 찾지 못했습니다. 스크린샷: ${screenshotPath}`);
+    throw new Error('발행 사이드바를 열 수 없음 — 스크린샷 확인 요망');
+  }
   await page.waitForTimeout(2000);
+
+  // 사이드바가 열린 후 태그 재시도 (새 에디터는 태그가 사이드바 안에 있을 수 있음)
+  try {
+    const { setTagsInEditor: setTags } = await import('../utils/tistoryClassifier.js');
+    const generatedTags = await generateBlogTags(
+      keyword,
+      content.blog_draft?.seo_keywords ?? [],
+      content.category ?? 'economy'
+    );
+    await setTags(page, generatedTags);
+  } catch { /* 태그 실패해도 발행 계속 */ }
 
   // "비공개 저장" 클릭 → 인터셉트돼 공개 저장됨
   let publishClicked = false;
-  for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")']) {
+  for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")', 'button:has-text("저장")']) {
     try {
       await page.click(sel, { timeout: 5000 });
       logger.info(`[blog_publisher] Publish clicked: ${sel}`);
@@ -256,7 +289,12 @@ async function publishPost(page, content, blogName) {
       break;
     } catch { /* 다음 시도 */ }
   }
-  if (!publishClicked) throw new Error('발행 버튼을 찾을 수 없음');
+  if (!publishClicked) {
+    const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_sidebar_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    logger.error(`[blog_publisher] 발행 버튼 없음. 스크린샷: ${screenshotPath}`);
+    throw new Error('발행 버튼을 찾을 수 없음');
+  }
 
   await page.waitForTimeout(3000);
   await page.unroute('**/manage/post.json');
