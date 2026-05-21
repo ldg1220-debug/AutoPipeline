@@ -143,16 +143,31 @@ async function publishShortsToYouTube(content, accessToken) {
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Shorts uploaded: https://youtube.com/shorts/${videoId}`);
 
-  // 쇼츠 전용 세로 썸네일 우선, 없으면 가로 썸네일 폴백
+  // 쇼츠 썸네일: 세로(9:16) 우선, 없으면 가로 폴백 — 5초 대기 후 최대 3회 재시도
   const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
   const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
   const shortsThumbExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
   const thumbPath = shortsThumbExists ? thumbShortsPath : thumbFallback;
+  const thumbPathExists   = await fs.access(thumbPath).then(() => true).catch(() => false);
+
   let thumbnailUploaded = false;
-  try {
-    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
-  } catch (err) {
-    logger.warn(`[auto_publisher] Shorts thumbnail upload failed: ${err.message}`);
+  if (!thumbPathExists) {
+    logger.warn(`[auto_publisher] 쇼츠 썸네일 파일 없음: ${thumbPath}`);
+  } else {
+    await new Promise((r) => setTimeout(r, 5000));
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
+        if (thumbnailUploaded) {
+          logger.info(`[auto_publisher] 쇼츠 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPath}`);
+          break;
+        }
+      } catch (err) {
+        logger.warn(`[auto_publisher] 쇼츠 썸네일 실패 (시도 ${attempt}/3): ${err.message}`);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+      }
+    }
+    if (!thumbnailUploaded) logger.error(`[auto_publisher] 쇼츠 썸네일 3회 모두 실패: ${videoId}`);
   }
 
   return {
@@ -243,15 +258,29 @@ async function publishToYouTube(content, accessToken) {
     logger.warn(`[auto_publisher] Captions upload failed: ${err.message}`);
   }
 
-  // 썸네일 A 업로드 (Variant A = 초기 버전)
+  // 썸네일 A 업로드 — 5초 대기 후 최대 3회 재시도 (YouTube 처리 시간 확보)
   const thumbPathA = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
   const thumbPathB = path.resolve(mediaDir, `${safeKeyword}_thumb_b.jpg`);
 
   let thumbnailUploaded = false;
-  try {
-    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPathA, accessToken);
-  } catch (err) {
-    logger.warn(`[auto_publisher] Thumbnail upload failed: ${err.message}`);
+  const thumbExists = await fs.access(thumbPathA).then(() => true).catch(() => false);
+  if (!thumbExists) {
+    logger.warn(`[auto_publisher] 썸네일 파일 없음: ${thumbPathA}`);
+  } else {
+    await new Promise((r) => setTimeout(r, 5000)); // YouTube 업로드 처리 대기
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPathA, accessToken);
+        if (thumbnailUploaded) {
+          logger.info(`[auto_publisher] 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPathA}`);
+          break;
+        }
+      } catch (err) {
+        logger.warn(`[auto_publisher] 썸네일 업로드 실패 (시도 ${attempt}/3): ${err.message}`);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+      }
+    }
+    if (!thumbnailUploaded) logger.error(`[auto_publisher] 썸네일 3회 모두 실패: ${videoId}`);
   }
 
   // A/B 테스트 레코드 저장 (Variant B가 있을 때만)
