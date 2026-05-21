@@ -5,6 +5,7 @@ import logger from './utils/logger.js';
 import { writeJSON } from './utils/fileIO.js';
 import { startScheduler } from './utils/scheduler.js';
 import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
+import { checkSubscribers } from './utils/subscriberMonitor.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
 import { runTextQA, runVisionQA, runBlogQA } from './agents/qa_editor.js';
@@ -304,6 +305,12 @@ async function runPipeline() {
 
   logger.info('[app] ===== Pipeline finished =====', summary);
   await sendDailyReport(summary);
+
+  // 구독자 마일스톤 체크 (실패해도 파이프라인 결과에 영향 없음)
+  checkSubscribers().catch((err) =>
+    logger.warn('[app] Subscriber check failed (non-critical):', { message: err.message })
+  );
+
   return publishResults; // 블로그 파이프라인에 youtube_url 전달용
 }
 

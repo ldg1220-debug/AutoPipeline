@@ -21,6 +21,7 @@
     "analyze:grouper": "node scripts/analyze-grouper.js",
     "youtube:auth": "node scripts/get-youtube-token.js",
     "youtube:channel-setup": "node scripts/youtube-channel-setup.js",
+    "youtube:subscribers": "node scripts/check-subscribers.js",
     "blog:reset-today": "node scripts/reset-blog-published.js",
     "wp:publish": "node scripts/publish-wordpress.js",
     "affiliate:replace": "node scripts/replace-affiliate-links.js",
