@@ -347,20 +347,28 @@ export async function setTagsInEditor(page, tags) {
     return false;
   }
 
+  // ReactModalPortal 오버레이가 pointer-events를 가로챌 수 있으므로
+  // force:true 클릭 + evaluate()로 focus를 직접 설정
+  const tagInputHandle = tagInput;
+
   // 태그 한 개씩 입력 — 쉼표 우선, 실패 시 Enter 로 확정
   let confirmed = 0;
   for (const tag of tags) {
     try {
-      await tagInput.click();
-      await tagInput.fill('');
-      await tagInput.type(tag, { delay: 30 });
+      // force:true로 오버레이 우회 클릭, 실패 시 evaluate로 직접 focus
+      await tagInputHandle.click({ force: true }).catch(async () => {
+        await page.evaluate((el) => { el.focus(); }, tagInputHandle);
+      });
+      // fill은 pointer-events 무관하게 동작
+      await tagInputHandle.fill('');
+      await tagInputHandle.type(tag, { delay: 30 });
       // 쉼표로 확정 시도, 실패(자동완성 드롭다운이 없는 경우)하면 Enter
-      await tagInput.press(',');
+      await tagInputHandle.press(',');
       await page.waitForTimeout(300);
       // 입력값이 남아있으면 쉼표가 무효 → Enter 재시도
-      const remaining = await tagInput.inputValue().catch(() => '');
+      const remaining = await tagInputHandle.inputValue().catch(() => '');
       if (remaining.trim()) {
-        await tagInput.press('Enter');
+        await tagInputHandle.press('Enter');
         await page.waitForTimeout(300);
       }
       confirmed++;
