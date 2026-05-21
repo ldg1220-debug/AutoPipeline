@@ -200,8 +200,7 @@ async function publishPost(page, content, blogName, context) {
   try {
     const availableCategories = await loadTistoryCategories(
       blogName,
-      config.tistory.accessToken,
-      context  // BrowserContext — 임시 페이지로 스크래핑, 에디터 page 이동 없음
+      config.tistory.accessToken
     );
     logger.info(`[blog_publisher] URL[3-after-categories]: ${page.url()}`);
     bestCategory = await matchBestCategory(

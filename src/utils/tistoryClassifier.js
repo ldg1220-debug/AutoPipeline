@@ -93,9 +93,10 @@ async function fetchCategoriesFromPage(context, blogName) {
   }
 }
 
-// ── 카테고리 목록 로드 (캐시 → API → Playwright) ──────────────────────────
-// context: Playwright BrowserContext (임시 페이지를 열어 스크래핑). null이면 API만 사용.
-export async function loadTistoryCategories(blogName, accessToken, context = null) {
+// ── 카테고리 목록 로드 (캐시 → API) ──────────────────────────────────────
+// Playwright 폴백(fetchCategoriesFromPage)은 제거 — 에디터 페이지 이동 위험
+// 카테고리 사용하려면 .env에 TISTORY_ACCESS_TOKEN 설정 필요
+export async function loadTistoryCategories(blogName, accessToken) {
   // 1. 캐시 조회
   const cached = getCachedCategories(blogName);
   if (cached.length > 0) {
@@ -116,17 +117,7 @@ export async function loadTistoryCategories(blogName, accessToken, context = nul
     }
   }
 
-  // 3. Playwright 폴백 (임시 페이지 사용 — 에디터 page 이동 없음)
-  if (context) {
-    const categories = await fetchCategoriesFromPage(context, blogName);
-    if (categories.length > 0) {
-      saveCategoriesCache(blogName, categories);
-      logger.info(`[tistoryClassifier] Categories from Playwright: ${categories.map((c) => c.name).join(', ')}`);
-      return categories;
-    }
-  }
-
-  logger.warn('[tistoryClassifier] No categories found, will use default.');
+  logger.warn('[tistoryClassifier] No categories found — set TISTORY_ACCESS_TOKEN to enable.');
   return [];
 }
 
@@ -248,7 +239,8 @@ export async function generateBlogTags(keyword, seoKeywords = [], internalCatego
 
     // GPT가 배열을 {"tags": [...]} 형태로 감쌀 수 있음
     const parsed = JSON.parse(res.data.choices[0].message.content);
-    const tags = Array.isArray(parsed) ? parsed : (parsed.tags ?? Object.values(parsed)[0] ?? []);
+    let tags = Array.isArray(parsed) ? parsed : (parsed.tags ?? Object.values(parsed)[0] ?? []);
+    if (!Array.isArray(tags)) tags = [];
     const result = tags.filter((t) => typeof t === 'string' && t.trim()).slice(0, 10);
     logger.info(`[tistoryClassifier] Generated ${result.length} tags: ${result.join(', ')}`);
     return result;
