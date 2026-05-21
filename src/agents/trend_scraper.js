@@ -181,10 +181,21 @@ export async function fetchTrends() {
         series: SERIES_MAP[item.category] ?? '오늘의 이슈',
         collected_at: new Date().toISOString(),
       }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
+      .sort((a, b) => b.score - a.score);
 
-    return { selected_items: sorted };
+    // 상위 4개(경제·금융 위주) + health 최고점 1개 보장
+    // health가 이미 top4 안에 있으면 그냥 top5 반환
+    const top4 = sorted.slice(0, 4);
+    const hasHealth = top4.some((i) => i.category === 'health');
+    let selected;
+    if (hasHealth) {
+      selected = sorted.slice(0, 5);
+    } else {
+      const bestHealth = sorted.find((i) => i.category === 'health');
+      selected = bestHealth ? [...top4, bestHealth] : sorted.slice(0, 5);
+    }
+
+    return { selected_items: selected };
   } catch (err) {
     logger.error('[trend_scraper] Unexpected error. Falling back to mock data.', { message: err.message });
     return readJSON(MOCK_PATH);
