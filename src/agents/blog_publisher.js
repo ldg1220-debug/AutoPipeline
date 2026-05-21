@@ -185,47 +185,43 @@ async function publishPost(page, content, blogName) {
     } catch { /* 무시 */ }
   }
 
-  // ── 카테고리 자동 분류 ───────────────────────────────────────────────────
-  try {
-    const availableCategories = await loadTistoryCategories(
-      blogName,
-      config.tistory.accessToken,
-      page
-    );
-    const bestCategory = await matchBestCategory(
-      availableCategories,
-      keyword,
-      content.category ?? 'economy'
-    );
-    if (bestCategory) {
-      const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
-      logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
-    }
-  } catch (err) {
-    logger.warn(`[blog_publisher] Category classification failed: ${err.message}`);
-  }
-
-  // ── 태그 자동 생성 ──────────────────────────────────────────────────────
-  try {
-    const generatedTags = await generateBlogTags(
-      keyword,
-      blog_draft?.seo_keywords ?? [],
-      content.category ?? 'economy'
-    );
-    await setTagsInEditor(page, generatedTags);
-  } catch (err) {
-    logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
-  }
-
-  // 썸네일 업로드 (있을 때만)
+  // 썸네일 업로드 (있을 때만) — 사이드바 열기 전에 처리
   if (blog_assets?.thumbnail) {
     try {
       await uploadImageToEditor(page, blog_assets.thumbnail);
     } catch { /* 썸네일 실패해도 발행 계속 */ }
   }
 
+  // 카테고리 목록은 API로 미리 로드 (페이지 이동 없음)
+  let bestCategory = null;
+  try {
+    const availableCategories = await loadTistoryCategories(
+      blogName,
+      config.tistory.accessToken,
+      page
+    );
+    bestCategory = await matchBestCategory(
+      availableCategories,
+      keyword,
+      content.category ?? 'economy'
+    );
+  } catch (err) {
+    logger.warn(`[blog_publisher] Category load failed: ${err.message}`);
+  }
+
+  // 태그도 미리 생성 (API 호출 — 페이지 이동 없음)
+  let generatedTags = [];
+  try {
+    generatedTags = await generateBlogTags(
+      keyword,
+      blog_draft?.seo_keywords ?? [],
+      content.category ?? 'economy'
+    );
+  } catch (err) {
+    logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
+  }
+
   // ── 발행 플로우: page.route() 인터셉트 ──────────────────────────────────
-  // "비공개 저장" 클릭 시 /manage/post.json 요청을 가로채
   // visibility:20(공개) + content:html(실제 본문)으로 교체 → 한 번에 공개 발행
   let publishApiResp = null;
   await page.route('**/manage/post.json', async (route) => {
@@ -249,7 +245,6 @@ async function publishPost(page, content, blogName) {
   const sidebarBtns = [
     'button:has-text("완료")',
     'button:has-text("발행")',
-    // React 에디터 신규 셀렉터
     'a:has-text("발행")',
     '[role="button"]:has-text("발행")',
     'button[class*="publish"]',
@@ -258,7 +253,6 @@ async function publishPost(page, content, blogName) {
     '#publish-layer-btn',
     '.btn-publish',
     '.publish-btn',
-    // 최후 수단: 오른쪽 상단 영역의 첫 번째 버튼
     '.wrap_btn_publish button',
     '.area_publish button',
   ];
@@ -276,7 +270,6 @@ async function publishPost(page, content, blogName) {
     } catch { /* 다음 시도 */ }
   }
   if (!sidebarOpened) {
-    // 실패 시 페이지의 모든 버튼·링크 텍스트를 로그에 출력 (셀렉터 디버깅용)
     const allBtns = await page.evaluate(() =>
       [...document.querySelectorAll('button, a[role="button"], [role="button"]')]
         .map((el) => `[${el.tagName}] class="${el.className}" text="${el.innerText?.trim().slice(0, 40)}"`)
@@ -291,16 +284,22 @@ async function publishPost(page, content, blogName) {
   }
   await page.waitForTimeout(2000);
 
-  // 사이드바가 열린 후 태그 재시도 (새 에디터는 태그가 사이드바 안에 있을 수 있음)
-  try {
-    const { setTagsInEditor: setTags } = await import('../utils/tistoryClassifier.js');
-    const generatedTags = await generateBlogTags(
-      keyword,
-      content.blog_draft?.seo_keywords ?? [],
-      content.category ?? 'economy'
-    );
-    await setTags(page, generatedTags);
-  } catch { /* 태그 실패해도 발행 계속 */ }
+  // 사이드바 열린 후: 카테고리 + 태그 설정 (새 에디터는 사이드바 안에 위치)
+  if (bestCategory) {
+    try {
+      const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
+      logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Category set failed: ${err.message}`);
+    }
+  }
+  if (generatedTags.length) {
+    try {
+      await setTagsInEditor(page, generatedTags);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Tag set failed: ${err.message}`);
+    }
+  }
 
   // "비공개 저장" 클릭 → 인터셉트돼 공개 저장됨
   let publishClicked = false;

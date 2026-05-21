@@ -259,35 +259,32 @@ export async function generateBlogTags(keyword, seoKeywords = [], internalCatego
 export async function setCategoryInEditor(page, categoryId, categoryName) {
   if (!categoryId && !categoryName) return false;
 
-  // 1. React 컴포넌트 기반 카테고리 버튼 → 드롭다운에서 선택
+  // 1. <select name="categoryId"> 직접 선택 (가장 안전 — 페이지 이동 없음)
   try {
-    await page.click('.category-btn, [data-tistory-react-app="Category"], button:has-text("카테고리")', { timeout: 3000 });
+    if (categoryId) {
+      await page.selectOption('select[name="categoryId"]', { value: String(categoryId) }, { timeout: 3000 });
+      return true;
+    }
+    await page.selectOption('select[name="categoryId"]', { label: categoryName }, { timeout: 3000 });
+    return true;
+  } catch { /* 다음 방식 시도 */ }
+
+  // 2. React 드롭다운 버튼 — class 기반만 사용 (has-text("카테고리")는 관리 페이지로 이동 위험)
+  try {
+    await page.click('.category-btn, [data-tistory-react-app="Category"]', { timeout: 3000 });
     await page.waitForTimeout(500);
-    // id 속성으로 클릭
     if (categoryId) {
       const clicked = await page.click(`[data-id="${categoryId}"], li[value="${categoryId}"]`, { timeout: 2000 })
         .then(() => true).catch(() => false);
       if (clicked) return true;
     }
-    // 이름 텍스트로 클릭
     await page.click(`text="${categoryName}"`, { timeout: 2000 });
-    return true;
-  } catch { /* 다음 방식 시도 */ }
-
-  // 2. <select name="categoryId"> 직접 선택
-  try {
-    if (categoryId) {
-      await page.selectOption('select[name="categoryId"]', { value: categoryId });
-      return true;
-    }
-    await page.selectOption('select[name="categoryId"]', { label: categoryName });
     return true;
   } catch { /* 다음 방식 시도 */ }
 
   // 3. JavaScript로 React state 우회 설정
   try {
     const set = await page.evaluate(({ id, name }) => {
-      // Tistory React state 직접 업데이트 (최후 수단)
       const select = document.querySelector('select[name="categoryId"]');
       if (select) {
         select.value = id;
@@ -295,7 +292,7 @@ export async function setCategoryInEditor(page, categoryId, categoryName) {
         return true;
       }
       return false;
-    }, { id: categoryId, name: categoryName });
+    }, { id: String(categoryId), name: categoryName });
     return set;
   } catch { return false; }
 }
@@ -310,7 +307,13 @@ export async function setTagsInEditor(page, tags) {
 
   // 새 Tistory React 에디터(사이드바)부터 구버전까지 우선순위 순
   const selectors = [
-    // 새 React 에디터 — 사이드바 태그 영역
+    // 새 React 에디터 — layer_publish 사이드바 내부
+    '.layer_publish input[type="text"]',
+    '.layer_publish input',
+    '#tagContent',
+    '.wrap_tag input',
+    '.area_tag input',
+    // 새 React 에디터 — 일반 태그 영역
     '.sidebar-tag-input input',
     '.tag-area input',
     'input[data-role="tag-input"]',
