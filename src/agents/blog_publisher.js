@@ -400,11 +400,35 @@ async function editExistingPost(page, rewrite, blogName) {
     }
   });
 
-  // "완료" → "발행" 클릭
+  // 사이드바 열기 (publishPost와 동일한 fallback 배열)
+  const editSidebarBtns = [
+    'button:has-text("완료")',
+    'button:has-text("발행")',
+    'button[data-btn="publish"]',
+    'button[class*="publish"]',
+    'button[class*="Publish"]',
+    '#publish-layer-btn',
+  ];
+  let editSidebarOpened = false;
+  for (const sel of editSidebarBtns) {
+    try {
+      await page.click(sel, { timeout: 5000 });
+      logger.info(`[blog_publisher] Edit sidebar opened via: ${sel}`);
+      editSidebarOpened = true;
+      break;
+    } catch { /* 다음 시도 */ }
+  }
+  if (!editSidebarOpened) {
+    const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_edit_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    logger.error(`[blog_publisher] 수정 사이드바 버튼 없음. 스크린샷: ${screenshotPath}`);
+    await page.unroute('**/manage/post.json');
+    throw new Error('수정 사이드바를 열 수 없음 — 스크린샷 확인 요망');
+  }
+  await page.waitForTimeout(2000);
+
   try {
-    await page.click('button:has-text("완료")', { timeout: 10000 });
-    await page.waitForTimeout(2000);
-    for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")']) {
+    for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")', 'button:has-text("저장")']) {
       try {
         await page.click(sel, { timeout: 5000 });
         break;

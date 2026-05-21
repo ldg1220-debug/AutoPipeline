@@ -308,7 +308,16 @@ export async function setCategoryInEditor(page, categoryId, categoryName) {
 export async function setTagsInEditor(page, tags) {
   if (!tags?.length) return false;
 
+  // 새 Tistory React 에디터(사이드바)부터 구버전까지 우선순위 순
   const selectors = [
+    // 새 React 에디터 — 사이드바 태그 영역
+    '.sidebar-tag-input input',
+    '.tag-area input',
+    'input[data-role="tag-input"]',
+    'input[class*="tagInput"]',
+    'input[class*="TagInput"]',
+    '.tag-box input',
+    // 구버전 셀렉터
     'input[name="tag"]',
     '.tag-input input',
     'input[placeholder*="태그"]',
@@ -322,25 +331,42 @@ export async function setTagsInEditor(page, tags) {
 
   let tagInput = null;
   for (const sel of selectors) {
-    tagInput = await page.$(sel);
-    if (tagInput) break;
+    try {
+      tagInput = await page.$(sel);
+      if (tagInput) {
+        const visible = await tagInput.isVisible().catch(() => false);
+        if (visible) break;
+        tagInput = null;
+      }
+    } catch { /* 다음 셀렉터 */ }
   }
   if (!tagInput) {
     logger.warn('[tistoryClassifier] Tag input not found');
     return false;
   }
 
-  // 태그 한 개씩 입력 (쉼표로 구분, Enter로 확정)
+  // 태그 한 개씩 입력 — 쉼표 우선, 실패 시 Enter 로 확정
+  let confirmed = 0;
   for (const tag of tags) {
     try {
       await tagInput.click();
+      await tagInput.fill('');
       await tagInput.type(tag, { delay: 30 });
+      // 쉼표로 확정 시도, 실패(자동완성 드롭다운이 없는 경우)하면 Enter
       await tagInput.press(',');
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(300);
+      // 입력값이 남아있으면 쉼표가 무효 → Enter 재시도
+      const remaining = await tagInput.inputValue().catch(() => '');
+      if (remaining.trim()) {
+        await tagInput.press('Enter');
+        await page.waitForTimeout(300);
+      }
+      confirmed++;
     } catch (err) {
       logger.warn(`[tistoryClassifier] Tag input failed for "${tag}": ${err.message}`);
     }
   }
 
-  return true;
+  logger.info(`[tistoryClassifier] Tags confirmed: ${confirmed}/${tags.length}`);
+  return confirmed > 0;
 }
