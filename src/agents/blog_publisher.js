@@ -156,14 +156,44 @@ async function publishPost(page, content, blogName, context) {
 
   // 새 글 작성 페이지 이동
   const writeUrl = `https://${blogName}.tistory.com/manage/newpost/`;
-  await page.goto(writeUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(3000); // 에디터 JS 초기화 대기
 
-  // 에디터 로드 대기
-  await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 15000 });
+  // 현재 URL 로깅 (로그인 리디렉트 여부 확인)
+  logger.info(`[blog_publisher] Editor URL: ${page.url()}`);
+
+  // 제목 입력란 셀렉터 — 티스토리 에디터 버전별 대응
+  const titleSelectors = [
+    '#post-title-inp',
+    'input[name="title"]',
+    'textarea[name="title"]',
+    '.tit-post input',
+    '[placeholder*="제목"]',
+    '[aria-label*="제목"]',
+    '[data-placeholder*="제목"]',
+    'input[class*="title"]',
+    'textarea[class*="title"]',
+  ];
+
+  let titleEl = null;
+  for (const sel of titleSelectors) {
+    try {
+      titleEl = await page.waitForSelector(sel, { timeout: 5000, state: 'visible' });
+      if (titleEl) { logger.info(`[blog_publisher] Title selector matched: ${sel}`); break; }
+    } catch { /* 다음 셀렉터 시도 */ }
+  }
+
+  if (!titleEl) {
+    // 스크린샷 저장 후 에러
+    const ssPath = `output/blog/debug_title_${Date.now()}.png`;
+    await page.screenshot({ path: ssPath, fullPage: true }).catch(() => {});
+    logger.error(`[blog_publisher] Title input not found. Screenshot: ${ssPath}`);
+    throw new Error('Title input not found — check screenshot for current editor state');
+  }
 
   // 제목 입력
   const title = blog_draft?.title ?? keyword;
-  await page.fill('#post-title-inp, input[name="title"]', title);
+  await titleEl.fill(title);
 
   // 본문 HTML 구성
   let html = blog_draft?.monetized_html
