@@ -151,7 +151,7 @@ async function switchToHtmlMode(page) {
 }
 
 // ── 단일 포스트 발행 ───────────────────────────────────────────────────────
-async function publishPost(page, content, blogName) {
+async function publishPost(page, content, blogName, context) {
   const { keyword, blog_draft, blog_assets, youtube_url } = content;
 
   // 새 글 작성 페이지 이동
@@ -198,7 +198,7 @@ async function publishPost(page, content, blogName) {
     const availableCategories = await loadTistoryCategories(
       blogName,
       config.tistory.accessToken,
-      page
+      context  // BrowserContext — 임시 페이지로 스크래핑, 에디터 page 이동 없음
     );
     bestCategory = await matchBestCategory(
       availableCategories,
@@ -616,7 +616,7 @@ export async function publishBlogPosts(contentData) {
 
     try {
       logger.info(`[blog_publisher] Publishing: ${content.keyword}`);
-      const postUrl = await publishPost(page, content, blogName);
+      const postUrl = await publishPost(page, content, blogName, context);
 
       if (postUrl) {
         savePublishResult(

@@ -64,14 +64,18 @@ async function fetchCategoriesFromAPI(blogName, accessToken) {
 }
 
 // ── Playwright로 카테고리 목록 스크래핑 (API 토큰 없을 때 폴백) ────────────
-async function fetchCategoriesFromPage(page, blogName) {
+// context(BrowserContext)를 받아 임시 페이지를 열고 닫는다.
+// 에디터 page를 직접 넘기면 /manage/category/ 로 이동해 발행 흐름이 깨지므로 금지.
+async function fetchCategoriesFromPage(context, blogName) {
+  let tempPage = null;
   try {
-    await page.goto(`https://${blogName}.tistory.com/manage/category/`, {
+    tempPage = await context.newPage();
+    await tempPage.goto(`https://${blogName}.tistory.com/manage/category/`, {
       waitUntil: 'networkidle',
       timeout: 20000,
     });
 
-    const categories = await page.evaluate(() => {
+    const categories = await tempPage.evaluate(() => {
       const rows = document.querySelectorAll('.category-list li[data-id], tr[data-id]');
       return [...rows].map((row) => ({
         id:   row.getAttribute('data-id') ?? '',
@@ -84,11 +88,14 @@ async function fetchCategoriesFromPage(page, blogName) {
   } catch (err) {
     logger.warn(`[tistoryClassifier] Category page scrape failed: ${err.message}`);
     return [];
+  } finally {
+    await tempPage?.close().catch(() => {});
   }
 }
 
 // ── 카테고리 목록 로드 (캐시 → API → Playwright) ──────────────────────────
-export async function loadTistoryCategories(blogName, accessToken, page = null) {
+// context: Playwright BrowserContext (임시 페이지를 열어 스크래핑). null이면 API만 사용.
+export async function loadTistoryCategories(blogName, accessToken, context = null) {
   // 1. 캐시 조회
   const cached = getCachedCategories(blogName);
   if (cached.length > 0) {
@@ -109,9 +116,9 @@ export async function loadTistoryCategories(blogName, accessToken, page = null) 
     }
   }
 
-  // 3. Playwright 폴백
-  if (page) {
-    const categories = await fetchCategoriesFromPage(page, blogName);
+  // 3. Playwright 폴백 (임시 페이지 사용 — 에디터 page 이동 없음)
+  if (context) {
+    const categories = await fetchCategoriesFromPage(context, blogName);
     if (categories.length > 0) {
       saveCategoriesCache(blogName, categories);
       logger.info(`[tistoryClassifier] Categories from Playwright: ${categories.map((c) => c.name).join(', ')}`);
