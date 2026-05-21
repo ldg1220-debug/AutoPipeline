@@ -242,25 +242,48 @@ async function publishPost(page, content, blogName) {
     }
   });
 
-  // 사이드바/모달 열기 — 에디터 버전마다 버튼 텍스트가 다름
+  // 에디터 완전 로드 대기 (React 에디터는 마운트 후 버튼이 생성됨)
+  await page.waitForTimeout(2000);
+
+  // 사이드바/모달 열기 — 에디터 버전마다 버튼 텍스트·태그가 다름
   const sidebarBtns = [
     'button:has-text("완료")',
     'button:has-text("발행")',
-    'button[data-btn="publish"]',
+    // React 에디터 신규 셀렉터
+    'a:has-text("발행")',
+    '[role="button"]:has-text("발행")',
     'button[class*="publish"]',
     'button[class*="Publish"]',
+    'button[data-btn="publish"]',
     '#publish-layer-btn',
+    '.btn-publish',
+    '.publish-btn',
+    // 최후 수단: 오른쪽 상단 영역의 첫 번째 버튼
+    '.wrap_btn_publish button',
+    '.area_publish button',
   ];
   let sidebarOpened = false;
   for (const sel of sidebarBtns) {
     try {
-      await page.click(sel, { timeout: 5000 });
+      const el = await page.$(sel);
+      if (!el) continue;
+      const visible = await el.isVisible().catch(() => false);
+      if (!visible) continue;
+      await el.click({ timeout: 3000 });
       logger.info(`[blog_publisher] Sidebar opened via: ${sel}`);
       sidebarOpened = true;
       break;
     } catch { /* 다음 시도 */ }
   }
   if (!sidebarOpened) {
+    // 실패 시 페이지의 모든 버튼·링크 텍스트를 로그에 출력 (셀렉터 디버깅용)
+    const allBtns = await page.evaluate(() =>
+      [...document.querySelectorAll('button, a[role="button"], [role="button"]')]
+        .map((el) => `[${el.tagName}] class="${el.className}" text="${el.innerText?.trim().slice(0, 40)}"`)
+        .slice(0, 30)
+    ).catch(() => []);
+    logger.error(`[blog_publisher] 페이지 내 버튼 목록:\n${allBtns.join('\n')}`);
+
     const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_${Date.now()}.png`);
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
     logger.error(`[blog_publisher] 발행 사이드바 버튼을 찾지 못했습니다. 스크린샷: ${screenshotPath}`);
@@ -400,25 +423,43 @@ async function editExistingPost(page, rewrite, blogName) {
     }
   });
 
-  // 사이드바 열기 (publishPost와 동일한 fallback 배열)
+  // 사이드바 열기 (publishPost와 동일한 fallback 배열 + 가시성 검증)
+  await page.waitForTimeout(2000);
   const editSidebarBtns = [
     'button:has-text("완료")',
     'button:has-text("발행")',
-    'button[data-btn="publish"]',
+    'a:has-text("발행")',
+    '[role="button"]:has-text("발행")',
     'button[class*="publish"]',
     'button[class*="Publish"]',
+    'button[data-btn="publish"]',
     '#publish-layer-btn',
+    '.btn-publish',
+    '.publish-btn',
+    '.wrap_btn_publish button',
+    '.area_publish button',
   ];
   let editSidebarOpened = false;
   for (const sel of editSidebarBtns) {
     try {
-      await page.click(sel, { timeout: 5000 });
+      const el = await page.$(sel);
+      if (!el) continue;
+      const visible = await el.isVisible().catch(() => false);
+      if (!visible) continue;
+      await el.click({ timeout: 3000 });
       logger.info(`[blog_publisher] Edit sidebar opened via: ${sel}`);
       editSidebarOpened = true;
       break;
     } catch { /* 다음 시도 */ }
   }
   if (!editSidebarOpened) {
+    const allBtns = await page.evaluate(() =>
+      [...document.querySelectorAll('button, a[role="button"], [role="button"]')]
+        .map((el) => `[${el.tagName}] class="${el.className}" text="${el.innerText?.trim().slice(0, 40)}"`)
+        .slice(0, 30)
+    ).catch(() => []);
+    logger.error(`[blog_publisher] 수정 페이지 버튼 목록:\n${allBtns.join('\n')}`);
+
     const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_edit_${Date.now()}.png`);
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
     logger.error(`[blog_publisher] 수정 사이드바 버튼 없음. 스크린샷: ${screenshotPath}`);
