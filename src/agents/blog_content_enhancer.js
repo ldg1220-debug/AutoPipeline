@@ -214,8 +214,9 @@ function buildAffiliateHooks(sections, affiliateCategory) {
 async function enhanceBlogDraft(content) {
   const { keyword, category, shortform_script, blog_draft } = content;
 
-  // 이미 섹션이 채워진 경우 스킵
-  if ((blog_draft?.sections ?? []).length > 0) {
+  // 섹션에 실제 본문(body)이 있는 경우만 스킵 — heading만 있으면 Pass3 실행
+  const hasBodyContent = (blog_draft?.sections ?? []).some((s) => s.body?.trim());
+  if (hasBodyContent) {
     logger.info(`[blog_content_enhancer] Already enhanced, skipping: ${keyword}`);
     return content;
   }

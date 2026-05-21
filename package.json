@@ -20,6 +20,7 @@
     "analyze": "node scripts/analyze-rejected.js",
     "analyze:grouper": "node scripts/analyze-grouper.js",
     "youtube:auth": "node scripts/get-youtube-token.js",
+    "youtube:channel-setup": "node scripts/youtube-channel-setup.js",
     "wp:publish": "node scripts/publish-wordpress.js",
     "affiliate:replace": "node scripts/replace-affiliate-links.js",
     "blog:keywords": "node src/agents/keyword_miner.js",
