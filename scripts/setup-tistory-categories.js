@@ -33,13 +33,40 @@ async function getExistingCategories(page, blogName) {
   });
 }
 
-async function dumpButtons(page) {
-  return page.evaluate(() =>
-    [...document.querySelectorAll('button, a[role="button"], [role="button"], a')]
-      .map((el) => `[${el.tagName}] class="${el.className.slice(0, 60)}" text="${(el.innerText || el.textContent || '').trim().slice(0, 40)}"`)
-      .filter((s) => s.includes('text="') && !s.includes('text=""'))
-      .slice(0, 40)
-  ).catch(() => []);
+/** 페이지 또는 iframe frame에서 작동하는 클릭 헬퍼 */
+async function tryClick(frame, selectors, timeout = 2000) {
+  for (const sel of selectors) {
+    try {
+      await frame.click(sel, { timeout });
+      return sel;
+    } catch { /* 다음 */ }
+  }
+  return null;
+}
+
+/** iframe 내용 포함 전체 버튼 덤프 */
+async function dumpAllButtons(page) {
+  const results = [];
+
+  const dump = async (frame, label) => {
+    try {
+      const items = await frame.evaluate(() =>
+        [...document.querySelectorAll('button, a, input[type="button"], [role="button"]')]
+          .map((el) => `[${el.tagName}] class="${(el.className||'').slice(0,50)}" text="${(el.innerText||el.value||'').trim().slice(0,40)}"`)
+          .filter((s) => !s.includes('text=""'))
+          .slice(0, 30)
+      );
+      items.forEach((i) => results.push(`  ${label}: ${i}`));
+    } catch { /* 무시 */ }
+  };
+
+  await dump(page, 'main');
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    const url = frame.url();
+    await dump(frame, `iframe[${url.slice(0, 60)}]`);
+  }
+  return results;
 }
 
 async function createCategory(page, blogName, categoryName) {
@@ -47,97 +74,88 @@ async function createCategory(page, blogName, categoryName) {
     waitUntil: 'networkidle',
     timeout: 30000,
   });
-  // React 렌더링 대기
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(3000);
 
-  // 현재 페이지의 버튼 목록 덤프 (디버그용)
-  const btns = await dumpButtons(page);
-  console.log('  [DEBUG] 페이지 내 버튼/링크 목록:');
-  btns.forEach((b) => console.log('   ', b));
+  // iframe 목록 출력
+  const frames = page.frames();
+  console.log(`  [DEBUG] frames: ${frames.length}개`);
+  frames.forEach((f, i) => console.log(`    frame[${i}]: ${f.url().slice(0, 80)}`));
 
-  // "추가" 버튼 — 텍스트 포함 폭넓게 시도
-  const addBtns = [
+  // 버튼 덤프 (main + all iframes)
+  const btns = await dumpAllButtons(page);
+  console.log('  [DEBUG] 버튼 목록 (iframe 포함):');
+  btns.forEach((b) => console.log(b));
+
+  // 작업 대상 frame 결정: 카테고리 관련 frame 우선, 없으면 main
+  let workFrame = page.mainFrame();
+  for (const frame of frames) {
+    const url = frame.url();
+    if (url.includes('category') || url.includes('manage')) {
+      try {
+        const hasCatContent = await frame.$('.category_list, .wrap_category, #categoryList, [class*="category"]');
+        if (hasCatContent) { workFrame = frame; break; }
+      } catch { /* 다음 */ }
+    }
+  }
+  // iframe이 있으면 첫 번째 content iframe 시도
+  if (workFrame === page.mainFrame() && frames.length > 1) {
+    workFrame = frames[1];
+  }
+  console.log(`  [DEBUG] 작업 frame: ${workFrame.url().slice(0, 80)}`);
+
+  // "추가" 버튼 클릭
+  const addSel = await tryClick(workFrame, [
     'button:has-text("카테고리 추가")',
     'button:has-text("추가")',
     'a:has-text("카테고리 추가")',
     'a:has-text("추가")',
     '[role="button"]:has-text("추가")',
     '.btn_add_category',
-    '.btn-add',
+    '.btnAdd',
     '#addCategoryBtn',
-    '[data-action="add"]',
     'button[class*="add"]',
     'button[class*="Add"]',
-  ];
+  ]);
 
-  let clicked = false;
-  for (const sel of addBtns) {
-    try {
-      await page.click(sel, { timeout: 2000 });
-      clicked = true;
-      console.log(`  ✅ 추가 버튼 클릭: ${sel}`);
-      break;
-    } catch { /* 다음 시도 */ }
-  }
-
-  if (!clicked) {
+  if (!addSel) {
     const debugPath = `category_debug_${Date.now()}.png`;
     await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
     console.warn(`  ⚠️  추가 버튼을 찾지 못했습니다. 스크린샷: ${debugPath}`);
     return false;
   }
-
+  console.log(`  ✅ 추가 버튼: ${addSel}`);
   await page.waitForTimeout(1000);
 
-  // 입력 필드 찾기
-  const inputSels = [
-    'input[name="name"]',
-    'input[placeholder*="카테고리"]',
-    'input[placeholder*="이름"]',
-    '.category_input input',
-    '.layer_category_add input',
-    'input[type="text"]',
-  ];
-
+  // 입력 필드
   let input = null;
-  for (const sel of inputSels) {
+  for (const sel of ['input[name="name"]', 'input[placeholder*="카테고리"]', 'input[placeholder*="이름"]', '.category_input input', 'input[type="text"]']) {
     try {
-      const el = await page.$(sel);
+      const el = await workFrame.$(sel);
       if (el && await el.isVisible()) { input = el; break; }
     } catch { /* 다음 */ }
   }
-
   if (!input) {
-    console.warn(`  ⚠️  카테고리명 입력 필드를 찾지 못했습니다.`);
+    console.warn('  ⚠️  입력 필드를 찾지 못했습니다.');
     return false;
   }
 
   await input.fill(categoryName);
   await page.waitForTimeout(300);
 
-  // 저장/확인 버튼
-  const saveBtns = [
+  const saveSel = await tryClick(workFrame, [
     'button:has-text("확인")',
     'button:has-text("저장")',
     'button:has-text("완료")',
     'button[type="submit"]',
-    '.btn_confirm',
-    '.btn_save',
-    '.btn-confirm',
-  ];
-
-  for (const sel of saveBtns) {
-    try {
-      await page.click(sel, { timeout: 2000 });
-      console.log(`  ✅ 저장 버튼: ${sel}`);
-      await page.waitForTimeout(1500);
-      return true;
-    } catch { /* 다음 */ }
+    '.btn_confirm', '.btn_save', '.btnConfirm',
+  ]);
+  if (saveSel) {
+    console.log(`  ✅ 저장 버튼: ${saveSel}`);
+  } else {
+    await input.press('Enter');
+    console.log('  ✅ Enter로 저장');
   }
-
-  // 폴백: Enter
-  await input.press('Enter');
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(2000);
   return true;
 }
 
