@@ -185,11 +185,14 @@ async function publishPost(page, content, blogName, context) {
     } catch { /* 무시 */ }
   }
 
+  logger.info(`[blog_publisher] URL[1-after-inject]: ${page.url()}`);
+
   // 썸네일 업로드 (있을 때만) — 사이드바 열기 전에 처리
   if (blog_assets?.thumbnail) {
     try {
       await uploadImageToEditor(page, blog_assets.thumbnail);
     } catch { /* 썸네일 실패해도 발행 계속 */ }
+    logger.info(`[blog_publisher] URL[2-after-thumbnail]: ${page.url()}`);
   }
 
   // 카테고리 목록은 API로 미리 로드 (페이지 이동 없음)
@@ -200,6 +203,7 @@ async function publishPost(page, content, blogName, context) {
       config.tistory.accessToken,
       context  // BrowserContext — 임시 페이지로 스크래핑, 에디터 page 이동 없음
     );
+    logger.info(`[blog_publisher] URL[3-after-categories]: ${page.url()}`);
     bestCategory = await matchBestCategory(
       availableCategories,
       keyword,
@@ -207,6 +211,17 @@ async function publishPost(page, content, blogName, context) {
     );
   } catch (err) {
     logger.warn(`[blog_publisher] Category load failed: ${err.message}`);
+    logger.info(`[blog_publisher] URL[3-after-categories-err]: ${page.url()}`);
+  }
+
+  // URL이 에디터에서 벗어났으면 복구
+  if (!page.url().includes('/manage/newpost') && !page.url().includes('/manage/post/')) {
+    logger.warn(`[blog_publisher] URL changed to ${page.url()}, re-navigating to editor`);
+    await page.goto(writeUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 15000 });
+    await page.fill('#post-title-inp, input[name="title"]', title);
+    await page.waitForTimeout(1000);
+    await injectHtmlContent(page, html);
   }
 
   // 태그도 미리 생성 (API 호출 — 페이지 이동 없음)
@@ -220,6 +235,7 @@ async function publishPost(page, content, blogName, context) {
   } catch (err) {
     logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
   }
+  logger.info(`[blog_publisher] URL[4-before-sidebar]: ${page.url()}`);
 
   // ── 발행 플로우: page.route() 인터셉트 ──────────────────────────────────
   // visibility:20(공개) + content:html(실제 본문)으로 교체 → 한 번에 공개 발행
