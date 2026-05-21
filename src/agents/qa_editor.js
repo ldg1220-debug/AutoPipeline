@@ -178,7 +178,7 @@ async function checkVideoWithGemini(videoPath) {
 출력: { "layout": "PASS", "sync": "PASS", "reason": "" }`;
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${config.gemini.apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
       {
         contents: [{
           parts: [
