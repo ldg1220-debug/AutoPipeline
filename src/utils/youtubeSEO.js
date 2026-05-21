@@ -174,7 +174,15 @@ export async function generateYouTubeTags(keyword, category, seoKeywords = []) {
     );
 
     const parsed = JSON.parse(res.data.choices[0].message.content);
-    const generated = Array.isArray(parsed) ? parsed : (parsed.tags ?? Object.values(parsed)[0] ?? []);
+    let generated;
+    if (Array.isArray(parsed)) {
+      generated = parsed;
+    } else {
+      const firstVal = Object.values(parsed)[0];
+      generated = Array.isArray(firstVal)
+        ? firstVal
+        : Object.values(parsed).filter((v) => typeof v === 'string');
+    }
 
     const allTags = [...new Set([
       keyword,
