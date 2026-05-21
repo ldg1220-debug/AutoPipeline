@@ -202,6 +202,13 @@ async function publishToYouTube(content, accessToken) {
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Long-form uploaded: https://youtu.be/${videoId}`);
 
+  // 카테고리 재생목록에 영상 추가
+  try {
+    await addVideoToPlaylist(videoId, content.category, accessToken);
+  } catch (err) {
+    logger.warn(`[auto_publisher] Playlist insert failed: ${err.message}`);
+  }
+
   // 자막(SRT) 업로드
   const srtPath  = path.resolve(mediaDir, `${safeKeyword}_long.srt`);
   let captionsUploaded = false;
@@ -245,6 +252,37 @@ async function publishToYouTube(content, accessToken) {
     thumbnail_uploaded: thumbnailUploaded,
     captions_uploaded:  captionsUploaded,
   };
+}
+
+/**
+ * 업로드된 영상을 카테고리 재생목록에 추가한다.
+ * .env의 YOUTUBE_PLAYLIST_* 값이 없으면 건너뜀.
+ */
+async function addVideoToPlaylist(videoId, category, accessToken) {
+  const playlistId = config.youtube?.playlists?.[category];
+  if (!playlistId) {
+    logger.info(`[auto_publisher] No playlist configured for category "${category}", skipping.`);
+    return false;
+  }
+
+  await axios.post(
+    'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet',
+    {
+      snippet: {
+        playlistId,
+        resourceId: { kind: 'youtube#video', videoId },
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    }
+  );
+  logger.info(`[auto_publisher] Added video ${videoId} to playlist ${playlistId} (category: ${category})`);
+  return true;
 }
 
 /**

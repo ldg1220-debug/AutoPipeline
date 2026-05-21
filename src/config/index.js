@@ -56,6 +56,15 @@ export const config = {
     clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
     refreshToken: process.env.YOUTUBE_REFRESH_TOKEN,
     channelUrl:   process.env.YOUTUBE_CHANNEL_URL || 'https://www.youtube.com/@매일읽어주는남자',
+    // 카테고리별 재생목록 ID — YouTube Studio에서 미리 생성 후 .env에 입력
+    playlists: {
+      economy:       process.env.YOUTUBE_PLAYLIST_ECONOMY       || null,
+      finance:       process.env.YOUTUBE_PLAYLIST_ECONOMY       || null,
+      realestate:    process.env.YOUTUBE_PLAYLIST_REALESTATE    || null,
+      health:        process.env.YOUTUBE_PLAYLIST_HEALTH        || null,
+      entertainment: process.env.YOUTUBE_PLAYLIST_ENTERTAINMENT || null,
+      social:        process.env.YOUTUBE_PLAYLIST_ENTERTAINMENT || null,
+    },
   },
   // 카테고리별 별도 YouTube 채널 (없으면 default youtube 채널 사용)
   youtubeChannels: {
