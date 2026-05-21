@@ -55,6 +55,7 @@ export const config = {
     clientId:     process.env.YOUTUBE_CLIENT_ID,
     clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
     refreshToken: process.env.YOUTUBE_REFRESH_TOKEN,
+    channelUrl:   process.env.YOUTUBE_CHANNEL_URL || 'https://www.youtube.com/@매일읽어주는남자',
   },
   // 카테고리별 별도 YouTube 채널 (없으면 default youtube 채널 사용)
   youtubeChannels: {

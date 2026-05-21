@@ -333,15 +333,17 @@ async function monetizeBlogDraft(content) {
     logger.warn(`[monetizer] Internal links failed: ${err.message}`);
   }
 
-  const youtubeSection =
-    `<h2>📺 관련 영상</h2>\n` +
-    `<div class="youtube-embed">{{YOUTUBE_EMBED}}</div>`;
-
+  // 블로그가 YouTube 영상보다 먼저 발행되므로 특정 영상 링크 대신 채널 홍보 카드 사용
+  const channelUrl = config.youtube?.channelUrl || 'https://www.youtube.com/@매일읽어주는남자';
   const ctaBox =
     `<div class="cta-box">` +
     `<h3>📌 매일읽어주는남자</h3>` +
     `<p>매일 아침 경제·생활 정보를 짧고 쉽게 전달합니다.<br>` +
     `유튜브 <strong>구독 &amp; 🔔 알림 설정</strong>으로 놓치지 마세요!</p>` +
+    `<a href="${channelUrl}" target="_blank" rel="noopener" ` +
+    `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#FF0000;` +
+    `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
+    `▶ 채널 바로가기</a>` +
     `</div>`;
 
   const html = [
@@ -357,7 +359,6 @@ async function monetizeBlogDraft(content) {
     faqHtml,
     relatedPostsHtml,                             // 관련 포스트 내부 링크 카드
     tagCloudHtml,                                 // 키워드 태그 클라우드
-    youtubeSection,
     ctaBox,
     adsenseSlot('post_end'),
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
