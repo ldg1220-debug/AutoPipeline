@@ -37,6 +37,7 @@
     "thumbnail:set": "node scripts/set-thumbnail.js",
     "thumbnail:swap": "node scripts/swap-thumbnails.js",
     "thumbnail:swap:dry": "cross-env DRY_RUN=true node scripts/swap-thumbnails.js",
+    "voice:audition": "node scripts/voice-audition.js",
     "competitor:analyze": "node src/agents/competitor_analyzer.js",
     "youtube:auth:health": "node scripts/get-youtube-health-token.js",
     "director:strategy": "node src/agents/pipeline_director.js",
