@@ -199,7 +199,10 @@ async function checkVideoWithGemini(videoPath) {
       reason: parsed.reason ?? '',
     };
   } catch (err) {
-    logger.warn('[qa_editor] Vision QA failed. Defaulting to PASS.', { message: err.message });
+    const status = err.response?.status ?? 'no-response';
+    const body   = err.response?.data;
+    const detail = body?.error?.message ?? body?.message ?? err.message;
+    logger.warn(`[qa_editor] Vision QA failed (${status}): ${detail}${body ? ' | ' + JSON.stringify(body).slice(0, 300) : ''}. Defaulting to PASS.`);
     return { layout: 'PASS', sync: 'PASS', reason: '' };
   }
 }
