@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import axios from 'axios';
 import { createRequire } from 'module';
 import { config } from '../config/index.js';
@@ -11,6 +13,10 @@ import { findSimilarImage, saveImageToCache, pruneImageCache } from '../utils/im
 
 const require = createRequire(import.meta.url);
 const sharp   = require('sharp');
+
+const execFileAsync = promisify(execFile);
+// ffmpeg-static 번들 바이너리 (시스템 ffmpeg 설치 불필요)
+const { default: ffmpegPath } = await import('ffmpeg-static');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -31,6 +37,38 @@ const ACT_MOODS = [
   'informative, analytical, clear, professional atmosphere', // Act 1 본론
   'calm, conclusive, forward-looking, hopeful atmosphere',   // Act 2 마무리
 ];
+
+// ── Grok Aurora 이미지 생성 ───────────────────────────────────────────────
+/**
+ * xAI Grok Aurora (grok-2-image-1212)로 이미지를 생성한다.
+ * b64_json이면 outputPath에 저장 후 경로 반환, url이면 URL 반환.
+ */
+async function generateImageGrokAurora(prompt, outputPath) {
+  const apiKey = config.grok?.apiKey;
+  if (!apiKey) return null;
+  try {
+    const res = await axios.post(
+      'https://api.x.ai/v1/images/generations',
+      { model: 'grok-2-image-1212', prompt, n: 1 },
+      {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 120000,
+      }
+    );
+    const item = res.data.data[0];
+    if (item.b64_json) {
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+      await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
+      return outputPath;
+    }
+    if (item.url) return item.url;
+    return null;
+  } catch (err) {
+    const detail = err.response?.data?.error?.message ?? err.message;
+    logger.warn(`[media_generator] Grok Aurora failed: ${detail}`);
+    return null;
+  }
+}
 
 // ── ② 이미지 프롬프트 QA + DALL-E 결과 검수 ──────────────────────────────
 /**
@@ -216,42 +254,36 @@ async function generateSceneImages(keyword, scripts, category) {
       `Background scene: ${bg}. ` +
       `Full body character centered, 9:16 portrait composition, high quality, vibrant illustration.`;
 
+    const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
+
+    // Grok Aurora 우선 → OpenAI gpt-image-1 폴백 → Pexels 최종 폴백
     let imageUrl = null;
-    for (const m of [
-      { model: 'gpt-image-1', size: '1024x1536', quality: 'high' },
-      { model: 'dall-e-3',    size: '1024x1792', quality: 'standard' },
-    ]) {
+    if (config.grok?.apiKey) {
+      imageUrl = await generateImageGrokAurora(imagePrompt, imgPath);
+      if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, Grok Aurora): ${keyword}`);
+    }
+    if (!imageUrl && config.openai.apiKey) {
       try {
-        const body = { model: m.model, prompt: imagePrompt, n: 1, size: m.size };
-        if (m.quality) body.quality = m.quality;
+        const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
         const res = await axios.post(
-          'https://api.openai.com/v1/images/generations',
-          body,
-          {
-            headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-            timeout: 120000,
-          }
+          'https://api.openai.com/v1/images/generations', body,
+          { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
         );
         const item = res.data.data[0];
-        if (item.url) {
-          imageUrl = item.url;
-        } else if (item.b64_json) {
-          const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-          const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
+        if (item.b64_json) {
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
+        } else if (item.url) {
+          imageUrl = item.url;
         }
-        if (imageUrl) {
-          logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, ${m.model}): ${keyword}`);
-          break;
-        }
+        if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, gpt-image-1): ${keyword}`);
       } catch (err) {
-        const detail = err.response?.data?.error?.message ?? err.message;
-        logger.warn(`[media_generator] Scene image ${m.model} act${i} failed: ${detail}`);
+        logger.warn(`[media_generator] gpt-image-1 act${i} failed: ${err.response?.data?.error?.message ?? err.message}`);
       }
     }
 
-    // Pexels 폴백
+    // Pexels 최종 폴백
     if (!imageUrl) {
       const pexels = await searchPexelsImages(keyword, category, 1);
       imageUrl = pexels[0] || null;
@@ -535,6 +567,160 @@ async function renderLabelPng(seriesName, outputPath) {
   </svg>`;
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await sharp(Buffer.from(svg)).png().toFile(outputPath);
+  return outputPath;
+}
+
+// ── Sharp 버퍼 반환 변형 (ffmpeg 합성용) ─────────────────────────────────
+async function renderSubtitlePngBuffer(text) {
+  const W = 1080, H = 1920;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const fontSize = 36;
+  const lineH = Math.ceil(fontSize * 1.6);
+  const padding = 24;
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = wrapTextKorean(text, 22);
+  const boxH = lines.length * lineH + padding * 2;
+  const boxX = 90, boxW = 900;
+  const boxY = H - boxH - 115;
+  const textElems = lines.map((line, i) => {
+    const y = boxY + padding + (i + 0.8) * lineH;
+    return `<text x="${W / 2}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(line)}</text>`;
+  }).join('\n');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="14" fill="#000000" fill-opacity="0.82"/>
+    ${textElems}
+  </svg>`;
+  return await sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function renderLabelPngBuffer(seriesName) {
+  const W = 1080, H = 1920;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const fontSize = 40;
+  const boxH = 72;
+  const boxX = 90, boxW = 900;
+  const boxY = 52;
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="8" fill="#000000" fill-opacity="0.85"/>
+    <text x="${W / 2}" y="${boxY + Math.round(boxH / 2 + fontSize * 0.36)}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(seriesName)}</text>
+  </svg>`;
+  return await sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+// ── 이미지 URL/경로 → Buffer ─────────────────────────────────────────────
+async function fetchImageBuffer(url) {
+  if (!url) return null;
+  try {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000 });
+      return Buffer.from(res.data);
+    }
+    return await fs.readFile(url);
+  } catch (err) {
+    logger.warn(`[media_generator] fetchImageBuffer failed (${url}): ${err.message}`);
+    return null;
+  }
+}
+
+// ── 섹션 오디오 병합 (ffmpeg) ────────────────────────────────────────────
+async function mergeAudioFiles(audioPaths, outputPath) {
+  const valid = audioPaths.filter(Boolean);
+  if (valid.length === 0) return null;
+  if (valid.length === 1) return valid[0];
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const listContent = valid.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n');
+  const listFile = `${outputPath}.list.txt`;
+  await fs.writeFile(listFile, listContent);
+
+  await execFileAsync(ffmpegPath, [
+    '-f', 'concat', '-safe', '0', '-i', listFile,
+    '-c:a', 'libmp3lame', '-q:a', '2', '-y', outputPath,
+  ]);
+  await fs.unlink(listFile);
+  return outputPath;
+}
+
+// ── ffmpeg 영상 렌더링 (Shotstack 대체) ──────────────────────────────────
+/**
+ * frames 배열을 Sharp로 합성한 뒤 ffmpeg로 인코딩한다.
+ * frames: [{ bgUrl, label, subtitle, duration }]
+ *   bgUrl   — 배경 이미지 (URL 또는 로컬 경로, null 허용)
+ *   label   — 상단 레이블 텍스트 (null 허용)
+ *   subtitle — 하단 자막 텍스트 (null 허용)
+ *   duration — 프레임 표시 시간(초)
+ */
+async function renderFramesWithFfmpeg(frames, audioPath, outputPath) {
+  const sessionId = Date.now().toString(36);
+  const tmpDir    = path.resolve(path.dirname(outputPath), 'tmp_ffmpeg');
+  await fs.mkdir(tmpDir, { recursive: true });
+
+  // 배경 이미지 일괄 다운로드 (중복 URL 한 번만)
+  const uniqueUrls = [...new Set(frames.map((f) => f.bgUrl).filter(Boolean))];
+  const bgBufMap   = new Map();
+  for (const url of uniqueUrls) {
+    const buf = await fetchImageBuffer(url);
+    if (buf) bgBufMap.set(url, buf);
+  }
+
+  const fallbackBg = await sharp({
+    create: { width: 1080, height: 1920, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
+  }).png().toBuffer();
+
+  // 프레임별 합성 PNG 생성
+  const framePaths = [];
+  for (let i = 0; i < frames.length; i++) {
+    const { bgUrl, label, subtitle, duration } = frames[i];
+
+    const bgRaw  = bgUrl ? (bgBufMap.get(bgUrl) ?? null) : null;
+    const baseBuf = bgRaw
+      ? await sharp(bgRaw).resize(1080, 1920, { fit: 'cover' }).png().toBuffer()
+      : fallbackBg;
+
+    const composites = [];
+    if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
+    if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+
+    const frameBuf = composites.length
+      ? await sharp(baseBuf).composite(composites).png().toBuffer()
+      : baseBuf;
+
+    const framePath = path.resolve(tmpDir, `f_${sessionId}_${i}.png`);
+    await fs.writeFile(framePath, frameBuf);
+    framePaths.push({ path: framePath, duration });
+  }
+
+  // concat 리스트 파일 (마지막 프레임 2회 추가로 끊김 방지)
+  const concatLines = framePaths.map(({ path: p, duration }) =>
+    `file '${p.replace(/\\/g, '/')}'\nduration ${duration}`
+  );
+  if (framePaths.length > 0) {
+    concatLines.push(`file '${framePaths.at(-1).path.replace(/\\/g, '/')}'`);
+  }
+  const concatFile = path.resolve(tmpDir, `list_${sessionId}.txt`);
+  await fs.writeFile(concatFile, concatLines.join('\n'));
+
+  // ffmpeg 실행
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const args = [
+    '-f', 'concat', '-safe', '0', '-i', concatFile,
+    ...(audioPath ? ['-i', audioPath] : []),
+    '-vf', 'fps=30,scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
+    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+    ...(audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : []),
+    '-y', outputPath,
+  ];
+  try {
+    await execFileAsync(ffmpegPath, args, { maxBuffer: 50 * 1024 * 1024 });
+  } finally {
+    await Promise.allSettled([
+      ...framePaths.map(({ path: p }) => fs.unlink(p)),
+      fs.unlink(concatFile),
+    ]);
+  }
+
+  logger.info(`[media_generator] ffmpeg video saved: ${outputPath}`);
   return outputPath;
 }
 
@@ -1120,15 +1306,31 @@ async function generateMedia(content) {
     }
   }
 
-  // 5. 영상 렌더링
+  // 5. ffmpeg 영상 렌더링
   try {
-    await renderVideoWithShotstack(content, result.audio, videoPath, sceneUrls);
+    const audioStats = await fs.stat(result.audio);
+    const totalDuration = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+    const scenes = buildScenes(
+      {
+        hook:    content.shortform_script?.hook    ?? '',
+        context: content.shortform_script?.context ?? '',
+        insight: content.shortform_script?.insight ?? '',
+        summary: content.shortform_script?.summary ?? '',
+        cta:     content.shortform_script?.cta     ?? '',
+      },
+      totalDuration
+    );
+    const seriesName = content.series_name ?? '매일읽어주는남자';
+    const frames = scenes.map((scene) => ({
+      bgUrl:    sceneUrls[scene.act] ?? null,
+      label:    seriesName,
+      subtitle: scene.text,
+      duration: scene.duration,
+    }));
+    await renderFramesWithFfmpeg(frames, result.audio, videoPath);
     result.video = videoPath;
   } catch (err) {
-    const detail = err.response?.data
-      ? JSON.stringify(err.response.data).slice(0, 400)
-      : err.message;
-    logger.error(`[media_generator] Video render failed: ${content.keyword} | ${detail}`);
+    logger.error(`[media_generator] Video render failed: ${content.keyword} | ${err.message}`);
   }
 
   return result;
@@ -1141,23 +1343,18 @@ async function generateMedia(content) {
  * 처리 흐름:
  *   1. sections[] 각각 TTS 생성 (ClovaVoice → OpenAI 폴백)
  *   2. 섹션별 오디오 크기로 길이 추정 → 타임스탬프 계산
- *   3. 섹션별 캐릭터 이미지 생성 (key_point 기반, gpt-image-1 → Pexels 폴백)
- *   4. 이미지·오디오 tmpfiles.org 업로드 (병렬)
- *   5. 섹션 제목·요점 자막 PNG 렌더링 + 업로드
- *   6. Shotstack으로 롱폼 영상 렌더링 (섹션별 오디오 클립 + 이미지 전환)
+ *   3. 섹션별 이미지 생성 (Grok Aurora → gpt-image-1 → Pexels 폴백)
+ *   4. 섹션 오디오 ffmpeg로 병합
+ *   5. ffmpeg로 영상 렌더링 (로컬, 클라우드 의존 없음)
  */
 async function generateLongFormMedia(content) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-  const videoPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
-  const result = { keyword: content.keyword, video: null };
+  const videoPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
+  const result      = { keyword: content.keyword, video: null };
 
   const sections = content.long_video?.sections ?? [];
-  if (!config.openai.apiKey || sections.length === 0) {
-    logger.warn(`[media_generator] Long-form skipped (no sections or API key): "${content.keyword}"`);
-    return result;
-  }
-  if (!config.shotstack.apiKey) {
-    logger.warn('[media_generator] Long-form skipped — SHOTSTACK_API_KEY not set');
+  if (sections.length === 0) {
+    logger.warn(`[media_generator] Long-form skipped (no sections): "${content.keyword}"`);
     return result;
   }
 
@@ -1189,14 +1386,9 @@ async function generateLongFormMedia(content) {
       }
     })
   );
-  const sectionStarts = sectionDurations.reduce((acc, dur, i) => {
-    acc.push(i === 0 ? 0 : acc[i - 1] + sectionDurations[i - 1]);
-    return acc;
-  }, []);
-  const totalDuration = sectionStarts[sectionStarts.length - 1] + sectionDurations[sectionDurations.length - 1];
-  logger.info(`[media_generator] Long-form total: ${totalDuration}s, sections: ${sections.length}`);
+  logger.info(`[media_generator] Long-form total: ${sectionDurations.reduce((a, b) => a + b, 0)}s, sections: ${sections.length}`);
 
-  // ── 3. 섹션별 캐릭터 이미지 생성 ──────────────────────────────────────
+  // ── 3. 섹션별 이미지 생성 (Grok Aurora → gpt-image-1 → Pexels) ──────────
   const sectionImageUrls = [];
   for (let i = 0; i < sections.length; i++) {
     await throttle(300);
@@ -1209,23 +1401,28 @@ async function generateLongFormMedia(content) {
       `Background scene: professional environment relevant to "${keyPoint}". ` +
       `Full body visible, 9:16 portrait, vibrant illustration.`;
 
-    let imageUrl = null;
-    try {
-      const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'medium' };
-      const res = await axios.post(
-        'https://api.openai.com/v1/images/generations', body,
-        { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
-      );
-      const item = res.data.data[0];
-      if (item.url) {
-        imageUrl = item.url;
-      } else if (item.b64_json) {
-        const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_img${i}.png`);
-        await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
-        imageUrl = imgPath;
+    const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_img${i}.png`);
+    let imageUrl  = null;
+
+    if (config.grok?.apiKey) {
+      imageUrl = await generateImageGrokAurora(imagePrompt, imgPath);
+      if (imageUrl) logger.info(`[media_generator] Long-form image s${i} (Grok Aurora): ${content.keyword}`);
+    }
+    if (!imageUrl && config.openai?.apiKey) {
+      try {
+        const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'medium' };
+        const res = await axios.post(
+          'https://api.openai.com/v1/images/generations', body,
+          { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
+        );
+        const item = res.data.data[0];
+        if (item.b64_json) { await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64')); imageUrl = imgPath; }
+        else if (item.url) { imageUrl = item.url; }
+      } catch (err) {
+        logger.warn(`[media_generator] Long-form gpt-image-1 s${i} failed: ${err.message}`);
       }
-    } catch (err) {
-      logger.warn(`[media_generator] Long-form image s${i} failed: ${err.message}. Using Pexels.`);
+    }
+    if (!imageUrl) {
       const pexels = await searchPexelsImages(content.keyword, content.category, 1);
       imageUrl = pexels[0] || null;
     }
@@ -1233,120 +1430,31 @@ async function generateLongFormMedia(content) {
   }
   logger.info(`[media_generator] Long-form images: ${sectionImageUrls.filter(Boolean).length}/${sections.length}`);
 
-  // ── 4. 이미지·오디오 tmpfiles.org 업로드 (병렬) ──────────────────────
-  const FALLBACK_IMG = 'https://placehold.co/1080x1920/1a1a2e/1a1a2e.png';
-  const [hostedImageUrls, hostedAudioUrls] = await Promise.all([
-    Promise.all(sectionImageUrls.map(async (url) => {
-      if (!url) return FALLBACK_IMG;
-      if (url.startsWith('http')) return url;
-      try { return await uploadImageForShotstack(url); } catch { return FALLBACK_IMG; }
-    })),
-    Promise.all(sectionAudioPaths.map(async (p, i) => {
-      if (!p) return null;
-      try { return await uploadAudioForShotstack(p); }
-      catch (err) { logger.warn(`[media_generator] Long-form audio upload s${i}: ${err.message}`); return null; }
-    })),
-  ]);
+  // ── 4. 섹션 오디오 ffmpeg로 병합 ────────────────────────────────────────
+  const mergedAudioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_merged.mp3`);
+  const mergedAudio = await mergeAudioFiles(sectionAudioPaths, mergedAudioPath).catch((err) => {
+    logger.warn(`[media_generator] Audio merge failed: ${err.message}`);
+    return sectionAudioPaths.find(Boolean) ?? null;
+  });
 
-  // ── 5. 자막 PNG 렌더링 + 업로드 ──────────────────────────────────────
-  let textTrackClips = [];
-  try {
-    const labelPath     = path.resolve(__dirname, `../../output/media/label_long_${safeKeyword}.png`);
-    const subtitlePaths = sections.map((_, i) =>
-      path.resolve(__dirname, `../../output/media/sub_long_${safeKeyword}_${i}.png`)
-    );
-    await Promise.all([
-      renderLabelPng(content.long_video.youtube_title ?? content.keyword, labelPath),
-      ...sections.map((s, i) =>
-        renderSubtitlePng(`${s.name}  ${s.key_point ?? ''}`.slice(0, 60), subtitlePaths[i])
-      ),
-    ]);
-    const [hostedLabel, ...hostedSubs] = await Promise.all([
-      uploadImageForShotstack(labelPath),
-      ...subtitlePaths.map((p) => uploadImageForShotstack(p)),
-    ]);
-    textTrackClips.push({ asset: { type: 'image', src: hostedLabel }, start: 0, length: totalDuration, fit: 'cover' });
-    sections.forEach((_, i) => {
-      textTrackClips.push({
-        asset: { type: 'image', src: hostedSubs[i] },
-        start: sectionStarts[i], length: sectionDurations[i],
-        fit: 'cover', transition: { in: 'fade', out: 'fade' },
-      });
-    });
-    await Promise.allSettled([fs.unlink(labelPath), ...subtitlePaths.map((p) => fs.unlink(p))]);
-    logger.info(`[media_generator] Long-form text PNGs done: ${textTrackClips.length} clips`);
-  } catch (err) {
-    logger.warn(`[media_generator] Long-form text PNG failed: ${err.message}. Skipping text overlays.`);
-  }
-
-  // ── 6. Shotstack 타임라인 조립 ────────────────────────────────────────
-  const imageClips = sections.map((_, i) => ({
-    asset: { type: 'image', src: hostedImageUrls[i] },
-    start:  sectionStarts[i],
-    length: sectionDurations[i],
-    fit:    'cover',
-    effect: i % 2 === 0 ? 'zoomIn' : 'zoomOut',
-    transition: { in: 'fade', out: 'fade' },
+  // ── 5. ffmpeg 영상 렌더링 ────────────────────────────────────────────────
+  const videoTitle = content.long_video?.youtube_title ?? content.keyword;
+  const frames = sections.map((s, i) => ({
+    bgUrl:    sectionImageUrls[i] ?? null,
+    label:    videoTitle,
+    subtitle: `${s.name}  ${s.key_point ?? ''}`.slice(0, 60),
+    duration: sectionDurations[i],
   }));
-  const audioClips = hostedAudioUrls
-    .map((url, i) => url ? {
-      asset: { type: 'audio', src: url, volume: 1 },
-      start:  sectionStarts[i],
-      length: sectionDurations[i],
-    } : null)
-    .filter(Boolean);
-  const overlayClip = {
-    asset: { type: 'image', src: FALLBACK_IMG },
-    start: 0, length: totalDuration, opacity: 0.2, fit: 'cover',
-  };
 
-  const tracks = [];
-  if (textTrackClips.length) tracks.push({ clips: textTrackClips });
-  tracks.push({ clips: [overlayClip] });
-  tracks.push({ clips: imageClips });
-  if (audioClips.length)     tracks.push({ clips: audioClips });
-
-  // 롱폼도 동시 렌더 슬롯 확보를 위해 제출 전 대기
-  await throttle(5000);
-
-  const submitLongRender = () => axios.post(
-    `https://api.shotstack.io/${config.shotstack.env}/render`,
-    { timeline: { tracks }, output: { format: 'mp4', resolution: '1080', aspectRatio: '9:16', fps: 30 } },
-    { headers: { 'x-api-key': config.shotstack.apiKey, 'Content-Type': 'application/json' }, timeout: 30000 }
-  );
-
-  let renderResponse = await submitLongRender();
-  let renderId = renderResponse.data.response.id;
-  logger.info(`[media_generator] Long-form Shotstack render started: ${renderId}`);
-
-  // 롱폼은 섹션 수가 많아 렌더링이 길다 — 240회(20분) 폴링
-  const pollUrl = `https://api.shotstack.io/${config.shotstack.env}/render/${renderId}`;
-  for (let i = 0; i < 240; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const statusRes = await axios.get(pollUrl, { headers: { 'x-api-key': config.shotstack.apiKey }, timeout: 10000 });
-    const { status, url } = statusRes.data.response;
-    if (status === 'done' && url) {
-      const videoRes = await axios.get(url, { responseType: 'arraybuffer', timeout: 300000 });
-      await fs.mkdir(path.dirname(videoPath), { recursive: true });
-      await fs.writeFile(videoPath, Buffer.from(videoRes.data));
-      result.video = videoPath;
-      logger.info(`[media_generator] Long-form video saved: ${videoPath}`);
-      return result;
-    }
-    if (status === 'failed') {
-      if (i < 5) {
-        logger.warn(`[media_generator] Long-form render failed early (poll ${i}). Waiting 90s and retrying...`);
-        await new Promise((r) => setTimeout(r, 90000));
-        renderResponse = await submitLongRender();
-        renderId = renderResponse.data.response.id;
-        logger.info(`[media_generator] Long-form render retried: ${renderId}`);
-        i = 0;
-        continue;
-      }
-      throw new Error(`Shotstack long-form render failed: ${renderId}`);
-    }
+  try {
+    await renderFramesWithFfmpeg(frames, mergedAudio, videoPath);
+    result.video = videoPath;
+    logger.info(`[media_generator] Long-form video saved: ${videoPath}`);
+  } catch (err) {
+    logger.error(`[media_generator] Long-form ffmpeg render failed: ${err.message}`);
   }
-  throw new Error(`Shotstack long-form render timed out: ${renderId}`);
+
+  return result;
 }
 
 export { generateLongFormMedia };

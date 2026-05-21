@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-05-21
+
+### D-010: 영상 렌더링 엔진 교체 — Shotstack → ffmpeg-static
+- **결정**: Shotstack 클라우드 렌더링 제거, ffmpeg-static(로컬) + Sharp 합성으로 전환
+- **버린 대안**: Shotstack 유지 / Vrew + Claude Computer Use 자동화 / Grok Imagine 영상 생성
+- **근거**:
+  - Shotstack: 동시 렌더 제한으로 잦은 실패, 한국어 폰트 미지원, 86분 렌더 시간
+  - Vrew: API 없음 → Computer Use 자동화 시 월 ~₩60,000 + UI 깨짐 리스크
+  - Grok Imagine: 숏츠 1편 $3, 롱폼 $18 → 월 30편 기준 ~$560 (비현실적 비용)
+  - ffmpeg-static: 무료 로컬 바이너리, Sharp PNG 합성 후 인코딩 → 렌더 실패 없음
+- **비용**: ffmpeg 무료, Grok Aurora 이미지 ~$0.07/장 → 월 ~$22 유지
+- **관련 파일**: `src/agents/media_generator.js`, `package.json`
+
+### D-011: 이미지 생성 엔진 교체 — DALL-E/gpt-image-1 → Grok Aurora
+- **결정**: 이미지 생성 1순위를 Grok Aurora(`grok-2-image-1212`)로 변경, gpt-image-1 → 2순위 폴백
+- **버린 대안**: DALL-E 3 유지
+- **근거**: Grok Aurora가 DALL-E 3 대비 스타일 일관성 및 품질 우수. 비용 유사.
+- **환경변수**: `GROK_API_KEY` 추가 (api.x.ai에서 발급)
+- **관련 파일**: `src/agents/media_generator.js`, `src/config/index.js`, `.env.example`
+
+---
+
 ## 2026-05-20
 
 ### D-001: TTS 엔진 선택 — ClovaVoice vs ElevenLabs

@@ -87,6 +87,9 @@ export const config = {
   tistoryBlog: {
     sessionCookie: process.env.TISTORY_SESSION_COOKIE,
   },
+  grok: {
+    apiKey: process.env.GROK_API_KEY,
+  },
   gsc: {
     credentials: process.env.GOOGLE_SC_CREDENTIALS,  // JSON 키 파일 경로
   },
