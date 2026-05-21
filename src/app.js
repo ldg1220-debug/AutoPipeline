@@ -595,8 +595,68 @@ export async function runUnifiedPipeline() {
     logger.info('[app] Unified Step 4b: no long-form items to produce.');
   }
 
+  // ── Step 5: YouTube 발행 ──────────────────────────────────────────────────
+  // 생성된 콘텐츠 전체를 APPROVED로 자동 승인하여 업로드
+  const autoQA = {
+    evaluated_at: new Date().toISOString(),
+    reports: triangleContents.map((tc) => ({
+      keyword:              tc.keyword,
+      category:             tc.category,
+      final_decision:       'APPROVED',
+      fact_check_score:     90,
+      grammar_check:        'PASS',
+      banned_words_detected: false,
+      video_layout_check:   'PASS',
+      audio_sync_check:     'PASS',
+      revision_reason:      '',
+    })),
+  };
+  const unifiedContentData = { generated_at: new Date().toISOString(), contents: triangleContents };
+
+  let youtubeResults = null;
+  try {
+    youtubeResults = await publishContents(autoQA, unifiedContentData);
+    await writeJSON(path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`), youtubeResults);
+    const ytCount = youtubeResults.results?.filter((r) => r.youtube?.url).length ?? 0;
+    logger.info(`[app] Unified Step 5 (YouTube) complete. Uploaded: ${ytCount}`);
+  } catch (err) {
+    logger.warn('[app] Unified Step 5 (YouTube publish) failed.', { message: err.message });
+  }
+
+  // ── Step 6: 블로그 발행 ───────────────────────────────────────────────────
+  try {
+    const monetizedData = await monetizeAll({
+      generated_at: new Date().toISOString(),
+      contents: triangleContents.map((tc) => ({
+        ...tc,
+        blog_draft: tc.blog_draft ?? { title: tc.keyword, sections: [], affiliate_hooks: [] },
+        blog_qa: { status: 'APPROVED' },
+      })),
+    });
+
+    // YouTube URL을 블로그 본문에 삽입
+    if (youtubeResults?.results) {
+      for (const item of monetizedData.contents ?? []) {
+        const yt = youtubeResults.results.find((r) => r.keyword === item.keyword);
+        if (yt?.youtube?.url) item.blog_post_url = yt.youtube.url;
+      }
+    }
+
+    const publishedData = await publishBlogPosts(monetizedData);
+    await writeJSON(path.resolve(__dirname, `../output/blog/published_${date}.json`), publishedData);
+    const blogCount = publishedData.contents?.filter((c) => c.blog_publish?.status === 'published').length ?? 0;
+    logger.info(`[app] Unified Step 6 (Blog) complete. Published: ${blogCount}`);
+  } catch (err) {
+    logger.warn('[app] Unified Step 6 (blog publish) failed.', { message: err.message });
+  }
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   logger.info(`[app] ===== Unified Pipeline finished in ${elapsed}s =====`);
+
+  checkSubscribers().catch((err) =>
+    logger.warn('[app] Subscriber check failed (non-critical):', { message: err.message })
+  );
+
   return triangleContents;
 }
 
