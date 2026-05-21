@@ -180,7 +180,8 @@ async function buildSceneBackgrounds(keyword, scripts) {
     `2. "pose": character action/pose for the chibi cat professor (매읽남) in that scene\n\n` +
     `Rules for bg:\n` +
     `- Directly relevant to the script content (courtroom, trading floor, office, etc.)\n` +
-    `- No text, no numbers\n` +
+    `- NO text, NO numbers, NO specific prices or index values anywhere\n` +
+    `- Stock charts may show trend arrows or candlestick shapes ONLY — zero visible numerical data\n` +
     `Rules for pose (character action, not background):\n` +
     `- Act 0 mood: ${ACT_MOODS[0]} — e.g. gasping, pointing at screen in shock\n` +
     `- Act 1 mood: ${ACT_MOODS[1]} — e.g. holding document, gesturing at chart\n` +
@@ -210,9 +211,9 @@ async function buildSceneBackgrounds(keyword, scripts) {
   } catch (err) {
     logger.warn(`[media_generator] Scene background generation failed: ${err.message}. Using defaults.`);
     return {
-      hook:  { bg: 'dramatic dark room with large red falling arrow graphs on glowing screens, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
-      body:  { bg: 'bright lecture classroom with economic charts on whiteboard, warm lighting',            pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
-      close: { bg: 'cozy library with warm golden sunlight through window, stacked books',                  pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
+      hook:  { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines on screens, no numbers no text, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
+      body:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text, warm lighting',   pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
+      close: { bg: 'cozy library with warm golden sunlight through window, stacked books, no text',                                   pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
     };
   }
 }
@@ -767,8 +768,9 @@ async function generateThumbnailTitle(keyword, hook) {
           content:
             `YouTube 썸네일용 강렬한 한국어 제목을 만들어줘.\n` +
             `키워드: ${keyword}\n훅: ${(hook ?? '').slice(0, 80)}\n\n` +
-            `조건: 2줄, 한 줄 10자 이내, 숫자/감탄/질문 적극 활용, 클릭 욕구 자극\n` +
-            `예시: {"line1":"금리 또 올랐다!","line2":"내 대출 괜찮나?"}\n` +
+            `조건: 2줄, 한 줄 최대 7자(공백 포함), 숫자/감탄/질문 적극 활용, 클릭 욕구 자극\n` +
+            `7자 초과 금지 — 반드시 지킬 것\n` +
+            `예시: {"line1":"코스피 폭등!","line2":"사야 할까?"}\n` +
             `JSON만 반환: {"line1":"...","line2":"..."}`,
         }],
         response_format: { type: 'json_object' },
@@ -779,10 +781,14 @@ async function generateThumbnailTitle(keyword, hook) {
         timeout: 15000,
       }
     );
-    return JSON.parse(res.data.choices[0].message.content);
+    const result = JSON.parse(res.data.choices[0].message.content);
+    // 7자 초과 시 강제 자름
+    result.line1 = [...(result.line1 ?? '')].slice(0, 7).join('');
+    result.line2 = [...(result.line2 ?? '')].slice(0, 7).join('');
+    return result;
   } catch {
     const words = keyword.replace(/[^가-힣a-z0-9\s]/gi, '').trim().split(/\s+/);
-    return { line1: words.slice(0, 3).join(' '), line2: words.slice(3, 6).join(' ') || '지금 확인!' };
+    return { line1: words.slice(0, 2).join(' '), line2: words.slice(2, 4).join(' ') || '지금 확인!' };
   }
 }
 
@@ -824,13 +830,19 @@ async function generateThumbnailB(content, charImageUrl, outputPath) {
     </svg>`
   );
 
-  // 텍스트 레이어 SVG
+  // 텍스트 레이어 SVG (동적 폰트 크기)
+  const charWidthB = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
+  const maxTextWB  = Math.round(W * 0.55) - 52 - 40; // 그라디언트 영역 55% 활용
+  const maxCharsB  = Math.max(charWidthB(line1), charWidthB(line2 ?? ''));
+  const fontSizeB  = Math.min(96, Math.floor(maxTextWB / Math.max(maxCharsB, 1)));
+  const lineGapB   = Math.round(fontSizeB * 1.25);
+
   const textSvg = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <text x="52" y="260" font-family="${FONT}" font-size="96" font-weight="bold" fill="#FCD34D">${esc(line1)}</text>
-      ${line2 ? `<text x="52" y="376" font-family="${FONT}" font-size="96" font-weight="bold" fill="#FFFFFF">${esc(line2)}</text>` : ''}
-      <text x="52" y="510" font-family="${FONT}" font-size="32" fill="#FDA97A">📺 매일읽어주는남자</text>
-      <rect x="52" y="546" width="120" height="5" rx="3" fill="#f97316"/>
+      <text x="52" y="${H / 2 - lineGapB * 0.2}" font-family="${FONT}" font-size="${fontSizeB}" font-weight="bold" fill="#FCD34D">${esc(line1)}</text>
+      ${line2 ? `<text x="52" y="${H / 2 - lineGapB * 0.2 + lineGapB}" font-family="${FONT}" font-size="${fontSizeB}" font-weight="bold" fill="#FFFFFF">${esc(line2)}</text>` : ''}
+      <text x="52" y="${H - 88}" font-family="${FONT}" font-size="30" fill="#FDA97A">📺 매일읽어주는남자</text>
+      <rect x="52" y="${H - 54}" width="120" height="5" rx="3" fill="#f97316"/>
     </svg>`
   );
 
@@ -875,14 +887,21 @@ async function generateThumbnail(content, charImageUrl, outputPath) {
 
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
 
+  // 텍스트 너비에 맞게 폰트 크기 자동 산출 (한글 1.0, 영숫자 0.6 비례)
+  const charWidth = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
+  const maxTextW  = LEFT - 88; // 44px 좌우 여백
+  const maxChars  = Math.max(charWidth(line1), charWidth(line2 ?? ''));
+  const fontSize  = Math.min(88, Math.floor(maxTextW / Math.max(maxChars, 1)));
+  const lineGap   = Math.round(fontSize * 1.25);
+
   // SVG: 좌측 텍스트 레이어
   const textSvg = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${LEFT}" height="${H}">
       <rect width="${LEFT}" height="${H}" fill="#0a1228"/>
-      <text x="44" y="280" font-family="${FONT}" font-size="88" font-weight="bold" fill="#FFFFFF">${esc(line1)}</text>
-      ${line2 ? `<text x="44" y="390" font-family="${FONT}" font-size="88" font-weight="bold" fill="#93c5fd">${esc(line2)}</text>` : ''}
-      <text x="44" y="520" font-family="${FONT}" font-size="34" fill="#94a3b8">📺 매일읽어주는남자</text>
-      <rect x="44" y="556" width="120" height="5" rx="3" fill="#3b82f6"/>
+      <text x="44" y="${H / 2 - lineGap * 0.2}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF">${esc(line1)}</text>
+      ${line2 ? `<text x="44" y="${H / 2 - lineGap * 0.2 + lineGap}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#93c5fd">${esc(line2)}</text>` : ''}
+      <text x="44" y="${H - 88}" font-family="${FONT}" font-size="32" fill="#94a3b8">📺 매일읽어주는남자</text>
+      <rect x="44" y="${H - 54}" width="120" height="5" rx="3" fill="#3b82f6"/>
     </svg>`
   );
 
