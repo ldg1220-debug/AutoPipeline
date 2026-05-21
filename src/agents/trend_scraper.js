@@ -183,17 +183,16 @@ export async function fetchTrends() {
       }))
       .sort((a, b) => b.score - a.score);
 
-    // 상위 4개(경제·금융 위주) + health 최고점 1개 보장
-    // health가 이미 top4 안에 있으면 그냥 top5 반환
-    const top4 = sorted.slice(0, 4);
-    const hasHealth = top4.some((i) => i.category === 'health');
-    let selected;
-    if (hasHealth) {
-      selected = sorted.slice(0, 5);
-    } else {
-      const bestHealth = sorted.find((i) => i.category === 'health');
-      selected = bestHealth ? [...top4, bestHealth] : sorted.slice(0, 5);
-    }
+    // 경제·재테크 5개 + 건강 1개 = 총 6개
+    // health를 별도 슬롯으로 보장해야 YouTube 영상 제작까지 이어진다
+    const economyItems = sorted.filter((i) => i.category !== 'health').slice(0, 5);
+    const bestHealth   = sorted.find((i) => i.category === 'health');
+    const selected     = bestHealth ? [...economyItems, bestHealth] : economyItems;
+
+    logger.info(
+      `[trend_scraper] Selected ${selected.length} items: ` +
+      selected.map((i) => `${i.keyword}(${i.category})`).join(', ')
+    );
 
     return { selected_items: selected };
   } catch (err) {
