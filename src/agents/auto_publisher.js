@@ -41,20 +41,19 @@ async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
 }
 
 /**
- * 최적 공개 시간 계산 — 7:23 AM KST (다음 발생 시각, 최소 12시간 후)
- * 정각(7:00, 8:00)을 피해 :23분으로 설정 → 알림 노출 경쟁 감소
- * KST = UTC+9 → 7:23 KST = 22:23 UTC (전날)
+ * 공개 시간 계산 — 다음 날 7:15 AM KST (업로드 후 최소 12시간 후 보장)
+ * KST = UTC+9 → 7:15 KST = 22:15 UTC (전날)
  */
 function getOptimalPublishTime() {
   const KST_TARGET_HOUR = 7;
-  const KST_TARGET_MIN  = 23;
+  const KST_TARGET_MIN  = 15;
   const UTC_HOUR = ((KST_TARGET_HOUR - 9) + 24) % 24; // 22
 
   const now    = new Date();
   const target = new Date(now);
   target.setUTCHours(UTC_HOUR, KST_TARGET_MIN, 0, 0);
 
-  // 12시간 이상 남지 않았으면 하루 추가
+  // 12시간 이상 남지 않았으면 하루 추가 (항상 "다음 날 7:15" 보장)
   while (target.getTime() - now.getTime() < 12 * 60 * 60 * 1000) {
     target.setUTCDate(target.getUTCDate() + 1);
   }
@@ -184,7 +183,7 @@ async function publishToYouTube(content, accessToken) {
   }
   const videoPath = longExists ? longPath : legacyPath;
 
-  const publishAt    = getOptimalPublishTime(); // 다음 날 7:23 AM KST (24시간 비공개 후 공개)
+  const publishAt    = getOptimalPublishTime(); // 다음 날 7:15 AM KST
   const channelCfg   = getYouTubeChannelConfig(content.category);
   const seriesName   = content.series_name ?? channelCfg.seriesName ?? '매일읽어주는남자';
 
@@ -224,7 +223,7 @@ async function publishToYouTube(content, accessToken) {
     },
   };
 
-  logger.info(`[auto_publisher] Scheduled publish at: ${publishAt} (KST 7:23 AM)`);
+  logger.info(`[auto_publisher] Scheduled publish at: ${publishAt} (KST 7:15 AM)`);
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Long-form uploaded: https://youtu.be/${videoId}`);
 
