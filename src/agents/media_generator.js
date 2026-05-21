@@ -1074,23 +1074,33 @@ async function generateAudioClovaVoice(text, outputPath) {
 // ── ElevenLabs TTS ────────────────────────────────────────────────────────
 async function generateAudioElevenLabs(text, outputPath) {
   const { apiKey, voiceId } = config.elevenlabs;
-  const response = await axios.post(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      text: text.slice(0, 5000),
-      model_id: 'eleven_multilingual_v2',
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-    },
-    {
-      headers: {
-        'xi-api-key': apiKey,
-        'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
+  let response;
+  try {
+    response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        text: text.slice(0, 5000),
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
       },
-      responseType: 'arraybuffer',
-      timeout: 60000,
+      {
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        responseType: 'arraybuffer',
+        timeout: 60000,
+      }
+    );
+  } catch (err) {
+    // 에러 응답 바디를 디코딩해 실제 원인 로깅
+    if (err.response?.data) {
+      const body = Buffer.from(err.response.data).toString('utf8').slice(0, 300);
+      logger.warn(`[media_generator] ElevenLabs API error body: ${body}`);
     }
-  );
+    throw err;
+  }
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, Buffer.from(response.data));
   logger.info(`[media_generator] ElevenLabs TTS audio saved: ${outputPath}`);
