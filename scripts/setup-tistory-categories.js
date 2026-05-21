@@ -33,61 +33,77 @@ async function getExistingCategories(page, blogName) {
   });
 }
 
+async function dumpButtons(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('button, a[role="button"], [role="button"], a')]
+      .map((el) => `[${el.tagName}] class="${el.className.slice(0, 60)}" text="${(el.innerText || el.textContent || '').trim().slice(0, 40)}"`)
+      .filter((s) => s.includes('text="') && !s.includes('text=""'))
+      .slice(0, 40)
+  ).catch(() => []);
+}
+
 async function createCategory(page, blogName, categoryName) {
-  // 카테고리 관리 페이지로 이동
   await page.goto(`https://${blogName}.tistory.com/manage/category/`, {
     waitUntil: 'networkidle',
-    timeout: 20000,
+    timeout: 30000,
   });
-  await page.waitForTimeout(1000);
+  // React 렌더링 대기
+  await page.waitForTimeout(2000);
 
-  // "카테고리 추가" 버튼 클릭
+  // 현재 페이지의 버튼 목록 덤프 (디버그용)
+  const btns = await dumpButtons(page);
+  console.log('  [DEBUG] 페이지 내 버튼/링크 목록:');
+  btns.forEach((b) => console.log('   ', b));
+
+  // "추가" 버튼 — 텍스트 포함 폭넓게 시도
   const addBtns = [
     'button:has-text("카테고리 추가")',
     'button:has-text("추가")',
+    'a:has-text("카테고리 추가")',
+    'a:has-text("추가")',
+    '[role="button"]:has-text("추가")',
     '.btn_add_category',
+    '.btn-add',
     '#addCategoryBtn',
     '[data-action="add"]',
-    'a:has-text("추가")',
+    'button[class*="add"]',
+    'button[class*="Add"]',
   ];
 
   let clicked = false;
   for (const sel of addBtns) {
     try {
-      const btn = await page.$(sel);
-      if (btn && await btn.isVisible()) {
-        await btn.click();
-        clicked = true;
-        console.log(`  ✅ 추가 버튼 클릭: ${sel}`);
-        break;
-      }
+      await page.click(sel, { timeout: 2000 });
+      clicked = true;
+      console.log(`  ✅ 추가 버튼 클릭: ${sel}`);
+      break;
     } catch { /* 다음 시도 */ }
   }
 
   if (!clicked) {
-    // 스크린샷 저장 후 실패 반환
-    await page.screenshot({ path: `/tmp/category_debug_${Date.now()}.png`, fullPage: true });
-    console.warn(`  ⚠️  추가 버튼을 찾지 못했습니다. /tmp/category_debug_*.png 확인`);
+    const debugPath = `category_debug_${Date.now()}.png`;
+    await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
+    console.warn(`  ⚠️  추가 버튼을 찾지 못했습니다. 스크린샷: ${debugPath}`);
     return false;
   }
 
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(1000);
 
-  // 카테고리명 입력 인풋 찾기
+  // 입력 필드 찾기
   const inputSels = [
     'input[name="name"]',
-    '.category_input input',
     'input[placeholder*="카테고리"]',
+    'input[placeholder*="이름"]',
+    '.category_input input',
     '.layer_category_add input',
-    'input[type="text"]:visible',
+    'input[type="text"]',
   ];
 
   let input = null;
   for (const sel of inputSels) {
     try {
-      input = await page.$(sel);
-      if (input && await input.isVisible()) break;
-      input = null;
+      const el = await page.$(sel);
+      if (el && await el.isVisible()) { input = el; break; }
     } catch { /* 다음 */ }
   }
 
@@ -99,28 +115,27 @@ async function createCategory(page, blogName, categoryName) {
   await input.fill(categoryName);
   await page.waitForTimeout(300);
 
-  // 저장 버튼 클릭
+  // 저장/확인 버튼
   const saveBtns = [
     'button:has-text("확인")',
     'button:has-text("저장")',
+    'button:has-text("완료")',
     'button[type="submit"]',
     '.btn_confirm',
     '.btn_save',
+    '.btn-confirm',
   ];
 
   for (const sel of saveBtns) {
     try {
-      const btn = await page.$(sel);
-      if (btn && await btn.isVisible()) {
-        await btn.click();
-        console.log(`  ✅ 저장 버튼 클릭: ${sel}`);
-        await page.waitForTimeout(1500);
-        return true;
-      }
+      await page.click(sel, { timeout: 2000 });
+      console.log(`  ✅ 저장 버튼: ${sel}`);
+      await page.waitForTimeout(1500);
+      return true;
     } catch { /* 다음 */ }
   }
 
-  // 엔터키로 폴백
+  // 폴백: Enter
   await input.press('Enter');
   await page.waitForTimeout(1500);
   return true;
@@ -140,7 +155,7 @@ async function createCategory(page, blogName, categoryName) {
 
   console.log(`\n🗂️  티스토리 카테고리 생성 시작 — ${blogName}.tistory.com\n`);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });  // UI 확인용
   const context = await createTistoryContext(browser);
   if (!context) {
     await browser.close();
