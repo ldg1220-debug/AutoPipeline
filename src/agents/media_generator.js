@@ -64,8 +64,10 @@ async function generateImageGrokAurora(prompt, outputPath) {
     if (item.url) return item.url;
     return null;
   } catch (err) {
-    const detail = err.response?.data?.error?.message ?? err.message;
-    logger.warn(`[media_generator] Grok Aurora failed: ${detail}`);
+    const body   = err.response?.data;
+    const detail = body?.error?.message ?? body?.message ?? err.message;
+    const status = err.response?.status ?? 'no-response';
+    logger.warn(`[media_generator] Grok Aurora failed (${status}): ${detail}${body ? ' | body: ' + JSON.stringify(body).slice(0, 200) : ''}`);
     return null;
   }
 }
