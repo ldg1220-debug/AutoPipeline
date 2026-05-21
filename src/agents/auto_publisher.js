@@ -41,6 +41,27 @@ async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
 }
 
 /**
+ * 최적 공개 시간 계산 — 7:23 AM KST (다음 발생 시각, 최소 12시간 후)
+ * 정각(7:00, 8:00)을 피해 :23분으로 설정 → 알림 노출 경쟁 감소
+ * KST = UTC+9 → 7:23 KST = 22:23 UTC (전날)
+ */
+function getOptimalPublishTime() {
+  const KST_TARGET_HOUR = 7;
+  const KST_TARGET_MIN  = 23;
+  const UTC_HOUR = ((KST_TARGET_HOUR - 9) + 24) % 24; // 22
+
+  const now    = new Date();
+  const target = new Date(now);
+  target.setUTCHours(UTC_HOUR, KST_TARGET_MIN, 0, 0);
+
+  // 12시간 이상 남지 않았으면 하루 추가
+  while (target.getTime() - now.getTime() < 12 * 60 * 60 * 1000) {
+    target.setUTCDate(target.getUTCDate() + 1);
+  }
+  return target.toISOString();
+}
+
+/**
  * 단일 mp4 파일을 YouTube에 multipart 업로드하는 내부 헬퍼.
  * @param {string} videoPath  업로드할 mp4 파일 경로
  * @param {object} metadata   JSON.stringify 전 snippet+status 객체
@@ -103,6 +124,7 @@ async function publishShortsToYouTube(content, accessToken) {
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
 
+  const shortsPublishAt = getOptimalPublishTime(); // 다음 날 7:23 AM KST
   const metadata = {
     snippet: {
       title: shortsTitle,
@@ -112,8 +134,10 @@ async function publishShortsToYouTube(content, accessToken) {
       defaultLanguage: 'ko',
     },
     status: {
-      privacyStatus: 'public',   // 쇼츠는 즉시 공개 (예약 발행 비권장)
+      privacyStatus: 'private',
+      publishAt: shortsPublishAt,
       selfDeclaredMadeForKids: false,
+      containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기
     },
   };
 
@@ -160,7 +184,7 @@ async function publishToYouTube(content, accessToken) {
   }
   const videoPath = longExists ? longPath : legacyPath;
 
-  const publishAt    = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const publishAt    = getOptimalPublishTime(); // 다음 날 7:23 AM KST (24시간 비공개 후 공개)
   const channelCfg   = getYouTubeChannelConfig(content.category);
   const seriesName   = content.series_name ?? channelCfg.seriesName ?? '매일읽어주는남자';
 
@@ -196,9 +220,11 @@ async function publishToYouTube(content, accessToken) {
       privacyStatus: 'private',
       publishAt,
       selfDeclaredMadeForKids: false,
+      containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기 (페널티 없음)
     },
   };
 
+  logger.info(`[auto_publisher] Scheduled publish at: ${publishAt} (KST 7:23 AM)`);
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Long-form uploaded: https://youtu.be/${videoId}`);
 

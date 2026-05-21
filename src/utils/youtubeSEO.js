@@ -93,9 +93,13 @@ export async function generateYouTubeDescription(content, blogPostUrl = null) {
 }
 
 function assembleDescription({ hookLines, bullets, blogPostUrl, seriesName, hashtags }) {
-  const bulletStr = bullets.map((b) => `• ${b.replace(/^•\s*/, '')}`).join('\n');
-  const blogLine  = blogPostUrl ? `\n👉 블로그 자세히 보기: ${blogPostUrl}\n` : '';
-  const hashtagStr = hashtags.slice(0, 5).join(' ');
+  const bulletStr  = bullets.map((b) => `• ${b.replace(/^•\s*/, '')}`).join('\n');
+  const blogLine   = blogPostUrl ? `\n👉 블로그 자세히 보기: ${blogPostUrl}\n` : '';
+  // 해시태그 3~6개 — 3개 미만이면 채우고, 6개 초과하면 자름 (알고리즘 최적 범위)
+  const clampedHashtags = hashtags.length < 3
+    ? [...hashtags, '#경제', '#재테크', '#매일읽어주는남자'].slice(0, 6)
+    : hashtags.slice(0, 6);
+  const hashtagStr = clampedHashtags.join(' ');
 
   return [
     hookLines,
