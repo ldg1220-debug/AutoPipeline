@@ -120,10 +120,17 @@ async function publishShortsToYouTube(content, accessToken) {
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Shorts uploaded: https://youtube.com/shorts/${videoId}`);
 
-  // 썸네일 업로드
-  const thumbPath = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
+  // 쇼츠 전용 세로 썸네일 우선, 없으면 가로 썸네일 폴백
+  const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
+  const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
+  const shortsThumbExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
+  const thumbPath = shortsThumbExists ? thumbShortsPath : thumbFallback;
   let thumbnailUploaded = false;
-  try { thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken); } catch { /* 무시 */ }
+  try {
+    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
+  } catch (err) {
+    logger.warn(`[auto_publisher] Shorts thumbnail upload failed: ${err.message}`);
+  }
 
   return {
     platform:           'youtube_shorts',
