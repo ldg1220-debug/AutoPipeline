@@ -127,12 +127,12 @@ async function createCategory(page, blogName, categoryName) {
 }
 
 (async () => {
-  const blogName = config.tistoryBlog?.blogName;
+  const blogName = config.tistory?.blogName;
   if (!blogName) {
     console.error('❌ .env에 TISTORY_BLOG_NAME이 필요합니다.');
     process.exit(1);
   }
-  if (!config.tistoryBlog?.sessionCookie) {
+  if (!config.tistoryBlog?.sessionCookie && !config.tistory?.sessionCookie) {
     console.error('❌ .env에 TISTORY_SESSION_COOKIE가 필요합니다.');
     console.error('   npm run blog:login 으로 먼저 로그인하세요.');
     process.exit(1);
