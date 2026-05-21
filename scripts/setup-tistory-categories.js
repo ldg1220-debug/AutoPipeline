@@ -33,42 +33,6 @@ async function getExistingCategories(page, blogName) {
   });
 }
 
-/** 페이지 또는 iframe frame에서 작동하는 클릭 헬퍼 */
-async function tryClick(frame, selectors, timeout = 2000) {
-  for (const sel of selectors) {
-    try {
-      await frame.click(sel, { timeout });
-      return sel;
-    } catch { /* 다음 */ }
-  }
-  return null;
-}
-
-/** iframe 내용 포함 전체 버튼 덤프 */
-async function dumpAllButtons(page) {
-  const results = [];
-
-  const dump = async (frame, label) => {
-    try {
-      const items = await frame.evaluate(() =>
-        [...document.querySelectorAll('button, a, input[type="button"], [role="button"]')]
-          .map((el) => `[${el.tagName}] class="${(el.className||'').slice(0,50)}" text="${(el.innerText||el.value||'').trim().slice(0,40)}"`)
-          .filter((s) => !s.includes('text=""'))
-          .slice(0, 30)
-      );
-      items.forEach((i) => results.push(`  ${label}: ${i}`));
-    } catch { /* 무시 */ }
-  };
-
-  await dump(page, 'main');
-  for (const frame of page.frames()) {
-    if (frame === page.mainFrame()) continue;
-    const url = frame.url();
-    await dump(frame, `iframe[${url.slice(0, 60)}]`);
-  }
-  return results;
-}
-
 async function createCategory(page, blogName, categoryName) {
   await page.goto(`https://${blogName}.tistory.com/manage/category/`, {
     waitUntil: 'networkidle',
@@ -76,61 +40,72 @@ async function createCategory(page, blogName, categoryName) {
   });
   await page.waitForTimeout(3000);
 
-  // iframe 목록 출력
-  const frames = page.frames();
-  console.log(`  [DEBUG] frames: ${frames.length}개`);
-  frames.forEach((f, i) => console.log(`    frame[${i}]: ${f.url().slice(0, 80)}`));
+  // 콘텐츠 영역 전체 덤프 (슬라이스 없이, 네비게이션 제외)
+  const allEls = await page.evaluate(() =>
+    [...document.querySelectorAll('button, a, input[type="button"], [role="button"]')]
+      .filter((el) => {
+        // 네비게이션/헤더 클래스는 제외
+        const cls = el.className || '';
+        return !['link_gnb','link_menu','tit_menu','link_logo','btn_search',
+                 'link_profile','link_write','link_alarm','btn_logout'].some((c) => cls.includes(c));
+      })
+      .map((el) => `[${el.tagName}] class="${(el.className||'').slice(0,80)}" text="${(el.innerText||el.value||'').trim().slice(0,50)}"`)
+  ).catch(() => []);
 
-  // 버튼 덤프 (main + all iframes)
-  const btns = await dumpAllButtons(page);
-  console.log('  [DEBUG] 버튼 목록 (iframe 포함):');
-  btns.forEach((b) => console.log(b));
+  console.log(`  [DEBUG] 콘텐츠 영역 요소 (${allEls.length}개):`);
+  allEls.forEach((e) => console.log('   ', e));
 
-  // 작업 대상 frame 결정: 카테고리 관련 frame 우선, 없으면 main
-  let workFrame = page.mainFrame();
-  for (const frame of frames) {
-    const url = frame.url();
-    if (url.includes('category') || url.includes('manage')) {
-      try {
-        const hasCatContent = await frame.$('.category_list, .wrap_category, #categoryList, [class*="category"]');
-        if (hasCatContent) { workFrame = frame; break; }
-      } catch { /* 다음 */ }
-    }
-  }
-  // iframe이 있으면 첫 번째 content iframe 시도
-  if (workFrame === page.mainFrame() && frames.length > 1) {
-    workFrame = frames[1];
-  }
-  console.log(`  [DEBUG] 작업 frame: ${workFrame.url().slice(0, 80)}`);
-
-  // "추가" 버튼 클릭
-  const addSel = await tryClick(workFrame, [
-    'button:has-text("카테고리 추가")',
-    'button:has-text("추가")',
+  // Tistory 카테고리 관리 페이지 고유 셀렉터 패턴
+  const addBtns = [
+    // 텍스트 기반
     'a:has-text("카테고리 추가")',
     'a:has-text("추가")',
-    '[role="button"]:has-text("추가")',
-    '.btn_add_category',
-    '.btnAdd',
-    '#addCategoryBtn',
-    'button[class*="add"]',
-    'button[class*="Add"]',
-  ]);
+    'button:has-text("카테고리 추가")',
+    'button:has-text("추가")',
+    // Tistory 관리 페이지 class 패턴
+    'a.btn_add',
+    'button.btn_add',
+    '.btn_add',
+    'a.btn_category_add',
+    '.category_add',
+    '#category_add',
+    'a[onclick*="add"]',
+    'a[href*="add"]',
+    // 콘텐츠 영역 내 모든 버튼형 요소
+    '.wrap_category_manage a',
+    '.category_wrap a',
+    '#content a.btn',
+    '.cont_admin a.btn',
+  ];
 
-  if (!addSel) {
+  let clicked = false;
+  for (const sel of addBtns) {
+    try {
+      await page.click(sel, { timeout: 2000 });
+      clicked = true;
+      console.log(`  ✅ 추가 버튼: ${sel}`);
+      break;
+    } catch { /* 다음 */ }
+  }
+
+  if (!clicked) {
     const debugPath = `category_debug_${Date.now()}.png`;
     await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
     console.warn(`  ⚠️  추가 버튼을 찾지 못했습니다. 스크린샷: ${debugPath}`);
     return false;
   }
-  console.log(`  ✅ 추가 버튼: ${addSel}`);
+
   await page.waitForTimeout(1000);
 
   // 입력 필드
   let input = null;
-  for (const sel of ['input[name="name"]', 'input[placeholder*="카테고리"]', 'input[placeholder*="이름"]', '.category_input input', 'input[type="text"]']) {
+  for (const sel of [
+    'input[name="name"]', 'input[name="categoryName"]',
+    'input[placeholder*="카테고리"]', 'input[placeholder*="이름"]',
+    '.category_input input', '#categoryName', 'input[type="text"]',
+  ]) {
     try {
-      const el = await workFrame.$(sel);
+      const el = await page.$(sel);
       if (el && await el.isVisible()) { input = el; break; }
     } catch { /* 다음 */ }
   }
@@ -142,16 +117,22 @@ async function createCategory(page, blogName, categoryName) {
   await input.fill(categoryName);
   await page.waitForTimeout(300);
 
-  const saveSel = await tryClick(workFrame, [
-    'button:has-text("확인")',
-    'button:has-text("저장")',
-    'button:has-text("완료")',
-    'button[type="submit"]',
-    '.btn_confirm', '.btn_save', '.btnConfirm',
-  ]);
-  if (saveSel) {
-    console.log(`  ✅ 저장 버튼: ${saveSel}`);
-  } else {
+  // 저장
+  const saveBtns = [
+    'button:has-text("확인")', 'button:has-text("저장")', 'button:has-text("완료")',
+    'a:has-text("확인")', 'a:has-text("저장")',
+    'button[type="submit"]', '.btn_confirm', '.btn_save',
+  ];
+  let saved = false;
+  for (const sel of saveBtns) {
+    try {
+      await page.click(sel, { timeout: 2000 });
+      console.log(`  ✅ 저장 버튼: ${sel}`);
+      saved = true;
+      break;
+    } catch { /* 다음 */ }
+  }
+  if (!saved) {
     await input.press('Enter');
     console.log('  ✅ Enter로 저장');
   }
