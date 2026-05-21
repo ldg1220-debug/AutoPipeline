@@ -32,6 +32,7 @@
     "blog:analytics": "node src/agents/blog_analytics.js",
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:login": "node scripts/tistory-login.js",
+    "blog:setup-categories": "node scripts/setup-tistory-categories.js",
     "thumbnail:swap": "node scripts/swap-thumbnails.js",
     "thumbnail:swap:dry": "cross-env DRY_RUN=true node scripts/swap-thumbnails.js",
     "competitor:analyze": "node src/agents/competitor_analyzer.js",

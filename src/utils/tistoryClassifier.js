@@ -132,13 +132,14 @@ export async function matchBestCategory(categories, keyword, internalCategory) {
   if (categories.length === 1) return { id: categories[0].id, name: categories[0].name };
 
   // 카테고리명 직접 매핑 (API 비용 절감)
+  // setup-tistory-categories.js 로 생성하는 카테고리명과 일치시킨다
   const QUICK_MAP = {
-    economy:       ['경제', '경제·금융', '재테크', '금융'],
-    finance:       ['재테크', '금융', '투자', '경제'],
-    realestate:    ['부동산', '주거', '아파트'],
-    health:        ['건강', '의료', '라이프'],
-    entertainment: ['연예', '문화', '방송', '미디어'],
-    social:        ['사회', '이슈', '생활'],
+    economy:       ['경제·금융', '경제', '재테크', '금융'],
+    finance:       ['경제·금융', '재테크', '금융', '투자'],
+    realestate:    ['부동산'],
+    health:        ['건강'],
+    entertainment: ['연예·사회', '연예', '문화', '방송'],
+    social:        ['연예·사회', '사회', '이슈', '생활'],
   };
 
   const preferredNames = QUICK_MAP[internalCategory] ?? [];
