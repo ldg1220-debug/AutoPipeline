@@ -34,14 +34,22 @@ export async function createTistoryContext(browser) {
     return null;
   }
 
-  logger.info(`[playwright_session] Loading ${cookies.length} cookies (domains: ${[...new Set(cookies.map((c) => c.domain))].join(', ')})`);
+  // Normalize tistory.com → .tistory.com so cookies apply to all subdomains
+  const normalizedCookies = cookies.map((c) => ({
+    ...c,
+    domain: c.domain.includes('tistory.com') && !c.domain.startsWith('.')
+      ? '.tistory.com'
+      : c.domain,
+  }));
+
+  logger.info(`[playwright_session] Loading ${normalizedCookies.length} cookies (domains: ${[...new Set(normalizedCookies.map((c) => c.domain))].join(', ')})`);
 
   const context = await browser.newContext({
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   });
-  await context.addCookies(cookies);
+  await context.addCookies(normalizedCookies);
   return context;
 }
 
