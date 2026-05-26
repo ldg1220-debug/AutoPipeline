@@ -404,18 +404,28 @@ export async function uploadYouTubeThumbnail(videoId, thumbnailPath, accessToken
     return false;
   }
 
-  await axios.post(
-    `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`,
-    imageData,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'image/jpeg',
-        'Content-Length': imageData.length,
-      },
-      timeout: 60000,
+  try {
+    await axios.post(
+      `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`,
+      imageData,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'image/jpeg',
+          'Content-Length': imageData.length,
+        },
+        timeout: 60000,
+      }
+    );
+  } catch (err) {
+    const status = err.response?.status;
+    if (status === 403) {
+      // 채널 미인증 또는 구독자 1000명 미만이면 custom thumbnail 권한 없음
+      logger.warn(`[auto_publisher] 썸네일 업로드 불가 (403): 채널에 맞춤 썸네일 권한 없음 (구독자 1000명 이상 또는 채널 인증 필요). videoId=${videoId}`);
+      return false;
     }
-  );
+    throw err;
+  }
   logger.info(`[auto_publisher] Thumbnail uploaded for video: ${videoId}`);
   return true;
 }
@@ -487,6 +497,9 @@ export async function publishContents(qaData, contentData) {
       logger.error(`[auto_publisher] Long-form upload failed: ${content.keyword}`, { message: err.message });
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
+
+    // 롱폼 직후 바로 쇼츠 올리면 429 발생 — 10초 간격
+    await new Promise((r) => setTimeout(r, 10000));
 
     // 쇼츠 업로드
     try {
