@@ -1530,7 +1530,27 @@ async function generateLongFormMedia(content) {
       }
     })
   );
-  logger.info(`[media_generator] Long-form total: ${sectionDurations.reduce((a, b) => a + b, 0)}s, sections: ${sections.length}`);
+  const totalSecs = sectionDurations.reduce((a, b) => a + b, 0);
+  logger.info(`[media_generator] Long-form total: ${totalSecs}s, sections: ${sections.length}`);
+
+  // ── SRT 자막 생성 (섹션 타이밍 기반) ────────────────────────────────────
+  const srtPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.srt`);
+  try {
+    let cumSecs = 0;
+    const srtBlocks = sections.map((s, i) => {
+      const startStr = formatSRTTime(cumSecs);
+      cumSecs += sectionDurations[i];
+      const endStr   = formatSRTTime(cumSecs);
+      const line1 = s.name ?? `섹션 ${i + 1}`;
+      const line2 = s.key_point ? s.key_point.slice(0, 60) : '';
+      return `${i + 1}\n${startStr} --> ${endStr}\n${line1}${line2 ? '\n' + line2 : ''}`;
+    });
+    await fs.writeFile(srtPath, srtBlocks.join('\n\n') + '\n', 'utf8');
+    result.srt = srtPath;
+    logger.info(`[media_generator] Long-form SRT saved: ${srtPath} (${sections.length}개 섹션)`);
+  } catch (srtErr) {
+    logger.warn(`[media_generator] Long-form SRT generation failed: ${srtErr.message}`);
+  }
 
   // ── 3. 섹션별 이미지 생성 (Grok Aurora → gpt-image-1 → Pexels) ──────────
   const sectionImageUrls = [];

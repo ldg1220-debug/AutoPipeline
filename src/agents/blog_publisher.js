@@ -645,7 +645,16 @@ export async function publishBlogPosts(contentData) {
   }
 
   const updated = [];
+  let sessionExpired = false;
+
   for (const content of contents) {
+    // 로그인 세션 만료 감지 — 남은 포스트 전부 스킵
+    if (sessionExpired) {
+      logger.warn(`[blog_publisher] Session expired — skipping: ${content.keyword}`);
+      updated.push({ ...content, blog_publish: { status: 'skipped_session_expired' } });
+      continue;
+    }
+
     // 블로그 QA REJECTED 포스트 스킵
     if (content.blog_qa?.status === 'REJECTED') {
       logger.warn(`[blog_publisher] Blog QA REJECTED, skipping: ${content.keyword} | ${(content.blog_qa.issues ?? []).join(' / ')}`);
@@ -681,6 +690,12 @@ export async function publishBlogPosts(contentData) {
     } catch (err) {
       logger.error(`[blog_publisher] Failed: ${content.keyword}`, { message: err.message });
       updated.push({ ...content, blog_publish: { status: 'failed', error: err.message } });
+      // 로그인 리다이렉트 감지 — 남은 포스트 전부 건너뜀
+      const currentUrl = page.url();
+      if (currentUrl.includes('auth/login') || currentUrl.includes('tistory.com/auth')) {
+        sessionExpired = true;
+        logger.error('[blog_publisher] Login redirect detected — skipping remaining posts. Run: npm run blog:login');
+      }
     }
 
     // 발행 간격 분산 (마지막 아이템은 딜레이 불필요)

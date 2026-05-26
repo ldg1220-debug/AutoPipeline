@@ -148,7 +148,18 @@ export async function fetchTrends() {
 
     // 모든 RSS 소스 병렬 수집
     const results = await Promise.all(RSS_SOURCES.map(fetchRSS));
-    const allItems = results.flat();
+    const rawItems = results.flat();
+
+    // 품질 사전 필터: 기관명 단독 검색어, 짧은 검색어 제거
+    // Google Trends는 뉴스 헤드라인이 아닌 검색어를 반환하므로 짧은 항목이 많음
+    const allItems = rawItems.filter((item) => {
+      const t = item.title.trim();
+      if (t.length < 12) {
+        logger.info(`[trend_scraper] Pre-filter (too short): "${t}"`);
+        return false;
+      }
+      return true;
+    });
 
     if (allItems.length === 0) {
       logger.warn('[trend_scraper] All RSS sources returned empty. Falling back to mock data.');
