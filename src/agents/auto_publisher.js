@@ -462,6 +462,7 @@ export async function publishContents(qaData, contentData) {
   );
 
   const results = [];
+  let youtubeQuotaExhausted = false;
 
   for (const report of approvedReports) {
     const content = contentMap[report.keyword];
@@ -483,6 +484,18 @@ export async function publishContents(qaData, contentData) {
     }
 
     const result = { keyword: content.keyword, dry_run: false };
+
+    // YouTube 일일 쿼터 소진 시 남은 항목 건너뜀
+    if (youtubeQuotaExhausted) {
+      logger.warn(`[auto_publisher] YouTube quota exhausted — skipping: ${content.keyword}`);
+      results.push({
+        keyword: content.keyword,
+        dry_run: false,
+        youtube:        { platform: 'youtube',        status: 'skipped_quota_exhausted' },
+        youtube_shorts: { platform: 'youtube_shorts', status: 'skipped_quota_exhausted' },
+      });
+      continue;
+    }
 
     // YouTube 채널 인증 (롱폼 + 쇼츠 공통)
     let accessToken = null;
@@ -508,6 +521,16 @@ export async function publishContents(qaData, contentData) {
     } catch (err) {
       logger.error(`[auto_publisher] Long-form upload failed: ${content.keyword}`, { message: err.message });
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
+      if (err.response?.status === 429) {
+        youtubeQuotaExhausted = true;
+        logger.warn('[auto_publisher] YouTube 429 — 일일 쿼터 소진. 이 세션의 남은 YouTube 업로드를 건너뜁니다.');
+      }
+    }
+
+    if (youtubeQuotaExhausted) {
+      result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped_quota_exhausted' };
+      results.push(result);
+      continue;
     }
 
     // 롱폼 직후 바로 쇼츠 올리면 429 발생 — 10초 간격
@@ -520,6 +543,10 @@ export async function publishContents(qaData, contentData) {
     } catch (err) {
       logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
       result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
+      if (err.response?.status === 429) {
+        youtubeQuotaExhausted = true;
+        logger.warn('[auto_publisher] YouTube Shorts 429 — 일일 쿼터 소진. 이 세션의 남은 YouTube 업로드를 건너뜁니다.');
+      }
     }
 
     results.push(result);
