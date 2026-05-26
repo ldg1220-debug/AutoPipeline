@@ -77,19 +77,31 @@ async function uploadVideoFile(videoPath, metadata, accessToken) {
     videoBuffer,
     Buffer.from(`\r\n--${boundary}--`),
   ]);
-  const response = await axios.post(
-    'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status',
-    body,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-        'Content-Length': body.length,
-      },
-      timeout: 120000,
+  // 429(레이트리밋) 시 30초 대기 후 1회 재시도
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await axios.post(
+        'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status',
+        body,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+            'Content-Length': body.length,
+          },
+          timeout: 120000,
+        }
+      );
+      return response.data.id;
+    } catch (err) {
+      if (err.response?.status === 429 && attempt === 1) {
+        logger.warn(`[auto_publisher] YouTube upload 429 — waiting 30s before retry`);
+        await new Promise((r) => setTimeout(r, 30000));
+        continue;
+      }
+      throw err;
     }
-  );
-  return response.data.id;
+  }
 }
 
 /**

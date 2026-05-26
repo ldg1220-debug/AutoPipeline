@@ -29,6 +29,13 @@ export async function createTistoryContext(browser) {
     return null;
   }
 
+  if (!Array.isArray(cookies) || cookies.length === 0) {
+    logger.warn('[playwright_session] TISTORY_SESSION_COOKIE parsed but empty.');
+    return null;
+  }
+
+  logger.info(`[playwright_session] Loading ${cookies.length} cookies (domains: ${[...new Set(cookies.map((c) => c.domain))].join(', ')})`);
+
   const context = await browser.newContext({
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -39,14 +46,22 @@ export async function createTistoryContext(browser) {
 }
 
 /**
- * 현재 컨텍스트가 로그인 상태인지 확인한다.
+ * 실제 블로그 관리 페이지로 이동해 로그인 상태를 확인한다.
+ * www.tistory.com 메인은 미인증 상태에서도 정상 렌더링되어 신뢰할 수 없음.
  */
-export async function isLoggedIn(page) {
+export async function isLoggedIn(page, blogName) {
+  const blog = blogName ?? config.tistory?.blogName;
+  if (!blog) {
+    logger.warn('[playwright_session] blogName not provided to isLoggedIn — skipping check');
+    return true;
+  }
   try {
-    await page.goto('https://www.tistory.com', { timeout: 10000 });
-    // 로그인된 상태면 로그인 버튼이 없음
-    const loginBtn = await page.$('a[href*="login"]');
-    return !loginBtn;
+    const manageUrl = `https://${blog}.tistory.com/manage`;
+    await page.goto(manageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    const finalUrl = page.url();
+    const loggedIn = !finalUrl.includes('auth/login') && !finalUrl.includes('tistory.com/auth');
+    logger.info(`[playwright_session] Login check → ${finalUrl} → ${loggedIn ? 'OK' : 'EXPIRED'}`);
+    return loggedIn;
   } catch {
     return false;
   }

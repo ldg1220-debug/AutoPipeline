@@ -636,11 +636,11 @@ export async function publishBlogPosts(contentData) {
 
   const page = await context.newPage();
 
-  // 로그인 상태 확인
-  const loggedIn = await isLoggedIn(page);
+  // 로그인 상태 확인 (실제 manage URL로 검증 — 메인 페이지는 false positive 줌)
+  const loggedIn = await isLoggedIn(page, blogName);
   if (!loggedIn) {
     await browser.close();
-    logger.error('[blog_publisher] Session expired. Run npm run blog:login.');
+    logger.error('[blog_publisher] Session expired. Run: npm run blog:login');
     return { ...contentData, contents };
   }
 
