@@ -155,6 +155,46 @@ async function pass3Faq(keyword, faqItem, targetReader) {
   return callGPT4o(prompt, false);
 }
 
+// ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
+async function pass4FactCheck(keyword, sections) {
+  const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
+
+  const prompt = `아래 블로그 본문에서 허구이거나 검증되지 않은 인용을 찾아 수정하세요.
+
+【검토 대상】
+1. 특정 책 제목 (따옴표로 감싼 것)
+2. 저자 이름 직접 언급
+3. 특정 기사·논문·보고서 제목
+4. 출처 불명의 구체적 통계 수치 (예: "2024년 조사에 따르면 87%")
+
+【수정 규칙】
+- 위 항목 발견 시 → 일반적 표현으로 교체
+  예) "『부의 추월차선』에서는" → "여러 재테크 전문 서적에서는"
+  예) "홍길동 저자는" → "투자 전문가들은"
+  예) "2023년 금융연구원 보고서에 따르면 73%" → "금융 전문가들에 따르면"
+- 수정 없이 괜찮은 섹션은 원문 그대로 반환
+- 내용의 의미와 흐름은 유지
+
+키워드: ${keyword}
+
+본문:
+${fullText}
+
+응답 형식 (JSON):
+{ "sections": [{ "heading": "...", "body": "수정된 본문 또는 원문" }] }`;
+
+  try {
+    await throttle(2000);
+    const result = await callGPT4oMini(prompt);
+    if (Array.isArray(result?.sections) && result.sections.length === sections.length) {
+      return result.sections;
+    }
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] Pass 4 fact-check failed (${err.message}), using original`);
+  }
+  return sections;
+}
+
 // JSON-LD Article 스키마 생성
 function buildJsonLd(title, keyword, slug) {
   return {
@@ -283,7 +323,11 @@ async function enhanceBlogDraft(content) {
     faqSections.push({ q: faqItem.q, a: answer });
   }
 
-  const wordCount = completedSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등)
+  logger.info(`[blog_content_enhancer] Pass 4 (fact-check): ${keyword}`);
+  const checkedSections = await pass4FactCheck(keyword, completedSections);
+
+  const wordCount = checkedSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);
 
   return {
@@ -294,7 +338,7 @@ async function enhanceBlogDraft(content) {
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
       seo_keywords:     blog_draft?.seo_keywords ?? [keyword],
-      sections:         completedSections,
+      sections:         checkedSections,
       faq:              faqSections,
       affiliate_hooks:  buildAffiliateHooks(completedSections, intent.affiliate_category),
       json_ld:          buildJsonLd(outline.title || keyword, keyword, outline.slug || ''),
