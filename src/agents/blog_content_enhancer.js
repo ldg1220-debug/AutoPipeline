@@ -238,7 +238,16 @@ async function enhanceBlogDraft(content) {
     // 인사이트 없으면 스킵
   }
 
-  const combinedCtx = benchmarkCtx + competitorCtx;
+  // 실생활 영향 분석 프레이밍 — 뉴스가 독자의 돈·생활에 미치는 영향 + 행동 지침 강제
+  const lifeImpactCtx =
+    `\n[실생활 영향 분석 필수 적용]\n` +
+    `- 이 이슈가 독자의 월급·대출·소비·재테크에 미치는 구체적 영향 명시\n` +
+    `- "지금 당장 내가 할 수 있는 행동 3가지" 섹션 또는 목록 포함\n` +
+    `- "나에게 왜 중요한가?" 관점을 본문 전반에 유지\n` +
+    `- 수치는 반드시 기준 명시 (예: "1억 원 대출 기준", "서울 평균 기준")\n` +
+    `- 추상적 전망 금지 — 독자가 실제로 느낄 수 있는 금액·시간·절차로 환산`;
+
+  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx;
 
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
   const intent = await pass1Intent(keyword, category, combinedCtx);

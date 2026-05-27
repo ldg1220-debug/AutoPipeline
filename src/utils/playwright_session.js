@@ -2,74 +2,76 @@
  * 티스토리 Playwright 세션 관리
  *
  * 티스토리 공식 API가 2024년 종료되어 브라우저 자동화로 대체한다.
- * 최초 1회 수동 로그인 후 쿠키를 .env에 저장하면 이후 자동화에 재사용한다.
+ * npm run blog:login 실행 후 data/tistory_session.json 에 쿠키가 자동 저장된다.
+ * 파일이 없으면 .env의 TISTORY_SESSION_COOKIE 값을 폴백으로 사용한다.
  *
- * 세션 만료 시: npm run blog:login 실행 → 브라우저 열림 → 로그인 → 쿠키 자동 저장
+ * 세션 만료 시: npm run blog:login 실행 → 브라우저 열림 → 로그인 → 자동 저장
  */
 import { chromium } from 'playwright';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from '../config/index.js';
 import logger from './logger.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SESSION_PATH = path.resolve(__dirname, '../../data/tistory_session.json');
+
+async function loadCookies() {
+  // 1순위: 파일
+  try {
+    const raw = await fs.readFile(SESSION_PATH, 'utf-8');
+    const cookies = JSON.parse(raw);
+    if (Array.isArray(cookies) && cookies.length > 0) return cookies;
+  } catch {
+    // 파일 없음 → 폴백으로 진행
+  }
+
+  // 2순위: .env TISTORY_SESSION_COOKIE (구형 호환)
+  const cookieJson = config.tistoryBlog?.sessionCookie;
+  if (cookieJson) {
+    try {
+      const cookies = JSON.parse(cookieJson);
+      if (Array.isArray(cookies) && cookies.length > 0) {
+        logger.warn('[playwright_session] data/tistory_session.json 없음. .env 쿠키 사용 중 — npm run blog:login 권장');
+        return cookies;
+      }
+    } catch {
+      logger.warn('[playwright_session] TISTORY_SESSION_COOKIE가 유효한 JSON이 아님.');
+    }
+  }
+
+  return null;
+}
 
 /**
  * 저장된 쿠키로 Playwright 컨텍스트를 생성한다.
  * 쿠키가 없거나 만료됐으면 null 반환 → 호출부에서 재로그인 유도.
  */
 export async function createTistoryContext(browser) {
-  const cookieJson = config.tistoryBlog?.sessionCookie;
-  if (!cookieJson) {
-    logger.warn('[playwright_session] TISTORY_SESSION_COOKIE not set.');
+  const cookies = await loadCookies();
+  if (!cookies) {
+    logger.warn('[playwright_session] 세션 쿠키 없음. npm run blog:login 을 실행하세요.');
     return null;
   }
-
-  let cookies;
-  try {
-    cookies = JSON.parse(cookieJson);
-  } catch {
-    logger.warn('[playwright_session] TISTORY_SESSION_COOKIE is not valid JSON.');
-    return null;
-  }
-
-  if (!Array.isArray(cookies) || cookies.length === 0) {
-    logger.warn('[playwright_session] TISTORY_SESSION_COOKIE parsed but empty.');
-    return null;
-  }
-
-  // Normalize tistory.com → .tistory.com so cookies apply to all subdomains
-  const normalizedCookies = cookies.map((c) => ({
-    ...c,
-    domain: c.domain.includes('tistory.com') && !c.domain.startsWith('.')
-      ? '.tistory.com'
-      : c.domain,
-  }));
-
-  logger.info(`[playwright_session] Loading ${normalizedCookies.length} cookies (domains: ${[...new Set(normalizedCookies.map((c) => c.domain))].join(', ')})`);
 
   const context = await browser.newContext({
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   });
-  await context.addCookies(normalizedCookies);
+  await context.addCookies(cookies);
   return context;
 }
 
 /**
- * 실제 블로그 관리 페이지로 이동해 로그인 상태를 확인한다.
- * www.tistory.com 메인은 미인증 상태에서도 정상 렌더링되어 신뢰할 수 없음.
+ * 현재 컨텍스트가 로그인 상태인지 확인한다.
  */
-export async function isLoggedIn(page, blogName) {
-  const blog = blogName ?? config.tistory?.blogName;
-  if (!blog) {
-    logger.warn('[playwright_session] blogName not provided to isLoggedIn — skipping check');
-    return true;
-  }
+export async function isLoggedIn(page) {
   try {
-    const manageUrl = `https://${blog}.tistory.com/manage`;
-    await page.goto(manageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const finalUrl = page.url();
-    const loggedIn = !finalUrl.includes('auth/login') && !finalUrl.includes('tistory.com/auth');
-    logger.info(`[playwright_session] Login check → ${finalUrl} → ${loggedIn ? 'OK' : 'EXPIRED'}`);
-    return loggedIn;
+    await page.goto('https://www.tistory.com', { timeout: 10000 });
+    const loginBtn = await page.$('a[href*="login"]');
+    return !loginBtn;
   } catch {
     return false;
   }

@@ -6,10 +6,16 @@
  * 브라우저가 열리면:
  *   1. 카카오 계정으로 로그인
  *   2. 로그인 완료 후 엔터 입력
- *   → 쿠키가 콘솔에 출력됨 → .env의 TISTORY_SESSION_COOKIE에 붙여넣기
+ *   → 쿠키가 data/tistory_session.json 에 자동 저장됨 (.env 수정 불필요)
  */
 import { chromium } from 'playwright';
 import readline from 'readline';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SESSION_PATH = path.resolve(__dirname, '../data/tistory_session.json');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise((res) => rl.question(q, res));
@@ -34,7 +40,9 @@ const ask = (q) => new Promise((res) => rl.question(q, res));
   await browser.close();
   rl.close();
 
-  console.log('\n── 아래를 .env의 TISTORY_SESSION_COOKIE에 붙여넣으세요 ──\n');
-  console.log(`TISTORY_SESSION_COOKIE='${JSON.stringify(tistoryCookies)}'`);
-  console.log('\n── 복사 완료 후 서버를 재시작하세요 ──\n');
+  await fs.mkdir(path.dirname(SESSION_PATH), { recursive: true });
+  await fs.writeFile(SESSION_PATH, JSON.stringify(tistoryCookies, null, 2), 'utf-8');
+
+  console.log(`\n✅ 세션 저장 완료: ${SESSION_PATH}`);
+  console.log('이후 파이프라인이 자동으로 이 파일을 사용합니다. .env 수정 불필요.\n');
 })();

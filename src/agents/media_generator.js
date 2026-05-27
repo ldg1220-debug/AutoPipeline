@@ -61,7 +61,13 @@ async function generateImageGrokAurora(prompt, outputPath) {
       await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
       return outputPath;
     }
-    if (item.url) return item.url;
+    if (item.url) {
+      // xAI CDN URL은 수분 내 만료 → 즉시 다운로드해서 로컬 저장
+      const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+      await fs.writeFile(outputPath, Buffer.from(imgRes.data));
+      return outputPath;
+    }
     return null;
   } catch (err) {
     const body   = err.response?.data;
@@ -278,7 +284,11 @@ async function generateSceneImages(keyword, scripts, category) {
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         } else if (item.url) {
-          imageUrl = item.url;
+          // OpenAI 임시 URL도 만료 가능 → 즉시 다운로드
+          const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+          await fs.mkdir(path.dirname(imgPath), { recursive: true });
+          await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+          imageUrl = imgPath;
         }
         if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, gpt-image-1): ${keyword}`);
       } catch (err) {
@@ -1071,42 +1081,6 @@ async function generateAudioClovaVoice(text, outputPath) {
   return outputPath;
 }
 
-// ── ElevenLabs TTS ────────────────────────────────────────────────────────
-async function generateAudioElevenLabs(text, outputPath) {
-  const { apiKey, voiceId } = config.elevenlabs;
-  let response;
-  try {
-    response = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-      {
-        text: text.slice(0, 5000),
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-      },
-      {
-        headers: {
-          'xi-api-key': apiKey,
-          'Content-Type': 'application/json',
-          Accept: 'audio/mpeg',
-        },
-        responseType: 'arraybuffer',
-        timeout: 60000,
-      }
-    );
-  } catch (err) {
-    // 에러 응답 바디를 디코딩해 실제 원인 로깅
-    if (err.response?.data) {
-      const body = Buffer.from(err.response.data).toString('utf8').slice(0, 300);
-      logger.warn(`[media_generator] ElevenLabs API error body: ${body}`);
-    }
-    throw err;
-  }
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, Buffer.from(response.data));
-  logger.info(`[media_generator] ElevenLabs TTS audio saved: ${outputPath}`);
-  return outputPath;
-}
-
 // ── OpenAI TTS 폴백 ────────────────────────────────────────────────────────
 async function generateAudioOpenAI(text, outputPath) {
   // 기본값 onyx(남성 저음) — 매일읽어주는남자 채널 톤에 적합
@@ -1158,7 +1132,42 @@ function normalizeScriptForTTS(text) {
   return result;
 }
 
-// ── 오디오 생성 (ClovaVoice → ElevenLabs → OpenAI 순서) ─────────────────
+// ── ElevenLabs TTS ────────────────────────────────────────────────────────
+async function generateAudioElevenLabs(text, outputPath) {
+  const { apiKey, voiceId } = config.elevenlabs;
+  let response;
+  try {
+    response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        text: text.slice(0, 5000),
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      },
+      {
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        responseType: 'arraybuffer',
+        timeout: 60000,
+      }
+    );
+  } catch (err) {
+    if (err.response?.data) {
+      const body = Buffer.from(err.response.data).toString('utf8').slice(0, 300);
+      logger.warn(`[media_generator] ElevenLabs API error body: ${body}`);
+    }
+    throw err;
+  }
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, Buffer.from(response.data));
+  logger.info(`[media_generator] ElevenLabs TTS saved (voiceId: ${voiceId}): ${outputPath}`);
+  return outputPath;
+}
+
+// ── 오디오 생성 (ClovaVoice → ElevenLabs → OpenAI 순서) ──────────────────
 async function generateAudio(text, outputPath) {
   const { clientId, clientSecret } = config.clovaVoice;
 
@@ -1560,8 +1569,16 @@ async function generateLongFormMedia(content) {
           { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
         );
         const item = res.data.data[0];
-        if (item.b64_json) { await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64')); imageUrl = imgPath; }
-        else if (item.url) { imageUrl = item.url; }
+        if (item.b64_json) {
+          await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+          imageUrl = imgPath;
+        } else if (item.url) {
+          // 임시 URL 만료 전 즉시 다운로드
+          const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+          await fs.mkdir(path.dirname(imgPath), { recursive: true });
+          await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+          imageUrl = imgPath;
+        }
       } catch (err) {
         logger.warn(`[media_generator] Long-form gpt-image-1 s${i} failed: ${err.message}`);
       }

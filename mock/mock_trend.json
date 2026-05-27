@@ -1,49 +1,49 @@
 {
   "selected_items": [
     {
-      "keyword": "경기침체 공포",
+      "keyword": "미국 관세 협상 타결",
       "category": "economy",
-      "series": "오늘의 경제 용어",
-      "score": 87,
-      "score_reason": { "virality": 38, "commercial_value": 32, "freshness_hours": 17 },
-      "source_url": "https://www.yna.co.kr/view/AKR20260518001",
-      "collected_at": "2026-05-18T06:00:00+09:00"
+      "series": "오늘 읽는 경제뉴스",
+      "score": 91,
+      "score_reason": { "virality": 42, "commercial_value": 35, "freshness_hours": 4, "niche_premium": 10 },
+      "source_url": "https://news.google.com/rss/search?q=미국+관세+협상&hl=ko&gl=KR",
+      "collected_at": "2026-05-27T06:00:00+09:00"
     },
     {
-      "keyword": "아이돌 군백기 복귀",
-      "category": "entertainment",
-      "series": "오늘의 이슈",
-      "score": 76,
-      "score_reason": { "virality": 35, "commercial_value": 24, "freshness_hours": 17 },
-      "source_url": "https://www.yna.co.kr/view/AKR20260518002",
-      "collected_at": "2026-05-18T06:00:00+09:00"
+      "keyword": "코스피 3000 돌파 기대",
+      "category": "finance",
+      "series": "오늘 읽는 경제뉴스",
+      "score": 88,
+      "score_reason": { "virality": 40, "commercial_value": 34, "freshness_hours": 5, "niche_premium": 9 },
+      "source_url": "https://news.google.com/rss/search?q=코스피+3000&hl=ko&gl=KR",
+      "collected_at": "2026-05-27T06:00:00+09:00"
     },
     {
-      "keyword": "직장인 번아웃 급증",
-      "category": "social",
-      "series": "오늘의 이슈",
-      "score": 70,
-      "score_reason": { "virality": 28, "commercial_value": 30, "freshness_hours": 12 },
-      "source_url": "https://www.yna.co.kr/view/AKR20260518003",
-      "collected_at": "2026-05-18T06:00:00+09:00"
-    },
-    {
-      "keyword": "금리 인하 기대감",
+      "keyword": "한국은행 기준금리 동결",
       "category": "economy",
-      "series": "오늘의 경제 용어",
-      "score": 65,
-      "score_reason": { "virality": 25, "commercial_value": 30, "freshness_hours": 10 },
-      "source_url": "https://www.yna.co.kr/view/AKR20260518004",
-      "collected_at": "2026-05-18T06:00:00+09:00"
+      "series": "오늘 읽는 경제뉴스",
+      "score": 83,
+      "score_reason": { "virality": 36, "commercial_value": 33, "freshness_hours": 6, "niche_premium": 8 },
+      "source_url": "https://news.google.com/rss/search?q=한국은행+기준금리&hl=ko&gl=KR",
+      "collected_at": "2026-05-27T06:00:00+09:00"
     },
     {
-      "keyword": "AI 면접 확산 논란",
+      "keyword": "전세사기 피해 구제 법안",
+      "category": "realestate",
+      "series": "오늘 읽는 부동산",
+      "score": 79,
+      "score_reason": { "virality": 38, "commercial_value": 28, "freshness_hours": 8, "niche_premium": 5 },
+      "source_url": "https://news.google.com/rss/search?q=전세사기+구제&hl=ko&gl=KR",
+      "collected_at": "2026-05-27T06:00:00+09:00"
+    },
+    {
+      "keyword": "AI 일자리 대체 현실화",
       "category": "social",
-      "series": "오늘의 이슈",
-      "score": 61,
-      "score_reason": { "virality": 30, "commercial_value": 20, "freshness_hours": 11 },
-      "source_url": "https://www.yna.co.kr/view/AKR20260518005",
-      "collected_at": "2026-05-18T06:00:00+09:00"
+      "series": "오늘 읽는 핫이슈",
+      "score": 74,
+      "score_reason": { "virality": 35, "commercial_value": 27, "freshness_hours": 9, "niche_premium": 3 },
+      "source_url": "https://news.google.com/rss/search?q=AI+일자리+대체&hl=ko&gl=KR",
+      "collected_at": "2026-05-27T06:00:00+09:00"
     }
   ]
 }

@@ -11,6 +11,7 @@ import { runBlogAnalytics } from '../src/agents/blog_analytics.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
+import db from '../src/db/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -26,15 +27,40 @@ async function main() {
   const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
   const keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
   await writeJSON(`${outDir}/keywords/keywords_${date}.json`, keywordData);
-  logger.info(`[blog:pipeline] Part 1 완료. 키워드: ${keywordData.contents?.length ?? 0}개`);
 
-  if (!keywordData.contents?.length) {
-    logger.warn('[blog:pipeline] 새 키워드 없음. 종료.');
+  // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
+  let rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
+
+  // 신규 키워드가 없으면 DB의 pending 키워드를 꺼내 재사용
+  if (rawKeywords.length === 0) {
+    const postsPerDay = config.runtime.blogPostsPerDay ?? 2;
+    const dbKeywords = db
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT ?`)
+      .all(postsPerDay);
+    if (dbKeywords.length > 0) {
+      logger.info(`[blog:pipeline] 신규 키워드 없음 → DB pending ${dbKeywords.length}개 사용`);
+      rawKeywords = dbKeywords;
+    }
+  }
+
+  const contentData = {
+    ...keywordData,
+    contents: rawKeywords.map((k) => ({
+      keyword:    k.keyword ?? k,
+      category:   k.category ?? 'economy',
+      score:      k.score ?? 0,
+      blog_draft: null,
+    })),
+  };
+  logger.info(`[blog:pipeline] Part 1 완료. 키워드: ${contentData.contents.length}개`);
+
+  if (!contentData.contents.length) {
+    logger.warn('[blog:pipeline] 처리할 키워드 없음 (신규 + DB pending 모두 0). 종료.');
     process.exit(0);
   }
 
   // Part 2: Content Enhancer
-  const draftData = await enhanceAllBlogDrafts(keywordData);
+  const draftData = await enhanceAllBlogDrafts(contentData);
   await writeJSON(`${outDir}/blog/draft_${date}.json`, draftData);
   logger.info(`[blog:pipeline] Part 2 완료. 초안: ${draftData.contents?.length ?? 0}개`);
 

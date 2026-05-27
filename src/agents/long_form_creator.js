@@ -7,7 +7,7 @@ import { throttle } from '../utils/rateLimiter.js';
  * Content triangle: blog draft → long-form video script (10~20 min) + Shorts extraction
  *
  * 5단계 스토리텔링 적용: 배경 → 디테일 → 문제 → 반전 → 참여
- * 첫 8초 훅 강화, 자기소개 금지, 10~20분 분량으로 시청 시간 극대화
+ * 황금 첫 15초 훅 구조 강화, 자기소개 금지, 10~20분 분량으로 시청 시간 극대화
  *
  * Returns:
  *   long_video: { title, duration_minutes, sections[{name,duration_seconds,script,key_point}],
@@ -31,6 +31,11 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `  ✗ 영상 시작 시 자기소개, 채널명 소개, "안녕하세요" 금지\n` +
     `  ✗ 첫 8초 내 구독 버튼 언급 금지\n` +
     `  → 도입 섹션 첫 문장은 반드시 시청자의 관심을 즉시 잡는 훅으로 시작\n\n` +
+    `【황금 첫 15초 구조 필수】\n` +
+    `  0~5초: 충격적 수치 또는 반직관적 사실 1문장 (예: "지금 당신 월급의 23%가 사라지고 있습니다")\n` +
+    `  5~10초: 이게 왜 나에게 관련 있는지 한 문장 연결 (공감 유발)\n` +
+    `  10~15초: 이 영상을 끝까지 봐야 하는 이유 1문장 예고 (호기심 유지)\n` +
+    `  → [배경] 섹션 script의 첫 3문장이 이 구조를 반드시 따를 것\n\n` +
     `【1】 롱폼 영상 스크립트 (10~20분 목표)\n` +
     `  ─── 5단계 스토리텔링 구조 필수 ───\n` +
     `  [배경] 섹션: 왜 지금 이 주제인가? 시청자가 공감할 상황 설정 (훅으로 즉시 시작)\n` +
@@ -101,7 +106,7 @@ export async function createLongFormAndShorts(item, blogDraft) {
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
         temperature: 0.8,
-        max_tokens: 3000,
+        max_tokens: 4000,
       },
       {
         headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
