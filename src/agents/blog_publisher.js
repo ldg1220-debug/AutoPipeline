@@ -430,7 +430,7 @@ export async function editBlogPosts(rewrites) {
   if (!rewrites?.length) return [];
 
   const blogName = config.tistory?.blogName;
-  if (!blogName || !config.tistoryBlog?.sessionCookie) {
+  if (!blogName) {
     logger.warn('[blog_publisher] Tistory config missing. Skipping edits.');
     return rewrites.map((r) => ({ ...r, edit_status: 'skipped_no_config' }));
   }
@@ -485,11 +485,14 @@ export async function editBlogPosts(rewrites) {
 
 // ── DB 업데이트 ────────────────────────────────────────────────────────────
 function savePublishResult(keyword, title, slug, postUrl, youtubeUrl) {
-  const stmt = db.prepare(`
+  db.prepare(`
     INSERT INTO blog_posts (keyword, title, slug, platform, post_url, youtube_url, status, published_at)
     VALUES (@keyword, @title, @slug, 'tistory', @post_url, @youtube_url, 'published', datetime('now','localtime'))
-  `);
-  stmt.run({ keyword, title, slug: slug || keyword, post_url: postUrl, youtube_url: youtubeUrl || null });
+  `).run({ keyword, title, slug: slug || keyword, post_url: postUrl, youtube_url: youtubeUrl || null });
+
+  // 해당 키워드를 'used'로 마킹 → blog:pipeline 재실행 시 중복 발행 방지
+  db.prepare(`UPDATE keywords SET status = 'used', used_at = datetime('now','localtime') WHERE keyword = ?`)
+    .run(keyword);
 }
 
 export async function publishBlogPosts(contentData) {
@@ -498,10 +501,6 @@ export async function publishBlogPosts(contentData) {
 
   if (!blogName) {
     logger.warn('[blog_publisher] TISTORY_BLOG_NAME not set. Skipping.');
-    return { ...contentData, contents };
-  }
-  if (!config.tistoryBlog?.sessionCookie) {
-    logger.warn('[blog_publisher] TISTORY_SESSION_COOKIE not set. Run npm run blog:login first.');
     return { ...contentData, contents };
   }
   if (config.runtime.dryRun) {
