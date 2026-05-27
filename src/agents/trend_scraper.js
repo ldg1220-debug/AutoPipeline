@@ -23,32 +23,40 @@ const SERIES_MAP = {
 
 const RSS_SOURCES = [
   {
-    label: 'google_trends_kr',
-    url: 'https://trends.google.com/trending/rss?geo=KR',
-  },
-  {
     label: 'yonhap_economy',
+    category: 'economy',
     url: 'https://www.yna.co.kr/rss/economy.xml',
   },
   {
-    label: 'mk_economy',                           // 매일경제 경제 (고CPM)
+    label: 'mk_economy',
+    category: 'economy',
     url: 'https://www.mk.co.kr/rss/30100041/',
   },
   {
-    label: 'mk_realestate',                        // 매일경제 부동산 (고CPM)
+    label: 'mk_realestate',
+    category: 'realestate',
     url: 'https://www.mk.co.kr/rss/30000041/',
   },
   {
-    label: 'yonhap_health',                        // 연합뉴스 건강·의학 (고CPM)
+    label: 'yonhap_health',
+    category: 'health',
     url: 'https://www.yna.co.kr/rss/health.xml',
   },
   {
-    label: 'yonhap_entertainment',
-    url: 'https://www.yna.co.kr/rss/entertainment.xml',
+    label: 'yonhap_society',
+    category: 'social',
+    url: 'https://www.yna.co.kr/rss/society.xml',
   },
   {
-    label: 'yonhap_society',
-    url: 'https://www.yna.co.kr/rss/society.xml',
+    label: 'yonhap_entertainment',
+    category: 'entertainment',
+    url: 'https://www.yna.co.kr/rss/entertainment.xml',
+  },
+  // Google Trends는 연예인·정치 키워드 다수 → 최후순위
+  {
+    label: 'google_trends_kr',
+    category: 'social',
+    url: 'https://trends.google.com/trending/rss?geo=KR',
   },
 ];
 
@@ -72,6 +80,7 @@ async function fetchRSS(source) {
       title: item.title ?? '',
       link: item.link ?? '',
       source: source.label,
+      sourceCategory: source.category ?? 'social',
     }));
   } catch (err) {
     logger.warn(`[trend_scraper] RSS fetch failed: ${source.label}`, { message: err.message });
@@ -97,25 +106,21 @@ async function fetchRSS(source) {
  *    출력 형식: [{ \"keyword\": \"...\", \"virality\": 0, \"commercial_value\": 0, \"freshness_hours\": 0 }]"
  */
 async function scoreKeywordsWithLLM(keywords) {
-  const scoringPrompt = `다음은 한국 뉴스·트렌드 키워드 목록입니다.
-각 키워드에 대해 아래 기준으로 점수를 매기고 다음 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
+  const scoringPrompt = `한국 경제 유튜브 채널용 뉴스 키워드를 스코어링하세요. JSON만 반환, 다른 텍스트 금지.
 
 점수 기준:
-- virality: 0~40 (SNS 확산 속도, 커뮤니티 반응)
-- commercial_value: 0~40 (광고·제휴 상품 연결 가능성)
-  ★ 가중치 우대 니치: 재테크·투자·금리·부동산·보험·대출·건강·다이어트·보충제 관련이면 35~40점 부여
-  ✗ 순수 연예·가십·정치 키워드는 10점 이하
-- freshness_hours: 0~20 (뉴스 발행 신선도, 최신일수록 고점)
-- niche_premium: 0~20 (고CPM 니치 보너스)
-  금융·재테크·부동산·건강 카테고리면 15~20점, 연예·사회면 0~5점
+- category: "finance"|"realestate"|"health"|"entertainment"|"social"|"economy"
+  ✗ 사람 이름(연예인·정치인)만 있는 키워드 → category:"entertainment", commercial_value:5 이하
+  ★ 금리·주가·부동산·대출·재테크·물가·환율·실업 → category:"economy" or "finance"
+- virality: 0~40
+- commercial_value: 0~40 (재테크·부동산·건강=35~40, 연예·가십=5 이하)
+- freshness_hours: 0~20
+- niche_premium: 0~20 (경제·금융·부동산·건강=15~20, 연예=0~3)
 
-category 분류: "finance" | "realestate" | "health" | "entertainment" | "social" | "economy"
+출력: { "items": [{ "keyword":"...", "category":"...", "virality":0, "commercial_value":0, "freshness_hours":0, "niche_premium":0, "source_url":"..." }] }
 
-출력 형식 (items 배열을 반드시 포함):
-{ "items": [{ "keyword": "...", "category": "...", "virality": 0, "commercial_value": 0, "freshness_hours": 0, "niche_premium": 0, "source_url": "..." }] }
-
-키워드 목록:
-${JSON.stringify(keywords, null, 2)}`;
+키워드(${keywords.length}개):
+${JSON.stringify(keywords.map((k) => ({ keyword: k.keyword, source_url: k.source_url })), null, 2)}`;
 
   const response = await axios.post(
     'https://api.openai.com/v1/chat/completions',
@@ -161,27 +166,41 @@ export async function fetchTrends() {
       return readJSON(MOCK_PATH);
     }
 
-    // LLM 스코어링에 필요한 최소 정보만 전달 (URL은 보존)
-    const keywordInput = allItems.slice(0, 30).map((item) => ({
+    // 경제·재테크 소스 우선 15개 선별 (LLM 부하 절감 + 연예인 키워드 차단)
+    const PRIORITY_SOURCES = ['yonhap_economy', 'mk_economy', 'mk_realestate', 'yonhap_health', 'yonhap_society'];
+    const priorityItems = allItems.filter((i) => PRIORITY_SOURCES.includes(i.source));
+    const otherItems    = allItems.filter((i) => !PRIORITY_SOURCES.includes(i.source));
+    const candidateItems = [...priorityItems, ...otherItems].slice(0, 15);
+
+    const keywordInput = candidateItems.map((item) => ({
       keyword: item.title,
       source_url: item.link,
+      sourceCategory: item.sourceCategory,
     }));
 
     let scored;
     try {
       scored = await scoreKeywordsWithLLM(keywordInput);
     } catch (llmErr) {
-      // LLM 타임아웃 시 RSS 항목으로 기본 스코어 부여 후 진행
-      logger.warn(`[trend_scraper] LLM scoring failed (${llmErr.message}). Using RSS items with default scores.`);
-      scored = keywordInput.slice(0, 10).map((item) => ({
-        keyword: item.keyword,
-        source_url: item.source_url,
-        category: 'economy',
-        virality: 25,
-        commercial_value: 25,
-        freshness_hours: 15,
-        niche_premium: 10,
-      }));
+      // LLM 타임아웃 시 경제·재테크 소스 항목만 사용 (연예인 키워드 배제)
+      logger.warn(`[trend_scraper] LLM scoring failed (${llmErr.message}). Using economy RSS items only.`);
+      const ECONOMY_SOURCES = ['yonhap_economy', 'mk_economy', 'mk_realestate', 'yonhap_health'];
+      const economyItems = allItems.filter((i) => ECONOMY_SOURCES.includes(i.source));
+      const fallbackItems = (economyItems.length > 0 ? economyItems : priorityItems).slice(0, 10);
+      const CATEGORY_SCORE = { economy: 75, finance: 75, realestate: 70, health: 65, social: 40, entertainment: 10 };
+      scored = fallbackItems.map((item) => {
+        const cat = item.sourceCategory ?? 'economy';
+        const base = CATEGORY_SCORE[cat] ?? 40;
+        return {
+          keyword: item.title,
+          source_url: item.link,
+          category: cat,
+          virality: Math.round(base * 0.4),
+          commercial_value: Math.round(base * 0.4),
+          freshness_hours: 15,
+          niche_premium: cat === 'economy' || cat === 'finance' || cat === 'realestate' ? 18 : cat === 'health' ? 15 : 3,
+        };
+      });
     }
 
     // 총점 계산 후 상위 5개 선정 (niche_premium 포함)

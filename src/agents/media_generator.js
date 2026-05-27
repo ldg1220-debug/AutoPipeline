@@ -1063,7 +1063,42 @@ function normalizeScriptForTTS(text) {
   return result;
 }
 
-// ── 오디오 생성 (ClovaVoice 우선 → OpenAI 폴백) ───────────────────────────
+// ── ElevenLabs TTS ────────────────────────────────────────────────────────
+async function generateAudioElevenLabs(text, outputPath) {
+  const { apiKey, voiceId } = config.elevenlabs;
+  let response;
+  try {
+    response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        text: text.slice(0, 5000),
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      },
+      {
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        responseType: 'arraybuffer',
+        timeout: 60000,
+      }
+    );
+  } catch (err) {
+    if (err.response?.data) {
+      const body = Buffer.from(err.response.data).toString('utf8').slice(0, 300);
+      logger.warn(`[media_generator] ElevenLabs API error body: ${body}`);
+    }
+    throw err;
+  }
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, Buffer.from(response.data));
+  logger.info(`[media_generator] ElevenLabs TTS saved (voiceId: ${voiceId}): ${outputPath}`);
+  return outputPath;
+}
+
+// ── 오디오 생성 (ClovaVoice → ElevenLabs → OpenAI 순서) ──────────────────
 async function generateAudio(text, outputPath) {
   const { clientId, clientSecret } = config.clovaVoice;
 
@@ -1071,7 +1106,15 @@ async function generateAudio(text, outputPath) {
     try {
       return await generateAudioClovaVoice(text, outputPath);
     } catch (err) {
-      logger.warn(`[media_generator] ClovaVoice failed (${err.message}), falling back to OpenAI TTS`);
+      logger.warn(`[media_generator] ClovaVoice failed (${err.message}), trying ElevenLabs`);
+    }
+  }
+
+  if (config.elevenlabs.apiKey) {
+    try {
+      return await generateAudioElevenLabs(text, outputPath);
+    } catch (err) {
+      logger.warn(`[media_generator] ElevenLabs failed (${err.message}), falling back to OpenAI TTS`);
     }
   }
 
