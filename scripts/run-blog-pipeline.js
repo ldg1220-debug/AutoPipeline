@@ -26,15 +26,27 @@ async function main() {
   const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
   const keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
   await writeJSON(`${outDir}/keywords/keywords_${date}.json`, keywordData);
-  logger.info(`[blog:pipeline] Part 1 완료. 키워드: ${keywordData.contents?.length ?? 0}개`);
 
-  if (!keywordData.contents?.length) {
+  // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
+  const rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
+  const contentData = {
+    ...keywordData,
+    contents: rawKeywords.map((k) => ({
+      keyword:  k.keyword ?? k,
+      category: k.category ?? 'economy',
+      score:    k.score ?? 0,
+      blog_draft: null,
+    })),
+  };
+  logger.info(`[blog:pipeline] Part 1 완료. 키워드: ${contentData.contents.length}개`);
+
+  if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] 새 키워드 없음. 종료.');
     process.exit(0);
   }
 
   // Part 2: Content Enhancer
-  const draftData = await enhanceAllBlogDrafts(keywordData);
+  const draftData = await enhanceAllBlogDrafts(contentData);
   await writeJSON(`${outDir}/blog/draft_${date}.json`, draftData);
   logger.info(`[blog:pipeline] Part 2 완료. 초안: ${draftData.contents?.length ?? 0}개`);
 
