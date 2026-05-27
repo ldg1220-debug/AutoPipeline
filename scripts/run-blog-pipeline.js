@@ -8,6 +8,7 @@ import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll } from '../src/agents/monetizer.js';
 import { publishBlogPosts } from '../src/agents/blog_publisher.js';
 import { runBlogAnalytics } from '../src/agents/blog_analytics.js';
+import { runBlogQA } from '../src/agents/qa_editor.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -64,10 +65,33 @@ async function main() {
   await writeJSON(`${outDir}/blog/draft_${date}.json`, draftData);
   logger.info(`[blog:pipeline] Part 2 완료. 초안: ${draftData.contents?.length ?? 0}개`);
 
+  // Part 2.5: Blog QA — 정합성·흐름·분량 검수 + 자동 재작성
+  let qaData = draftData;
+  try {
+    qaData = await runBlogQA(draftData);
+    const rejected = qaData.contents?.filter((c) => c.blog_qa?.status === 'REJECTED').length ?? 0;
+    const approved = qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED').length ?? 0;
+    logger.info(`[blog:pipeline] Part 2.5 완료. 승인: ${approved}개 / 탈락: ${rejected}개`);
+    await writeJSON(`${outDir}/blog/qa_${date}.json`, qaData);
+
+    // REJECTED 항목은 발행에서 제외
+    qaData = {
+      ...qaData,
+      contents: qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? [],
+    };
+    if (qaData.contents.length === 0) {
+      logger.warn('[blog:pipeline] QA 통과 항목 없음. 종료.');
+      process.exit(0);
+    }
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 2.5 QA 실패 (${err.message}). 원본으로 계속.`);
+    qaData = draftData;
+  }
+
   // Part 3: Asset Builder
   let assetData;
   try {
-    assetData = await buildAllAssets(draftData);
+    assetData = await buildAllAssets(qaData);
     await writeJSON(`${outDir}/blog/assets_${date}.json`, assetData);
     logger.info('[blog:pipeline] Part 3 완료.');
   } catch (err) {

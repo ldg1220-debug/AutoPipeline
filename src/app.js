@@ -8,7 +8,7 @@ import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
 import { checkSubscribers } from './utils/subscriberMonitor.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
-import { runTextQA, runVisionQA, runBlogQA } from './agents/qa_editor.js';
+import { runTextQA, runVisionQA, runBlogQA, runContentDirectorQA } from './agents/qa_editor.js';
 import { generateAllMedia, generateLongFormMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
@@ -564,9 +564,26 @@ export async function runUnifiedPipeline() {
   );
   logger.info(`[app] Unified Step 3 complete. ${triangleContents.length} items`);
 
+  // ── Step 3.5: Content Director QA — 정합성·분량·포맷 결정·자동 재작성 ──────
+  let directorQAData = { contents: triangleContents };
+  try {
+    directorQAData = await runContentDirectorQA(directorQAData);
+    const rewriteCount = directorQAData.contents.reduce(
+      (n, c) => n + (c.director_qa?.rewrites?.length ?? 0), 0
+    );
+    logger.info(`[app] Unified Step 3.5 (Director QA) complete. 재작성: ${rewriteCount}건`);
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/unified_qa_${date}.json`),
+      directorQAData
+    );
+  } catch (err) {
+    logger.warn(`[app] Unified Step 3.5 (Director QA) failed (${err.message}). 원본 콘텐츠로 계속.`);
+  }
+  const qaContents = directorQAData.contents;
+
   // ── Step 4a: 숏폼 미디어 제작 ─────────────────────────────────────────────
   try {
-    const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: triangleContents });
+    const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: qaContents });
     await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
     logger.info(`[app] Unified Step 4a (shorts media) complete. Media: ${mediaResult.results?.length ?? 0}`);
   } catch (err) {
@@ -575,7 +592,7 @@ export async function runUnifiedPipeline() {
 
   // ── Step 4b: 롱폼 영상 미디어 제작 ────────────────────────────────────────
   const longFormResults = [];
-  for (const tc of triangleContents) {
+  for (const tc of qaContents) {
     if (!tc.long_video?.sections?.length) continue;
     try {
       logger.info(`[app] Unified Step 4b: long-form video for "${tc.keyword}"`);
