@@ -74,3 +74,31 @@ export async function sendErrorAlert(stage, errorMessage) {
 
   await sendTelegram(text);
 }
+
+/**
+ * 구독자 마일스톤 달성 알림.
+ */
+export async function sendSubscriberAlert(channelName, subscribers, milestone) {
+  let text;
+  if (milestone === 1000) {
+    text = [
+      `🎉 *${channelName}* 구독자 ${subscribers.toLocaleString()}명 달성!`,
+      ``,
+      `✅ *AdSense 연결이 가능합니다!*`,
+      ``,
+      `*연결 방법:*`,
+      `1. YouTube Studio 접속`,
+      `2. 왼쪽 메뉴 → *수익 창출*`,
+      `3. AdSense 계정 연결 클릭`,
+      `4. 기존 AdSense 연결 또는 신규 생성`,
+      ``,
+      `📌 YouTube Partner Program 신청도 함께 진행하세요!`,
+    ].join('\n');
+  } else {
+    text = [
+      `🎉 *${channelName}* 구독자 *${milestone.toLocaleString()}명* 돌파!`,
+      `현재: ${subscribers.toLocaleString()}명`,
+    ].join('\n');
+  }
+  await sendTelegram(text);
+}

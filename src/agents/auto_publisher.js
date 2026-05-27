@@ -41,28 +41,164 @@ async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
 }
 
 /**
- * YouTube에 숏폼 영상을 예약 업로드한다.
- * YouTube Data API는 실제 영상 바이너리가 없으면 업로드 자체가 불가능하다.
- * 영상 파일 경로를 받아 multipart 업로드하며, 파일이 없으면 스킵한다.
+ * 공개 시간 계산 — 다음 날 7:15 AM KST (업로드 후 최소 12시간 후 보장)
+ * KST = UTC+9 → 7:15 KST = 22:15 UTC (전날)
+ */
+function getOptimalPublishTime() {
+  const KST_TARGET_HOUR = 7;
+  const KST_TARGET_MIN  = 15;
+  const UTC_HOUR = ((KST_TARGET_HOUR - 9) + 24) % 24; // 22
+
+  const now    = new Date();
+  const target = new Date(now);
+  target.setUTCHours(UTC_HOUR, KST_TARGET_MIN, 0, 0);
+
+  // 12시간 이상 남지 않았으면 하루 추가 (항상 "다음 날 7:15" 보장)
+  while (target.getTime() - now.getTime() < 12 * 60 * 60 * 1000) {
+    target.setUTCDate(target.getUTCDate() + 1);
+  }
+  return target.toISOString();
+}
+
+/**
+ * 단일 mp4 파일을 YouTube에 multipart 업로드하는 내부 헬퍼.
+ * @param {string} videoPath  업로드할 mp4 파일 경로
+ * @param {object} metadata   JSON.stringify 전 snippet+status 객체
+ * @param {string} accessToken
+ * @returns {string} videoId
+ */
+async function uploadVideoFile(videoPath, metadata, accessToken) {
+  const videoBuffer = await fs.readFile(videoPath);
+  const boundary    = 'frontier_boundary';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: video/mp4\r\n\r\n`
+    ),
+    videoBuffer,
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+  const response = await axios.post(
+    'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status',
+    body,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': body.length,
+      },
+      timeout: 120000,
+    }
+  );
+  return response.data.id;
+}
+
+/**
+ * YouTube에 쇼츠(숏폼) 영상을 업로드한다.
+ * 파일 규칙: output/media/<keyword>.mp4 (9:16 세로 포맷, ≤60초)
+ * #Shorts 해시태그를 제목·설명에 추가해 YouTube가 쇼츠로 인식하도록 한다.
+ * 쇼츠는 예약 발행 대신 즉시 공개 처리한다.
+ */
+async function publishShortsToYouTube(content, accessToken) {
+  const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  const mediaDir    = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
+  const videoPath   = path.resolve(mediaDir, `${safeKeyword}.mp4`);
+
+  try { await fs.access(videoPath); } catch {
+    logger.warn(`[auto_publisher] Shorts file not found, skipping: ${videoPath}`);
+    return { platform: 'youtube_shorts', status: 'skipped_no_video_file' };
+  }
+
+  const blogPostUrl = content.blog_publish?.url ?? content.blog_post_url ?? null;
+
+  const [description, tags, baseTitle] = await Promise.all([
+    generateYouTubeDescription(content, blogPostUrl),
+    generateYouTubeTags(content.keyword, content.category, content.blog_draft?.seo_keywords ?? []),
+    generateYouTubeTitle(content.keyword, content.shortform_script?.hook, content.youtube_title),
+  ]);
+
+  // #Shorts 태그 필수 — 없으면 YouTube가 Shorts 피드에 노출하지 않음
+  const shortsTitle = baseTitle.includes('#Shorts') ? baseTitle : `${baseTitle} #Shorts`;
+  const shortsDesc  = description.includes('#Shorts') ? description : `${description}\n\n#Shorts`;
+  const shortsTags  = tags.includes('Shorts') ? tags : [...tags, 'Shorts', '쇼츠'];
+
+  logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
+
+  const shortsPublishAt = getOptimalPublishTime(); // 다음 날 7:23 AM KST
+  const metadata = {
+    snippet: {
+      title: shortsTitle,
+      description: shortsDesc,
+      tags: shortsTags,
+      categoryId: '22',
+      defaultLanguage: 'ko',
+    },
+    status: {
+      privacyStatus: 'private',
+      publishAt: shortsPublishAt,
+      selfDeclaredMadeForKids: false,
+      containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기
+    },
+  };
+
+  const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
+  logger.info(`[auto_publisher] Shorts uploaded: https://youtube.com/shorts/${videoId}`);
+
+  // 쇼츠 썸네일: 세로(9:16) 우선, 없으면 가로 폴백 — 5초 대기 후 최대 3회 재시도
+  const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
+  const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
+  const shortsThumbExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
+  const thumbPath = shortsThumbExists ? thumbShortsPath : thumbFallback;
+  const thumbPathExists   = await fs.access(thumbPath).then(() => true).catch(() => false);
+
+  let thumbnailUploaded = false;
+  if (!thumbPathExists) {
+    logger.warn(`[auto_publisher] 쇼츠 썸네일 파일 없음: ${thumbPath}`);
+  } else {
+    await new Promise((r) => setTimeout(r, 5000));
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
+        if (thumbnailUploaded) {
+          logger.info(`[auto_publisher] 쇼츠 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPath}`);
+          break;
+        }
+      } catch (err) {
+        logger.warn(`[auto_publisher] 쇼츠 썸네일 실패 (시도 ${attempt}/3): ${err.message}`);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+      }
+    }
+    if (!thumbnailUploaded) logger.error(`[auto_publisher] 쇼츠 썸네일 3회 모두 실패: ${videoId}`);
+  }
+
+  return {
+    platform:           'youtube_shorts',
+    video_id:           videoId,
+    url:                `https://youtube.com/shorts/${videoId}`,
+    thumbnail_uploaded: thumbnailUploaded,
+  };
+}
+
+/**
+ * YouTube에 롱폼 영상을 예약 업로드한다.
+ * 파일 규칙: output/media/<keyword>_long.mp4
  * publishAt은 현재 시각 + 2시간으로 설정한다.
  */
 async function publishToYouTube(content, accessToken) {
-  // 영상 파일 경로 규칙: output/media/<keyword>.mp4
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-  const videoPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    `../../output/media/${safeKeyword}.mp4`
-  );
+  const mediaDir    = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
+  // long-form 파일 우선, 없으면 기존 <keyword>.mp4 (하위 호환)
+  const longPath    = path.resolve(mediaDir, `${safeKeyword}_long.mp4`);
+  const legacyPath  = path.resolve(mediaDir, `${safeKeyword}.mp4`);
 
-  try {
-    await fs.access(videoPath);
-  } catch {
-    // 영상 파일이 없으면 이 단계에서는 스킵 (영상 생성은 별도 Phase에서 추가)
-    logger.warn(`[auto_publisher] Video file not found, skipping YouTube upload: ${videoPath}`);
+  const longExists   = await fs.access(longPath).then(() => true).catch(() => false);
+  const legacyExists = await fs.access(legacyPath).then(() => true).catch(() => false);
+  if (!longExists && !legacyExists) {
+    logger.warn(`[auto_publisher] Long-form video not found, skipping: ${longPath}`);
     return { platform: 'youtube', status: 'skipped_no_video_file' };
   }
+  const videoPath = longExists ? longPath : legacyPath;
 
-  const publishAt    = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const publishAt    = getOptimalPublishTime(); // 다음 날 7:15 AM KST
   const channelCfg   = getYouTubeChannelConfig(content.category);
   const seriesName   = content.series_name ?? channelCfg.seriesName ?? '매일읽어주는남자';
 
@@ -86,7 +222,7 @@ async function publishToYouTube(content, accessToken) {
 
   logger.info(`[auto_publisher] SEO — title: "${optimizedTitle}" | tags: ${tags.length}개 | desc: ${description.length}자`);
 
-  const metadata = JSON.stringify({
+  const metadata = {
     snippet: {
       title: optimizedTitle,
       description,
@@ -98,37 +234,23 @@ async function publishToYouTube(content, accessToken) {
       privacyStatus: 'private',
       publishAt,
       selfDeclaredMadeForKids: false,
+      containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기 (페널티 없음)
     },
-  });
+  };
 
-  const videoBuffer = await fs.readFile(videoPath);
-  const boundary = 'frontier_boundary';
-  const body = Buffer.concat([
-    Buffer.from(
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: video/mp4\r\n\r\n`
-    ),
-    videoBuffer,
-    Buffer.from(`\r\n--${boundary}--`),
-  ]);
+  logger.info(`[auto_publisher] Scheduled publish at: ${publishAt} (KST 7:15 AM)`);
+  const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
+  logger.info(`[auto_publisher] Long-form uploaded: https://youtu.be/${videoId}`);
 
-  const response = await axios.post(
-    'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status',
-    body,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-        'Content-Length': body.length,
-      },
-      timeout: 120000,
-    }
-  );
-
-  const videoId = response.data.id;
+  // 카테고리 재생목록에 영상 추가
+  try {
+    await addVideoToPlaylist(videoId, content.category, accessToken);
+  } catch (err) {
+    logger.warn(`[auto_publisher] Playlist insert failed: ${err.message}`);
+  }
 
   // 자막(SRT) 업로드
-  const mediaDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
-  const srtPath  = path.resolve(mediaDir, `${safeKeyword}.srt`);
+  const srtPath  = path.resolve(mediaDir, `${safeKeyword}_long.srt`);
   let captionsUploaded = false;
   try {
     captionsUploaded = await uploadYouTubeCaptions(videoId, srtPath, accessToken);
@@ -136,15 +258,29 @@ async function publishToYouTube(content, accessToken) {
     logger.warn(`[auto_publisher] Captions upload failed: ${err.message}`);
   }
 
-  // 썸네일 A 업로드 (Variant A = 초기 버전)
+  // 썸네일 A 업로드 — 5초 대기 후 최대 3회 재시도 (YouTube 처리 시간 확보)
   const thumbPathA = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
   const thumbPathB = path.resolve(mediaDir, `${safeKeyword}_thumb_b.jpg`);
 
   let thumbnailUploaded = false;
-  try {
-    thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPathA, accessToken);
-  } catch (err) {
-    logger.warn(`[auto_publisher] Thumbnail upload failed: ${err.message}`);
+  const thumbExists = await fs.access(thumbPathA).then(() => true).catch(() => false);
+  if (!thumbExists) {
+    logger.warn(`[auto_publisher] 썸네일 파일 없음: ${thumbPathA}`);
+  } else {
+    await new Promise((r) => setTimeout(r, 5000)); // YouTube 업로드 처리 대기
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPathA, accessToken);
+        if (thumbnailUploaded) {
+          logger.info(`[auto_publisher] 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPathA}`);
+          break;
+        }
+      } catch (err) {
+        logger.warn(`[auto_publisher] 썸네일 업로드 실패 (시도 ${attempt}/3): ${err.message}`);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+      }
+    }
+    if (!thumbnailUploaded) logger.error(`[auto_publisher] 썸네일 3회 모두 실패: ${videoId}`);
   }
 
   // A/B 테스트 레코드 저장 (Variant B가 있을 때만)
@@ -170,6 +306,37 @@ async function publishToYouTube(content, accessToken) {
     thumbnail_uploaded: thumbnailUploaded,
     captions_uploaded:  captionsUploaded,
   };
+}
+
+/**
+ * 업로드된 영상을 카테고리 재생목록에 추가한다.
+ * .env의 YOUTUBE_PLAYLIST_* 값이 없으면 건너뜀.
+ */
+async function addVideoToPlaylist(videoId, category, accessToken) {
+  const playlistId = config.youtube?.playlists?.[category];
+  if (!playlistId) {
+    logger.info(`[auto_publisher] No playlist configured for category "${category}", skipping.`);
+    return false;
+  }
+
+  await axios.post(
+    'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet',
+    {
+      snippet: {
+        playlistId,
+        resourceId: { kind: 'youtube#video', videoId },
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    }
+  );
+  logger.info(`[auto_publisher] Added video ${videoId} to playlist ${playlistId} (category: ${category})`);
+  return true;
 }
 
 /**
@@ -295,21 +462,39 @@ export async function publishContents(qaData, contentData) {
 
     const result = { keyword: content.keyword, dry_run: false };
 
-    // YouTube 발행 (카테고리별 채널 선택)
+    // YouTube 채널 인증 (롱폼 + 쇼츠 공통)
+    let accessToken = null;
     try {
       const channelCfg = getYouTubeChannelConfig(content.category);
       if (!channelCfg.clientId || !channelCfg.refreshToken) {
         throw new Error('YouTube credentials not configured');
       }
-      const accessToken = await refreshYouTubeAccessToken(channelCfg);
+      accessToken = await refreshYouTubeAccessToken(channelCfg);
       logger.info(`[auto_publisher] Using ${content.category === 'health' && config.youtubeChannels?.health?.refreshToken ? 'health' : 'default'} channel for: ${content.keyword}`);
-      result.youtube = await publishToYouTube(content, accessToken);
-      logger.info(`[auto_publisher] YouTube upload success: ${result.youtube.url}`);
     } catch (err) {
-      logger.error(`[auto_publisher] YouTube upload failed: ${content.keyword}`, {
-        message: err.message,
-      });
+      logger.error(`[auto_publisher] YouTube auth failed: ${content.keyword}`, { message: err.message });
+      result.youtube       = { platform: 'youtube',        status: 'failed', error: err.message };
+      result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
+      results.push(result);
+      continue;
+    }
+
+    // 롱폼 업로드
+    try {
+      result.youtube = await publishToYouTube(content, accessToken);
+      logger.info(`[auto_publisher] Long-form upload: ${result.youtube.url ?? result.youtube.status}`);
+    } catch (err) {
+      logger.error(`[auto_publisher] Long-form upload failed: ${content.keyword}`, { message: err.message });
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
+    }
+
+    // 쇼츠 업로드
+    try {
+      result.youtube_shorts = await publishShortsToYouTube(content, accessToken);
+      logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
+    } catch (err) {
+      logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
+      result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
     }
 
     results.push(result);

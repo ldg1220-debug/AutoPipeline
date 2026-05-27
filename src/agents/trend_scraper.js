@@ -221,10 +221,20 @@ export async function fetchTrends() {
         series: SERIES_MAP[item.category] ?? '오늘의 이슈',
         collected_at: new Date().toISOString(),
       }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
+      .sort((a, b) => b.score - a.score);
 
-    return { selected_items: sorted };
+    // 경제·재테크 5개 + 건강 1개 = 총 6개
+    // health를 별도 슬롯으로 보장해야 YouTube 영상 제작까지 이어진다
+    const economyItems = sorted.filter((i) => i.category !== 'health').slice(0, 5);
+    const bestHealth   = sorted.find((i) => i.category === 'health');
+    const selected     = bestHealth ? [...economyItems, bestHealth] : economyItems;
+
+    logger.info(
+      `[trend_scraper] Selected ${selected.length} items: ` +
+      selected.map((i) => `${i.keyword}(${i.category})`).join(', ')
+    );
+
+    return { selected_items: selected };
   } catch (err) {
     logger.error('[trend_scraper] Unexpected error. Falling back to mock data.', { message: err.message });
     return readJSON(MOCK_PATH);

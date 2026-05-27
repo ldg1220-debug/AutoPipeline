@@ -151,7 +151,7 @@ async function switchToHtmlMode(page) {
 }
 
 // ── 단일 포스트 발행 ───────────────────────────────────────────────────────
-async function publishPost(page, content, blogName) {
+async function publishPost(page, content, blogName, context) {
   const { keyword, blog_draft, blog_assets, youtube_url } = content;
 
   // 새 글 작성 페이지 이동
@@ -185,47 +185,58 @@ async function publishPost(page, content, blogName) {
     } catch { /* 무시 */ }
   }
 
-  // ── 카테고리 자동 분류 ───────────────────────────────────────────────────
-  try {
-    const availableCategories = await loadTistoryCategories(
-      blogName,
-      config.tistory.accessToken,
-      page
-    );
-    const bestCategory = await matchBestCategory(
-      availableCategories,
-      keyword,
-      content.category ?? 'economy'
-    );
-    if (bestCategory) {
-      const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
-      logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
-    }
-  } catch (err) {
-    logger.warn(`[blog_publisher] Category classification failed: ${err.message}`);
-  }
+  logger.info(`[blog_publisher] URL[1-after-inject]: ${page.url()}`);
 
-  // ── 태그 자동 생성 ──────────────────────────────────────────────────────
-  try {
-    const generatedTags = await generateBlogTags(
-      keyword,
-      blog_draft?.seo_keywords ?? [],
-      content.category ?? 'economy'
-    );
-    await setTagsInEditor(page, generatedTags);
-  } catch (err) {
-    logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
-  }
-
-  // 썸네일 업로드 (있을 때만)
+  // 썸네일 업로드 (있을 때만) — 사이드바 열기 전에 처리
   if (blog_assets?.thumbnail) {
     try {
       await uploadImageToEditor(page, blog_assets.thumbnail);
     } catch { /* 썸네일 실패해도 발행 계속 */ }
+    logger.info(`[blog_publisher] URL[2-after-thumbnail]: ${page.url()}`);
   }
 
+  // 카테고리 목록은 API로 미리 로드 (페이지 이동 없음)
+  let bestCategory = null;
+  try {
+    const availableCategories = await loadTistoryCategories(
+      blogName,
+      config.tistory.accessToken
+    );
+    logger.info(`[blog_publisher] URL[3-after-categories]: ${page.url()}`);
+    bestCategory = await matchBestCategory(
+      availableCategories,
+      keyword,
+      content.category ?? 'economy'
+    );
+  } catch (err) {
+    logger.warn(`[blog_publisher] Category load failed: ${err.message}`);
+    logger.info(`[blog_publisher] URL[3-after-categories-err]: ${page.url()}`);
+  }
+
+  // URL이 에디터에서 벗어났으면 복구
+  if (!page.url().includes('/manage/newpost') && !page.url().includes('/manage/post/')) {
+    logger.warn(`[blog_publisher] URL changed to ${page.url()}, re-navigating to editor`);
+    await page.goto(writeUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 15000 });
+    await page.fill('#post-title-inp, input[name="title"]', title);
+    await page.waitForTimeout(1000);
+    await injectHtmlContent(page, html);
+  }
+
+  // 태그도 미리 생성 (API 호출 — 페이지 이동 없음)
+  let generatedTags = [];
+  try {
+    generatedTags = await generateBlogTags(
+      keyword,
+      blog_draft?.seo_keywords ?? [],
+      content.category ?? 'economy'
+    );
+  } catch (err) {
+    logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
+  }
+  logger.info(`[blog_publisher] URL[4-before-sidebar]: ${page.url()}`);
+
   // ── 발행 플로우: page.route() 인터셉트 ──────────────────────────────────
-  // "비공개 저장" 클릭 시 /manage/post.json 요청을 가로채
   // visibility:20(공개) + content:html(실제 본문)으로 교체 → 한 번에 공개 발행
   let publishApiResp = null;
   await page.route('**/manage/post.json', async (route) => {
@@ -242,42 +253,71 @@ async function publishPost(page, content, blogName) {
     }
   });
 
-  // 사이드바/모달 열기 — 에디터 버전마다 버튼 텍스트가 다름
+  // 에디터 완전 로드 대기 (React 에디터는 마운트 후 버튼이 생성됨)
+  await page.waitForTimeout(2000);
+
+  // 사이드바/모달 열기 — 에디터 버전마다 버튼 텍스트·태그가 다름
   const sidebarBtns = [
     'button:has-text("완료")',
     'button:has-text("발행")',
-    'button[data-btn="publish"]',
+    'a:has-text("발행")',
+    '[role="button"]:has-text("발행")',
     'button[class*="publish"]',
     'button[class*="Publish"]',
+    'button[data-btn="publish"]',
     '#publish-layer-btn',
+    '.btn-publish',
+    '.publish-btn',
+    '.wrap_btn_publish button',
+    '.area_publish button',
   ];
   let sidebarOpened = false;
   for (const sel of sidebarBtns) {
     try {
-      await page.click(sel, { timeout: 5000 });
+      const el = await page.$(sel);
+      if (!el) continue;
+      const visible = await el.isVisible().catch(() => false);
+      if (!visible) continue;
+      await el.click({ timeout: 3000 });
       logger.info(`[blog_publisher] Sidebar opened via: ${sel}`);
       sidebarOpened = true;
       break;
     } catch { /* 다음 시도 */ }
   }
   if (!sidebarOpened) {
+    const allBtns = await page.evaluate(() =>
+      [...document.querySelectorAll('button, a[role="button"], [role="button"]')]
+        .map((el) => `[${el.tagName}] class="${el.className}" text="${el.innerText?.trim().slice(0, 40)}"`)
+        .slice(0, 30)
+    ).catch(() => []);
+    logger.error(`[blog_publisher] 페이지 내 버튼 목록:\n${allBtns.join('\n')}`);
+
     const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_${Date.now()}.png`);
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
     logger.error(`[blog_publisher] 발행 사이드바 버튼을 찾지 못했습니다. 스크린샷: ${screenshotPath}`);
     throw new Error('발행 사이드바를 열 수 없음 — 스크린샷 확인 요망');
   }
-  await page.waitForTimeout(2000);
+  // 사이드바(layer_publish) 마운트 대기 — React Portal은 비동기 렌더링
+  await page.waitForSelector('.layer_publish, .publish-layer, #publish-layer', {
+    timeout: 5000,
+  }).catch(() => page.waitForTimeout(2000));
 
-  // 사이드바가 열린 후 태그 재시도 (새 에디터는 태그가 사이드바 안에 있을 수 있음)
-  try {
-    const { setTagsInEditor: setTags } = await import('../utils/tistoryClassifier.js');
-    const generatedTags = await generateBlogTags(
-      keyword,
-      content.blog_draft?.seo_keywords ?? [],
-      content.category ?? 'economy'
-    );
-    await setTags(page, generatedTags);
-  } catch { /* 태그 실패해도 발행 계속 */ }
+  // 사이드바 열린 후: 카테고리 + 태그 설정 (새 에디터는 사이드바 안에 위치)
+  if (bestCategory) {
+    try {
+      const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
+      logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Category set failed: ${err.message}`);
+    }
+  }
+  if (generatedTags.length) {
+    try {
+      await setTagsInEditor(page, generatedTags);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Tag set failed: ${err.message}`);
+    }
+  }
 
   // "비공개 저장" 클릭 → 인터셉트돼 공개 저장됨
   let publishClicked = false;
@@ -400,11 +440,53 @@ async function editExistingPost(page, rewrite, blogName) {
     }
   });
 
-  // "완료" → "발행" 클릭
+  // 사이드바 열기 (publishPost와 동일한 fallback 배열 + 가시성 검증)
+  await page.waitForTimeout(2000);
+  const editSidebarBtns = [
+    'button:has-text("완료")',
+    'button:has-text("발행")',
+    'a:has-text("발행")',
+    '[role="button"]:has-text("발행")',
+    'button[class*="publish"]',
+    'button[class*="Publish"]',
+    'button[data-btn="publish"]',
+    '#publish-layer-btn',
+    '.btn-publish',
+    '.publish-btn',
+    '.wrap_btn_publish button',
+    '.area_publish button',
+  ];
+  let editSidebarOpened = false;
+  for (const sel of editSidebarBtns) {
+    try {
+      const el = await page.$(sel);
+      if (!el) continue;
+      const visible = await el.isVisible().catch(() => false);
+      if (!visible) continue;
+      await el.click({ timeout: 3000 });
+      logger.info(`[blog_publisher] Edit sidebar opened via: ${sel}`);
+      editSidebarOpened = true;
+      break;
+    } catch { /* 다음 시도 */ }
+  }
+  if (!editSidebarOpened) {
+    const allBtns = await page.evaluate(() =>
+      [...document.querySelectorAll('button, a[role="button"], [role="button"]')]
+        .map((el) => `[${el.tagName}] class="${el.className}" text="${el.innerText?.trim().slice(0, 40)}"`)
+        .slice(0, 30)
+    ).catch(() => []);
+    logger.error(`[blog_publisher] 수정 페이지 버튼 목록:\n${allBtns.join('\n')}`);
+
+    const screenshotPath = path.resolve(__dirname, `../../output/blog/debug_edit_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    logger.error(`[blog_publisher] 수정 사이드바 버튼 없음. 스크린샷: ${screenshotPath}`);
+    await page.unroute('**/manage/post.json');
+    throw new Error('수정 사이드바를 열 수 없음 — 스크린샷 확인 요망');
+  }
+  await page.waitForTimeout(2000);
+
   try {
-    await page.click('button:has-text("완료")', { timeout: 10000 });
-    await page.waitForTimeout(2000);
-    for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")']) {
+    for (const sel of ['button:has-text("공개 발행")', 'button:has-text("발행")', 'button:has-text("비공개 저장")', 'button:has-text("저장")']) {
       try {
         await page.click(sel, { timeout: 5000 });
         break;
@@ -551,7 +633,7 @@ export async function publishBlogPosts(contentData) {
 
     try {
       logger.info(`[blog_publisher] Publishing: ${content.keyword}`);
-      const postUrl = await publishPost(page, content, blogName);
+      const postUrl = await publishPost(page, content, blogName, context);
 
       if (postUrl) {
         savePublishResult(

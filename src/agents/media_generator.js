@@ -876,6 +876,75 @@ async function generateThumbnailB(content, charImageUrl, outputPath) {
   return outputPath;
 }
 
+// ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
+/**
+ * YouTube Shorts는 세로 포맷 썸네일이 필요.
+ * 캐릭터 이미지를 배경으로 깔고 상단에 채널명, 하단에 키워드 텍스트 오버레이.
+ */
+async function generateShortsThumbnail(content, charImageUrl, outputPath) {
+  const W = 1080, H = 1920;
+  const hook = content.shortform_script?.hook ?? content.keyword;
+  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+
+  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
+    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
+    : await fs.readFile(charImageUrl);
+
+  const charBuf = await sharp(charRaw)
+    .resize(W, H, { fit: 'cover', position: 'centre' })
+    .png()
+    .toBuffer();
+
+  // 상단 + 하단 그라디언트 오버레이
+  const overlay = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <defs>
+        <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#000000" stop-opacity="0.75"/>
+          <stop offset="25%"  stop-color="#000000" stop-opacity="0.0"/>
+        </linearGradient>
+        <linearGradient id="bot" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#000000" stop-opacity="0.0"/>
+          <stop offset="60%"  stop-color="#000000" stop-opacity="0.85"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.95"/>
+        </linearGradient>
+      </defs>
+      <rect width="${W}" height="${H}" fill="url(#top)"/>
+      <rect y="${Math.round(H * 0.55)}" width="${W}" height="${Math.round(H * 0.45)}" fill="url(#bot)"/>
+
+      <!-- 채널명 상단 -->
+      <text x="${W / 2}" y="110"
+        font-family="${FONT}" font-size="52" font-weight="bold" fill="white"
+        text-anchor="middle">📺 매일읽어주는남자</text>
+
+      <!-- 키워드 텍스트 하단 -->
+      <text x="${W / 2}" y="${H - 280}"
+        font-family="${FONT}" font-size="88" font-weight="bold" fill="#FCD34D"
+        text-anchor="middle">${esc(line1)}</text>
+      ${line2 ? `<text x="${W / 2}" y="${H - 170}"
+        font-family="${FONT}" font-size="76" font-weight="bold" fill="white"
+        text-anchor="middle">${esc(line2)}</text>` : ''}
+
+      <!-- 하단 구독 CTA -->
+      <rect x="${W / 2 - 200}" y="${H - 110}" width="400" height="72" rx="36" fill="#FF0000"/>
+      <text x="${W / 2}" y="${H - 62}"
+        font-family="${FONT}" font-size="40" font-weight="bold" fill="white"
+        text-anchor="middle">구독 &amp; 좋아요 👍</text>
+    </svg>`
+  );
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await sharp(charBuf)
+    .composite([{ input: overlay }])
+    .jpeg({ quality: 95 })
+    .toFile(outputPath);
+
+  logger.info(`[media_generator] Shorts thumbnail saved: ${outputPath}`);
+  return outputPath;
+}
+
 // ── 썸네일 이미지 합성 (1280×720) ────────────────────────────────────────
 /**
  * 레이아웃:
@@ -1273,8 +1342,9 @@ async function generateMedia(content) {
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
   const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}.srt`);
 
-  const thumbPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_a.jpg`);
-  const thumbPathB = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_b.jpg`);
+  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_a.jpg`);
+  const thumbPathB      = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_b.jpg`);
+  const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
   const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_b: null };
 
   if (!config.openai.apiKey) {
@@ -1377,6 +1447,15 @@ async function generateMedia(content) {
       logger.info(`[media_generator] Thumbnail B saved`);
     } catch (err) {
       logger.warn(`[media_generator] Thumbnail B failed: ${err.message}`);
+    }
+
+    try {
+      // 쇼츠용 세로형 썸네일 (1080×1920, 9:16)
+      await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
+      result.thumbnail_shorts = thumbShortsPath;
+      logger.info(`[media_generator] Shorts thumbnail saved`);
+    } catch (err) {
+      logger.warn(`[media_generator] Shorts thumbnail failed: ${err.message}`);
     }
   }
 

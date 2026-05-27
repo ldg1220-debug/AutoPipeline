@@ -93,9 +93,13 @@ export async function generateYouTubeDescription(content, blogPostUrl = null) {
 }
 
 function assembleDescription({ hookLines, bullets, blogPostUrl, seriesName, hashtags }) {
-  const bulletStr = bullets.map((b) => `• ${b.replace(/^•\s*/, '')}`).join('\n');
-  const blogLine  = blogPostUrl ? `\n👉 블로그 자세히 보기: ${blogPostUrl}\n` : '';
-  const hashtagStr = hashtags.slice(0, 5).join(' ');
+  const bulletStr  = bullets.map((b) => `• ${b.replace(/^•\s*/, '')}`).join('\n');
+  const blogLine   = blogPostUrl ? `\n👉 블로그 자세히 보기: ${blogPostUrl}\n` : '';
+  // 해시태그 3~6개 — 3개 미만이면 채우고, 6개 초과하면 자름 (알고리즘 최적 범위)
+  const clampedHashtags = hashtags.length < 3
+    ? [...hashtags, '#경제', '#재테크', '#매일읽어주는남자'].slice(0, 6)
+    : hashtags.slice(0, 6);
+  const hashtagStr = clampedHashtags.join(' ');
 
   return [
     hookLines,
@@ -207,16 +211,19 @@ export async function generateYouTubeTags(keyword, category, seoKeywords = []) {
   }
 }
 
-// ── GPT-4o-mini: 제목 SEO 최적화 ─────────────────────────────────────────
+// ── GPT-4o-mini: 제목 SEO 최적화 (썸네일↔제목 상호보완 전략) ─────────────
 /**
- * content_creator가 생성한 youtube_title을 그대로 쓰되,
- * 없거나 너무 짧으면 CTR 최적화 제목 생성.
+ * 썸네일↔제목 상호보완 전략:
+ *   - 썸네일 = 감정·궁금증 유발 (이미 생성된 이미지가 담당)
+ *   - 제목   = 구체적 약속·정보 제공 ("왜 봐야 하는가"를 명확히)
+ *   → 제목이 썸네일의 궁금증에 답하는 구체적 정보를 담아야 CTR 극대화
+ *
  * - 40~60자 권장
- * - 숫자, 질문, 혜택, 감탄 포함
+ * - 숫자·구체적 수치 포함 (막연한 "알아보자" 금지)
  * - 채널명 접두어 제거 (썸네일에 이미 있음)
+ * - 혜택·행동 유도·결과 중심으로 작성
  */
 export async function generateYouTubeTitle(keyword, hook, existingTitle = null) {
-  // 기존 제목이 40자 이상이면 그대로 사용
   if (existingTitle && existingTitle.replace(/^\[.*?\]\s*/, '').length >= 20) {
     return existingTitle;
   }
@@ -234,15 +241,24 @@ export async function generateYouTubeTitle(keyword, hook, existingTitle = null) 
         messages: [{
           role: 'user',
           content:
-            `YouTube 쇼츠 영상 제목을 SEO 최적화해서 만들어줘.\n` +
+            `YouTube 영상 제목을 CTR 최적화해서 만들어줘.\n\n` +
             `키워드: ${keyword}\n` +
-            `훅: ${(hook ?? '').slice(0, 80)}\n` +
+            `훅/주제: ${(hook ?? '').slice(0, 80)}\n` +
             `기존 제목: ${existingTitle ?? '없음'}\n\n` +
-            `조건: 40~60자, 숫자·질문·혜택 중 하나 이상 포함, 검색 키워드 포함\n` +
+            `핵심 전략 — 썸네일↔제목 상호보완:\n` +
+            `  - 썸네일은 감정·궁금증을 담당함 (이미 처리됨)\n` +
+            `  - 제목은 썸네일의 궁금증에 답하는 "구체적 약속"이어야 함\n` +
+            `  - 예) 썸네일: 충격받은 얼굴 → 제목: "금리 0.25% 내렸는데 내 대출이자 月 3만원 줄어드는 이유"\n\n` +
+            `제목 작성 규칙:\n` +
+            `  - 40~60자\n` +
+            `  - 숫자·기간·금액 등 구체적 수치 반드시 포함\n` +
+            `  - "~알아보자", "~에 대해" 같은 막연한 표현 금지\n` +
+            `  - 시청자가 얻을 구체적 이익/결과를 명시\n` +
+            `  - 검색 키워드 자연스럽게 포함\n\n` +
             `제목 텍스트만 반환 (따옴표 없이):`,
         }],
         temperature: 0.8,
-        max_tokens: 80,
+        max_tokens: 100,
       },
       {
         headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
@@ -250,7 +266,7 @@ export async function generateYouTubeTitle(keyword, hook, existingTitle = null) 
       }
     );
     const title = res.data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
-    logger.info(`[youtubeSEO] Optimized title: "${title}"`);
+    logger.info(`[youtubeSEO] Optimized title (complementary): "${title}"`);
     return title || existingTitle || `${keyword} 핵심 정리`;
   } catch (err) {
     logger.warn(`[youtubeSEO] Title optimization failed: ${err.message}`);

@@ -41,10 +41,10 @@ export const config = {
     // Naver Cloud Platform → AI·Application Services → Clova Voice
     clientId:     process.env.NAVER_CLOVA_CLIENT_ID,
     clientSecret: process.env.NAVER_CLOVA_CLIENT_SECRET,
-    // 추천: nara_call (콜센터 여성, 밝고 명료) | nara (일반 여성) | kyunghun (남성)
-    speaker:      process.env.CLOVA_VOICE_SPEAKER || 'nara_call',
-    speed:        parseInt(process.env.CLOVA_VOICE_SPEED  || '0', 10),   // -5~5
-    pitch:        parseInt(process.env.CLOVA_VOICE_PITCH  || '2', 10),   // -5~5, +2=약간 높고 귀여운 음조
+    // 매읽남 캐릭터: kyunghun(남성) + pitch +4 + speed +1 = 귀엽고 활기찬 남자 목소리
+    speaker:      process.env.CLOVA_VOICE_SPEAKER || 'kyunghun',
+    speed:        parseInt(process.env.CLOVA_VOICE_SPEED  || '1', 10),   // -5~5, +1=약간 빠른 템포
+    pitch:        parseInt(process.env.CLOVA_VOICE_PITCH  || '4', 10),   // -5~5, +4=귀여운 음조
     volume:       parseInt(process.env.CLOVA_VOICE_VOLUME || '0', 10),
   },
   shotstack: {
@@ -55,6 +55,16 @@ export const config = {
     clientId:     process.env.YOUTUBE_CLIENT_ID,
     clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
     refreshToken: process.env.YOUTUBE_REFRESH_TOKEN,
+    channelUrl:   process.env.YOUTUBE_CHANNEL_URL || 'https://www.youtube.com/@매일읽어주는남자',
+    // 카테고리별 재생목록 ID — YouTube Studio에서 미리 생성 후 .env에 입력
+    playlists: {
+      economy:       process.env.YOUTUBE_PLAYLIST_ECONOMY       || null,
+      finance:       process.env.YOUTUBE_PLAYLIST_ECONOMY       || null,
+      realestate:    process.env.YOUTUBE_PLAYLIST_REALESTATE    || null,
+      health:        process.env.YOUTUBE_PLAYLIST_HEALTH        || null,
+      entertainment: process.env.YOUTUBE_PLAYLIST_ENTERTAINMENT || null,
+      social:        process.env.YOUTUBE_PLAYLIST_ENTERTAINMENT || null,
+    },
   },
   // 카테고리별 별도 YouTube 채널 (없으면 default youtube 채널 사용)
   youtubeChannels: {
