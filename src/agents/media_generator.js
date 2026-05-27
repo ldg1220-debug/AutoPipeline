@@ -61,7 +61,13 @@ async function generateImageGrokAurora(prompt, outputPath) {
       await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
       return outputPath;
     }
-    if (item.url) return item.url;
+    if (item.url) {
+      // xAI CDN URL은 수분 내 만료 → 즉시 다운로드해서 로컬 저장
+      const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+      await fs.writeFile(outputPath, Buffer.from(imgRes.data));
+      return outputPath;
+    }
     return null;
   } catch (err) {
     const body   = err.response?.data;
@@ -278,7 +284,11 @@ async function generateSceneImages(keyword, scripts, category) {
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         } else if (item.url) {
-          imageUrl = item.url;
+          // OpenAI 임시 URL도 만료 가능 → 즉시 다운로드
+          const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+          await fs.mkdir(path.dirname(imgPath), { recursive: true });
+          await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+          imageUrl = imgPath;
         }
         if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, gpt-image-1): ${keyword}`);
       } catch (err) {
@@ -1437,8 +1447,16 @@ async function generateLongFormMedia(content) {
           { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
         );
         const item = res.data.data[0];
-        if (item.b64_json) { await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64')); imageUrl = imgPath; }
-        else if (item.url) { imageUrl = item.url; }
+        if (item.b64_json) {
+          await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+          imageUrl = imgPath;
+        } else if (item.url) {
+          // 임시 URL 만료 전 즉시 다운로드
+          const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+          await fs.mkdir(path.dirname(imgPath), { recursive: true });
+          await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+          imageUrl = imgPath;
+        }
       } catch (err) {
         logger.warn(`[media_generator] Long-form gpt-image-1 s${i} failed: ${err.message}`);
       }

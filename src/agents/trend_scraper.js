@@ -58,7 +58,13 @@ const RSS_SOURCES = [
  */
 async function fetchRSS(source) {
   try {
-    const response = await axios.get(source.url, { timeout: 8000 });
+    const response = await axios.get(source.url, {
+      timeout: 12000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+      },
+    });
     const parsed = await parseStringPromise(response.data, { explicitArray: false });
     const items = parsed?.rss?.channel?.item ?? [];
     const itemArray = Array.isArray(items) ? items : [items];
@@ -114,7 +120,7 @@ ${JSON.stringify(keywords, null, 2)}`;
   const response = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: scoringPrompt }],
       temperature: 0.2,
       response_format: { type: 'json_object' },
@@ -124,7 +130,7 @@ ${JSON.stringify(keywords, null, 2)}`;
         Authorization: `Bearer ${config.openai.apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 30000,
+      timeout: 45000,
     }
   );
 
@@ -161,7 +167,22 @@ export async function fetchTrends() {
       source_url: item.link,
     }));
 
-    const scored = await scoreKeywordsWithLLM(keywordInput);
+    let scored;
+    try {
+      scored = await scoreKeywordsWithLLM(keywordInput);
+    } catch (llmErr) {
+      // LLM 타임아웃 시 RSS 항목으로 기본 스코어 부여 후 진행
+      logger.warn(`[trend_scraper] LLM scoring failed (${llmErr.message}). Using RSS items with default scores.`);
+      scored = keywordInput.slice(0, 10).map((item) => ({
+        keyword: item.keyword,
+        source_url: item.source_url,
+        category: 'economy',
+        virality: 25,
+        commercial_value: 25,
+        freshness_hours: 15,
+        niche_premium: 10,
+      }));
+    }
 
     // 총점 계산 후 상위 5개 선정 (niche_premium 포함)
     const sorted = scored
