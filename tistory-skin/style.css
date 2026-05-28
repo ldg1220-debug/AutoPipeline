@@ -224,6 +224,7 @@ img { max-width: 100%; height: auto; display: block; }
 .post-grid .post-card:first-child {
   grid-column: 1 / -1;
   border-radius: 14px;
+  min-height: 260px;
 }
 .post-grid .post-card:first-child .post-card-link {
   flex-direction: row;
@@ -261,16 +262,19 @@ img { max-width: 100%; height: auto; display: block; }
   border: 1px solid var(--color-border);
   overflow: hidden;
   transition: transform .2s, box-shadow .2s;
+  display: flex;
+  flex-direction: column;
 }
 .post-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 8px 24px rgba(37,99,235,.1);
 }
 
+/* flex:1 대신 height:100% 사용 시 grid auto-row에서 0으로 붕괴되는 버그 방지 */
 .post-card-link {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
 }
 
 .post-thumb {
