@@ -284,6 +284,11 @@ async function runPipeline() {
       path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`),
       publishResults
     );
+    // 블로그 파이프라인이 cron으로 독립 실행될 때도 YouTube URL을 읽을 수 있도록 저장
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/youtube_results_${date}.json`),
+      publishResults
+    );
     logger.info(`[app] Agent 4 complete. Published: ${publishResults.results?.length ?? 0}`);
   } catch (err) {
     logger.error('[app] Agent 4 (auto_publisher) failed.', { message: err.message });
@@ -354,6 +359,15 @@ async function runBlogPipeline(youtubeResults = null) {
   if (!keywordData.contents?.length) {
     logger.warn('[app] Blog Part 1: no new keywords. Skipping blog pipeline.');
     return;
+  }
+
+  // YouTube 발행 결과 로드 — 직접 전달 우선, 없으면 오늘 저장 파일에서 읽기
+  if (!youtubeResults?.results?.length) {
+    try {
+      const ytFile = path.resolve(__dirname, `../output/scripts/youtube_results_${date}.json`);
+      youtubeResults = JSON.parse(await import('fs').then((m) => m.promises.readFile(ytFile, 'utf-8')));
+      logger.info(`[app] Blog: loaded YouTube results from file (${youtubeResults.results?.length ?? 0}건)`);
+    } catch { /* 파일 없으면 youtube_url 없이 진행 */ }
   }
 
   // YouTube 발행 결과가 있으면 키워드별 youtube_url 매핑
@@ -533,6 +547,15 @@ export async function runUnifiedPipeline() {
     blogDraftData = await enhanceAllBlogDrafts(keywordInput);
     await writeJSON(path.resolve(__dirname, `../output/blog/unified_draft_${date}.json`), blogDraftData);
     logger.info(`[app] Unified Step 2 complete. Blog drafts: ${blogDraftData.contents?.length ?? 0}`);
+
+    // Blog QA: 초안 품질 검수 — REJECTED 항목은 이후 발행에서 제외
+    try {
+      blogDraftData = await runBlogQA(blogDraftData);
+      const passed = (blogDraftData.contents ?? []).filter((c) => c.blog_qa?.status !== 'REJECTED').length;
+      logger.info(`[app] Unified Step 2 (Blog QA) complete. Passed: ${passed}/${blogDraftData.contents?.length ?? 0}`);
+    } catch (err) {
+      logger.warn('[app] Unified Step 2 (Blog QA) failed. Continuing without QA filter.', { message: err.message });
+    }
   } catch (err) {
     logger.warn('[app] Unified Step 2 (blog draft) failed. Continuing with empty drafts.', { message: err.message });
     blogDraftData = { contents: trendData.selected_items.map((i) => ({ keyword: i.keyword, category: i.category, blog_draft: null })) };
@@ -671,7 +694,7 @@ export async function runUnifiedPipeline() {
     if (youtubeResults?.results) {
       for (const item of monetizedData.contents ?? []) {
         const yt = youtubeResults.results.find((r) => r.keyword === item.keyword);
-        if (yt?.youtube?.url) item.blog_post_url = yt.youtube.url;
+        if (yt?.youtube?.url) item.youtube_url = yt.youtube.url;
       }
     }
 
@@ -683,11 +706,40 @@ export async function runUnifiedPipeline() {
     logger.warn('[app] Unified Step 6 (blog publish) failed.', { message: err.message });
   }
 
+  // ── Step 7: Blog Analytics + 성과 부진 재작성 ────────────────────────────
+  try {
+    await runBlogAnalytics();
+    logger.info('[app] Unified Step 7 (blog analytics) complete.');
+    const underperformers = identifyUnderperformers();
+    if (underperformers.length > 0) {
+      logger.info(`[app] Unified Step 7: ${underperformers.length} underperformers found. Rewriting...`);
+      const rewrites = await rewriteUnderperformers(underperformers);
+      if (rewrites.length > 0) {
+        const editResults = await editBlogPosts(rewrites);
+        logger.info(`[app] Unified Step 7: rewritten ${editResults.filter((r) => r.edit_status === 'edited').length}/${rewrites.length}`);
+      }
+    }
+  } catch (err) {
+    logger.warn('[app] Unified Step 7 (analytics/rewrite) failed.', { message: err.message });
+  }
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  logger.info(`[app] ===== Unified Pipeline finished in ${elapsed}s =====`);
+  const unifSummary = {
+    date: new Date().toISOString().slice(0, 10),
+    elapsed_sec: elapsed,
+    total: triangleContents.length,
+    long_form: triangleContents.filter((c) => c.long_video?.sections?.length).length,
+    dry_run: config.runtime.dryRun,
+  };
+  logger.info(`[app] ===== Unified Pipeline finished in ${elapsed}s =====`, unifSummary);
+  await sendDailyReport(unifSummary);
 
   checkSubscribers().catch((err) =>
     logger.warn('[app] Subscriber check failed (non-critical):', { message: err.message })
+  );
+
+  runProjectManagerReview().catch((err) =>
+    logger.warn('[app] Project manager review failed (non-critical):', { message: err.message })
   );
 
   return triangleContents;

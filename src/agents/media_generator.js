@@ -860,79 +860,6 @@ async function generateThumbnailTitle(keyword, hook) {
   }
 }
 
-// ── 썸네일 Variant B: 캐릭터 풀블리드 + 오버레이 텍스트 ───────────────────
-/**
- * Variant B 레이아웃:
- *   캐릭터 이미지를 전체 배경으로 채우고,
- *   좌측 60% 위에 반투명 다크 그라디언트 + 오렌지 강조 제목.
- *   → 임팩트·긴박감 강조 (Variant A의 '정보형'과 대비)
- */
-async function generateThumbnailB(content, charImageUrl, outputPath) {
-  const hook = content.shortform_script?.hook ?? content.keyword;
-  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
-
-  const W = 1280, H = 720;
-  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-
-  // 캐릭터 이미지 전체 배경으로 리사이즈 (로컬 파일 또는 URL 모두 지원)
-  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
-    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
-    : await fs.readFile(charImageUrl);
-  const charBuf = await sharp(charRaw)
-    .resize(W, H, { fit: 'cover', position: 'top' })
-    .png()
-    .toBuffer();
-
-  // 좌측 그라디언트 오버레이 SVG (투명→다크)
-  const gradientOverlay = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%"  stop-color="#000000" stop-opacity="0.88"/>
-          <stop offset="60%" stop-color="#000000" stop-opacity="0.55"/>
-          <stop offset="100%" stop-color="#000000" stop-opacity="0.05"/>
-        </linearGradient>
-      </defs>
-      <rect width="${W}" height="${H}" fill="url(#g)"/>
-    </svg>`
-  );
-
-  // 텍스트 레이어 SVG (동적 폰트 크기)
-  const charWidthB = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
-  const maxTextWB  = Math.round(W * 0.55) - 52 - 40; // 그라디언트 영역 55% 활용
-  const maxCharsB  = Math.max(charWidthB(line1), charWidthB(line2 ?? ''));
-  const fontSizeB  = Math.min(96, Math.floor(maxTextWB / Math.max(maxCharsB, 1)));
-  const lineGapB   = Math.round(fontSizeB * 1.25);
-
-  const textSvg = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <text x="52" y="${H / 2 - lineGapB * 0.2}" font-family="${FONT}" font-size="${fontSizeB}" font-weight="bold" fill="#FCD34D">${esc(line1)}</text>
-      ${line2 ? `<text x="52" y="${H / 2 - lineGapB * 0.2 + lineGapB}" font-family="${FONT}" font-size="${fontSizeB}" font-weight="bold" fill="#FFFFFF">${esc(line2)}</text>` : ''}
-      <text x="52" y="${H - 88}" font-family="${FONT}" font-size="30" fill="#FDA97A">📺 매일읽어주는남자</text>
-      <rect x="52" y="${H - 54}" width="120" height="5" rx="3" fill="#f97316"/>
-    </svg>`
-  );
-
-  // 하단 오렌지 액센트 바
-  const accentBar = await sharp({
-    create: { width: W, height: 8, channels: 4, background: { r: 249, g: 115, b: 22, alpha: 1 } },
-  }).png().toBuffer();
-
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-
-  await sharp(charBuf)
-    .composite([
-      { input: gradientOverlay },
-      { input: textSvg },
-      { input: accentBar, left: 0, top: H - 8 },
-    ])
-    .jpeg({ quality: 95 })
-    .toFile(outputPath);
-
-  logger.info(`[media_generator] Thumbnail B saved: ${outputPath}`);
-  return outputPath;
-}
 
 // ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
 /**
@@ -1400,10 +1327,9 @@ async function generateMedia(content) {
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
   const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}.srt`);
 
-  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_a.jpg`);
-  const thumbPathB      = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_b.jpg`);
+  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
   const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_b: null };
+  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_shorts: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -1487,28 +1413,18 @@ async function generateMedia(content) {
     sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 A·B 생성 (Act 0 = 도입 씬 이미지 사용)
+  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형)
   const thumbSceneUrl = sceneUrls[0];
   if (thumbSceneUrl) {
     try {
       await generateThumbnail(content, thumbSceneUrl, thumbPath);
       result.thumbnail = thumbPath;
-      logger.info(`[media_generator] Thumbnail A saved`);
+      logger.info(`[media_generator] Thumbnail saved`);
     } catch (err) {
-      logger.warn(`[media_generator] Thumbnail A failed: ${err.message}`);
+      logger.warn(`[media_generator] Thumbnail failed: ${err.message}`);
     }
 
     try {
-      // Variant B는 Act 1(본론) 씬 이미지로 변화를 줌 — 없으면 Act 0 재사용
-      await generateThumbnailB(content, sceneUrls[1] ?? thumbSceneUrl, thumbPathB);
-      result.thumbnail_b = thumbPathB;
-      logger.info(`[media_generator] Thumbnail B saved`);
-    } catch (err) {
-      logger.warn(`[media_generator] Thumbnail B failed: ${err.message}`);
-    }
-
-    try {
-      // 쇼츠용 세로형 썸네일 (1080×1920, 9:16)
       await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
       result.thumbnail_shorts = thumbShortsPath;
       logger.info(`[media_generator] Shorts thumbnail saved`);

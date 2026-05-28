@@ -5,11 +5,11 @@
  *   node scripts/set-thumbnail.js <videoId> <썸네일파일경로>
  *
  * 예시:
- *   node scripts/set-thumbnail.js abc123XYZ output/media/금리인하_thumb_a.jpg
+ *   node scripts/set-thumbnail.js abc123XYZ output/media/금리인하_thumb.jpg
  *   node scripts/set-thumbnail.js abc123XYZ output/media/금리인하_thumb_shorts.jpg
  *
  * 건강 채널 영상은 --health 플래그 추가:
- *   node scripts/set-thumbnail.js abc123XYZ output/media/혈당관리_thumb_a.jpg --health
+ *   node scripts/set-thumbnail.js abc123XYZ output/media/혈당관리_thumb.jpg --health
  */
 import 'dotenv/config';
 import axios from 'axios';

@@ -155,7 +155,7 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
 
   // 쇼츠 썸네일: 세로(9:16) 우선, 없으면 가로 폴백 — 5초 대기 후 최대 3회 재시도
   const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
-  const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
+  const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb.jpg`);
   const shortsThumbExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
   const thumbPath = shortsThumbExists ? thumbShortsPath : thumbFallback;
   const thumbPathExists   = await fs.access(thumbPath).then(() => true).catch(() => false);
@@ -269,20 +269,19 @@ async function publishToYouTube(content, accessToken) {
   }
 
   // 썸네일 A 업로드 — 5초 대기 후 최대 3회 재시도 (YouTube 처리 시간 확보)
-  const thumbPathA = path.resolve(mediaDir, `${safeKeyword}_thumb_a.jpg`);
-  const thumbPathB = path.resolve(mediaDir, `${safeKeyword}_thumb_b.jpg`);
+  const thumbPath = path.resolve(mediaDir, `${safeKeyword}_thumb.jpg`);
 
   let thumbnailUploaded = false;
-  const thumbExists = await fs.access(thumbPathA).then(() => true).catch(() => false);
+  const thumbExists = await fs.access(thumbPath).then(() => true).catch(() => false);
   if (!thumbExists) {
-    logger.warn(`[auto_publisher] 썸네일 파일 없음: ${thumbPathA}`);
+    logger.warn(`[auto_publisher] 썸네일 파일 없음: ${thumbPath}`);
   } else {
     await new Promise((r) => setTimeout(r, 5000)); // YouTube 업로드 처리 대기
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPathA, accessToken);
+        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
         if (thumbnailUploaded) {
-          logger.info(`[auto_publisher] 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPathA}`);
+          logger.info(`[auto_publisher] 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPath}`);
           break;
         }
       } catch (err) {
@@ -291,21 +290,6 @@ async function publishToYouTube(content, accessToken) {
       }
     }
     if (!thumbnailUploaded) logger.error(`[auto_publisher] 썸네일 3회 모두 실패: ${videoId}`);
-  }
-
-  // A/B 테스트 레코드 저장 (Variant B가 있을 때만)
-  if (thumbnailUploaded) {
-    try {
-      const bExists = await fs.access(thumbPathB).then(() => true).catch(() => false);
-      db.prepare(`
-        INSERT INTO thumbnail_ab_tests (keyword, video_id, thumb_a_path, thumb_b_path)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(video_id) DO NOTHING
-      `).run(content.keyword, videoId, thumbPathA, bExists ? thumbPathB : null);
-      logger.info(`[auto_publisher] A/B test registered: ${videoId} (B variant: ${bExists ? 'ready' : 'not generated'})`);
-    } catch (err) {
-      logger.warn(`[auto_publisher] A/B test record failed: ${err.message}`);
-    }
   }
 
   return {

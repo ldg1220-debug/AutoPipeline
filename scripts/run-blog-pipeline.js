@@ -3,13 +3,15 @@
  * npm run blog:pipeline
  */
 import { mineKeywords } from '../src/agents/keyword_miner.js';
-import { enhanceAllBlogDrafts } from '../src/agents/blog_content_enhancer.js';
+import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll } from '../src/agents/monetizer.js';
-import { publishBlogPosts } from '../src/agents/blog_publisher.js';
-import { runBlogAnalytics } from '../src/agents/blog_analytics.js';
+import { publishBlogPosts, editBlogPosts } from '../src/agents/blog_publisher.js';
+import { runBlogAnalytics, identifyUnderperformers } from '../src/agents/blog_analytics.js';
 import { runBlogQA } from '../src/agents/qa_editor.js';
 import { runProjectManagerReview } from '../src/agents/project_manager.js';
+import { groupSimilarTopics } from '../src/agents/topic_grouper.js';
+import { analyzeCompetitors } from '../src/agents/competitor_analyzer.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -59,6 +61,23 @@ async function main() {
   if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] 처리할 키워드 없음 (신규 + DB pending 모두 0). 종료.');
     process.exit(0);
+  }
+
+  // Part 1.5: Topic Grouper — 유사 주제 키워드 묶기
+  try {
+    const grouped = await groupSimilarTopics(contentData);
+    Object.assign(contentData, grouped);
+    logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.5 Topic Grouper 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.6: Competitor Analyzer — 인사이트 캐시 (7일 주기)
+  try {
+    await analyzeCompetitors();
+    logger.info('[blog:pipeline] Part 1.6 완료 (경쟁 채널 분석).');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.6 Competitor Analyzer 실패 (계속 진행): ${err.message}`);
   }
 
   // Part 2: Content Enhancer
@@ -123,6 +142,27 @@ async function main() {
     logger.info('[blog:pipeline] Part 6 완료.');
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 6 실패: ${err.message}`);
+  }
+
+  // Part 6.5: 성과 부진 포스트 자동 재작성
+  try {
+    const underperformers = identifyUnderperformers();
+    if (underperformers.length > 0) {
+      logger.info(`[blog:pipeline] Part 6.5: ${underperformers.length}개 성과 부진 포스트 재작성 시작`);
+      const rewrites = await rewriteUnderperformers(underperformers);
+      if (rewrites.length > 0) {
+        const editResults = await editBlogPosts(rewrites);
+        const edited = editResults.filter((r) => r.edit_status === 'edited').length;
+        logger.info(`[blog:pipeline] Part 6.5 완료. 재작성 적용: ${edited}/${rewrites.length}건`);
+        await writeJSON(`${outDir}/analytics/rewrites_${date}.json`, {
+          rewritten_at: new Date().toISOString(), results: editResults,
+        });
+      }
+    } else {
+      logger.info('[blog:pipeline] Part 6.5: 재작성 대상 없음.');
+    }
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 6.5 성과 재작성 실패 (계속 진행): ${err.message}`);
   }
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
