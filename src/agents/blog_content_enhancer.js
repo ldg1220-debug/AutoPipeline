@@ -230,7 +230,6 @@ function buildAffiliateHooks(sections, affiliateCategory) {
     anchor_text:      `${affiliateCategory} 추천 상품 보기`,
   }];
 }
-}
 
 /**
  * content_creator의 blog_draft(sections 비어있음)를 3-Pass로 완성한다.
