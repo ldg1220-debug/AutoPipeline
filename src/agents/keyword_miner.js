@@ -237,7 +237,7 @@ export async function mineKeywords(seeds, topN = 30) {
     seed_count: seeds.length,
     total_suggestions: allSuggestions.length,
     new_keywords: newKeywords.length,
-    keywords: newKeywords,
+    contents: newKeywords,
   };
 }
 

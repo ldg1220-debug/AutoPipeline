@@ -44,7 +44,9 @@
     "unified": "node scripts/run-unified-pipeline.js",
     "unified:dry": "cross-env DRY_RUN=true node scripts/run-unified-pipeline.js",
     "project:review": "node scripts/run-project-review.js",
-    "project:manager": "node src/agents/project_manager.js"
+    "project:manager": "node src/agents/project_manager.js",
+    "rerun:media": "node scripts/rerun-media-upload.js",
+    "rerun:media:fresh": "node scripts/rerun-media-upload.js --delete-old"
   },
   "dependencies": {
     "axios": "^1.7.2",

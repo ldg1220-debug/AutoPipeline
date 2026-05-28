@@ -1325,7 +1325,7 @@ async function generateMedia(content) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const audioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp3`);
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
-  const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}.srt`);
+  const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.srt`);
 
   const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
   const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
