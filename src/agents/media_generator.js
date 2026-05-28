@@ -587,21 +587,75 @@ async function renderLabelPng(seriesName, outputPath) {
 async function renderSubtitlePngBuffer(text) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const fontSize = 36;
-  const lineH = Math.ceil(fontSize * 1.6);
-  const padding = 24;
+  const fontSize = 48;
+  const lineH = Math.ceil(fontSize * 1.55);
+  const padding = 28;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = wrapTextKorean(text, 22);
+  const lines = wrapTextKorean(text, 18);
   const boxH = lines.length * lineH + padding * 2;
-  const boxX = 90, boxW = 900;
-  const boxY = H - boxH - 115;
+  const boxX = 60, boxW = 960;
+  const boxY = H - boxH - 100;
+  // 텍스트 그림자 효과: 같은 텍스트를 살짝 오프셋으로 먼저 렌더링
+  const shadowElems = lines.map((line, i) => {
+    const y = boxY + padding + (i + 0.82) * lineH;
+    return `<text x="${W / 2 + 3}" y="${y + 3}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.6" text-anchor="middle">${esc(line)}</text>`;
+  }).join('\n');
   const textElems = lines.map((line, i) => {
-    const y = boxY + padding + (i + 0.8) * lineH;
+    const y = boxY + padding + (i + 0.82) * lineH;
     return `<text x="${W / 2}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(line)}</text>`;
   }).join('\n');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="14" fill="#000000" fill-opacity="0.82"/>
+    <defs>
+      <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000000" stop-opacity="0.75"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.92"/>
+      </linearGradient>
+    </defs>
+    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="16" fill="url(#subGrad)"/>
+    <rect x="${boxX}" y="${boxY}" width="6" height="${boxH}" rx="3" fill="#FACC15"/>
+    ${shadowElems}
     ${textElems}
+  </svg>`;
+  return await sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+/** 첫 프레임 전용 — 주제(키워드)를 화면 중앙에 크게 배치 */
+async function renderFirstFramePngBuffer(keyword, seriesName) {
+  const W = 1080, H = 1920;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = wrapTextKorean(keyword, 12);
+  const titleSize = 96;
+  const lineH = Math.ceil(titleSize * 1.3);
+  const blockH = lines.length * lineH + 60;
+  const blockY = Math.round(H * 0.38);
+  const shadowElems = lines.map((line, i) =>
+    `<text x="${W / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}" font-family="${FONT}" font-size="${titleSize}" font-weight="bold" fill="#000000" fill-opacity="0.55" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+  const titleElems = lines.map((line, i) =>
+    `<text x="${W / 2}" y="${blockY + 48 + (i + 0.85) * lineH}" font-family="${FONT}" font-size="${titleSize}" font-weight="bold" fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <defs>
+      <linearGradient id="grad" x1="0" y1="0.3" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="45%" stop-color="#000000" stop-opacity="0.70"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.90"/>
+      </linearGradient>
+    </defs>
+    <!-- 하단 그라데이션 오버레이 -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#grad)"/>
+    <!-- 주제 타이틀 배경 박스 -->
+    <rect x="60" y="${blockY}" width="${W - 120}" height="${blockH}" rx="20" fill="#000000" fill-opacity="0.55"/>
+    <!-- 좌측 강조 바 -->
+    <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
+    <!-- ▶ TODAY 뱃지 -->
+    <rect x="${W / 2 - 120}" y="${blockY - 58}" width="240" height="48" rx="24" fill="#FACC15"/>
+    <text x="${W / 2}" y="${blockY - 22}" font-family="${FONT}" font-size="26" font-weight="bold" fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>
+    ${shadowElems}
+    ${titleElems}
+    <!-- 시리즈명 -->
+    <text x="${W / 2}" y="${blockY + blockH + 54}" font-family="${FONT}" font-size="34" fill="#94a3b8" text-anchor="middle">${esc(seriesName ?? '매일읽어주는남자')}</text>
   </svg>`;
   return await sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -664,7 +718,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
  *   subtitle — 하단 자막 텍스트 (null 허용)
  *   duration — 프레임 표시 시간(초)
  */
-async function renderFramesWithFfmpeg(frames, audioPath, outputPath) {
+async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, seriesName } = {}) {
   const sessionId = Date.now().toString(36);
   const tmpDir    = path.resolve(path.dirname(outputPath), 'tmp_ffmpeg');
   await fs.mkdir(tmpDir, { recursive: true });
@@ -692,8 +746,12 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath) {
       : fallbackBg;
 
     const composites = [];
-    if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
-    if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+    if (i === 0 && keyword) {
+      composites.push({ input: await renderFirstFramePngBuffer(keyword, seriesName) });
+    } else {
+      if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
+      if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+    }
 
     const frameBuf = composites.length
       ? await sharp(baseBuf).composite(composites).png().toBuffer()
@@ -802,79 +860,6 @@ async function generateThumbnailTitle(keyword, hook) {
   }
 }
 
-// ── 썸네일 Variant B: 캐릭터 풀블리드 + 오버레이 텍스트 ───────────────────
-/**
- * Variant B 레이아웃:
- *   캐릭터 이미지를 전체 배경으로 채우고,
- *   좌측 60% 위에 반투명 다크 그라디언트 + 오렌지 강조 제목.
- *   → 임팩트·긴박감 강조 (Variant A의 '정보형'과 대비)
- */
-async function generateThumbnailB(content, charImageUrl, outputPath) {
-  const hook = content.shortform_script?.hook ?? content.keyword;
-  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
-
-  const W = 1280, H = 720;
-  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-
-  // 캐릭터 이미지 전체 배경으로 리사이즈 (로컬 파일 또는 URL 모두 지원)
-  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
-    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
-    : await fs.readFile(charImageUrl);
-  const charBuf = await sharp(charRaw)
-    .resize(W, H, { fit: 'cover', position: 'top' })
-    .png()
-    .toBuffer();
-
-  // 좌측 그라디언트 오버레이 SVG (투명→다크)
-  const gradientOverlay = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%"  stop-color="#000000" stop-opacity="0.88"/>
-          <stop offset="60%" stop-color="#000000" stop-opacity="0.55"/>
-          <stop offset="100%" stop-color="#000000" stop-opacity="0.05"/>
-        </linearGradient>
-      </defs>
-      <rect width="${W}" height="${H}" fill="url(#g)"/>
-    </svg>`
-  );
-
-  // 텍스트 레이어 SVG (동적 폰트 크기)
-  const charWidthB = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
-  const maxTextWB  = Math.round(W * 0.55) - 52 - 40; // 그라디언트 영역 55% 활용
-  const maxCharsB  = Math.max(charWidthB(line1), charWidthB(line2 ?? ''));
-  const fontSizeB  = Math.min(96, Math.floor(maxTextWB / Math.max(maxCharsB, 1)));
-  const lineGapB   = Math.round(fontSizeB * 1.25);
-
-  const textSvg = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <text x="52" y="${H / 2 - lineGapB * 0.2}" font-family="${FONT}" font-size="${fontSizeB}" font-weight="bold" fill="#FCD34D">${esc(line1)}</text>
-      ${line2 ? `<text x="52" y="${H / 2 - lineGapB * 0.2 + lineGapB}" font-family="${FONT}" font-size="${fontSizeB}" font-weight="bold" fill="#FFFFFF">${esc(line2)}</text>` : ''}
-      <text x="52" y="${H - 88}" font-family="${FONT}" font-size="30" fill="#FDA97A">📺 매일읽어주는남자</text>
-      <rect x="52" y="${H - 54}" width="120" height="5" rx="3" fill="#f97316"/>
-    </svg>`
-  );
-
-  // 하단 오렌지 액센트 바
-  const accentBar = await sharp({
-    create: { width: W, height: 8, channels: 4, background: { r: 249, g: 115, b: 22, alpha: 1 } },
-  }).png().toBuffer();
-
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-
-  await sharp(charBuf)
-    .composite([
-      { input: gradientOverlay },
-      { input: textSvg },
-      { input: accentBar, left: 0, top: H - 8 },
-    ])
-    .jpeg({ quality: 95 })
-    .toFile(outputPath);
-
-  logger.info(`[media_generator] Thumbnail B saved: ${outputPath}`);
-  return outputPath;
-}
 
 // ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
 /**
@@ -1342,10 +1327,9 @@ async function generateMedia(content) {
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
   const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}.srt`);
 
-  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_a.jpg`);
-  const thumbPathB      = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_b.jpg`);
+  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
   const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_b: null };
+  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_shorts: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -1429,28 +1413,18 @@ async function generateMedia(content) {
     sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 A·B 생성 (Act 0 = 도입 씬 이미지 사용)
+  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형)
   const thumbSceneUrl = sceneUrls[0];
   if (thumbSceneUrl) {
     try {
       await generateThumbnail(content, thumbSceneUrl, thumbPath);
       result.thumbnail = thumbPath;
-      logger.info(`[media_generator] Thumbnail A saved`);
+      logger.info(`[media_generator] Thumbnail saved`);
     } catch (err) {
-      logger.warn(`[media_generator] Thumbnail A failed: ${err.message}`);
+      logger.warn(`[media_generator] Thumbnail failed: ${err.message}`);
     }
 
     try {
-      // Variant B는 Act 1(본론) 씬 이미지로 변화를 줌 — 없으면 Act 0 재사용
-      await generateThumbnailB(content, sceneUrls[1] ?? thumbSceneUrl, thumbPathB);
-      result.thumbnail_b = thumbPathB;
-      logger.info(`[media_generator] Thumbnail B saved`);
-    } catch (err) {
-      logger.warn(`[media_generator] Thumbnail B failed: ${err.message}`);
-    }
-
-    try {
-      // 쇼츠용 세로형 썸네일 (1080×1920, 9:16)
       await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
       result.thumbnail_shorts = thumbShortsPath;
       logger.info(`[media_generator] Shorts thumbnail saved`);
@@ -1480,7 +1454,7 @@ async function generateMedia(content) {
       subtitle: scene.text,
       duration: scene.duration,
     }));
-    await renderFramesWithFfmpeg(frames, result.audio, videoPath);
+    await renderFramesWithFfmpeg(frames, result.audio, videoPath, { keyword: content.keyword, seriesName });
     result.video = videoPath;
   } catch (err) {
     logger.error(`[media_generator] Video render failed: ${content.keyword} | ${err.message}`);
@@ -1608,11 +1582,47 @@ async function generateLongFormMedia(content) {
   }));
 
   try {
-    await renderFramesWithFfmpeg(frames, mergedAudio, videoPath);
+    await renderFramesWithFfmpeg(frames, mergedAudio, videoPath, { keyword: content.keyword, seriesName: videoTitle });
     result.video = videoPath;
     logger.info(`[media_generator] Long-form video saved: ${videoPath}`);
   } catch (err) {
     logger.error(`[media_generator] Long-form ffmpeg render failed: ${err.message}`);
+  }
+
+  // ── 6. 숏폼 추출 — source_section 구간을 롱폼에서 잘라냄 ──────────────
+  if (result.video) {
+    try {
+      const sourceIdx = (content.shorts?.source_section ?? content.shortform_script?.source_section ?? 5) - 1;
+      const clampedIdx = Math.max(0, Math.min(sourceIdx, sectionDurations.length - 1));
+
+      // 섹션 누적 시작 시간 계산
+      let sectionStart = 0;
+      for (let i = 0; i < clampedIdx; i++) sectionStart += sectionDurations[i];
+      const sectionDur = Math.min(sectionDurations[clampedIdx] ?? 60, 59); // 최대 59초
+
+      const shortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_shorts.mp4`);
+      const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')
+        .replace(/'/g, "\\'").replace(/:/g, '\\:');
+
+      // 구간 잘라내기 + 9:16 크롭 + CTA 텍스트 오버레이
+      await execFileAsync(ffmpegPath, [
+        '-ss', String(sectionStart),
+        '-t',  String(sectionDur),
+        '-i',  result.video,
+        '-vf', [
+          'crop=ih*9/16:ih:(iw-ih*9/16)/2:0',
+          `drawtext=text='${ctaText}':fontsize=28:fontcolor=white:x=(w-tw)/2:y=h-80:box=1:boxcolor=black@0.6:boxborderw=8`,
+        ].join(','),
+        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', shortsPath,
+      ]);
+
+      result.shorts_video = shortsPath;
+      result.shorts_section_idx = clampedIdx;
+      result.shorts_start_sec   = sectionStart;
+      logger.info(`[media_generator] Shorts extracted from section ${clampedIdx + 1} (${sectionStart}s~${sectionStart + sectionDur}s): ${shortsPath}`);
+    } catch (err) {
+      logger.warn(`[media_generator] Shorts extraction failed: ${err.message}`);
+    }
   }
 
   return result;

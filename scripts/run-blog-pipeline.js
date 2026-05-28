@@ -3,11 +3,15 @@
  * npm run blog:pipeline
  */
 import { mineKeywords } from '../src/agents/keyword_miner.js';
-import { enhanceAllBlogDrafts } from '../src/agents/blog_content_enhancer.js';
+import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll } from '../src/agents/monetizer.js';
-import { publishBlogPosts } from '../src/agents/blog_publisher.js';
-import { runBlogAnalytics } from '../src/agents/blog_analytics.js';
+import { publishBlogPosts, editBlogPosts } from '../src/agents/blog_publisher.js';
+import { runBlogAnalytics, identifyUnderperformers } from '../src/agents/blog_analytics.js';
+import { runBlogQA } from '../src/agents/qa_editor.js';
+import { runProjectManagerReview } from '../src/agents/project_manager.js';
+import { groupSimilarTopics } from '../src/agents/topic_grouper.js';
+import { analyzeCompetitors } from '../src/agents/competitor_analyzer.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -59,15 +63,55 @@ async function main() {
     process.exit(0);
   }
 
+  // Part 1.5: Topic Grouper — 유사 주제 키워드 묶기
+  try {
+    const grouped = await groupSimilarTopics(contentData);
+    Object.assign(contentData, grouped);
+    logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.5 Topic Grouper 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.6: Competitor Analyzer — 인사이트 캐시 (7일 주기)
+  try {
+    await analyzeCompetitors();
+    logger.info('[blog:pipeline] Part 1.6 완료 (경쟁 채널 분석).');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.6 Competitor Analyzer 실패 (계속 진행): ${err.message}`);
+  }
+
   // Part 2: Content Enhancer
   const draftData = await enhanceAllBlogDrafts(contentData);
   await writeJSON(`${outDir}/blog/draft_${date}.json`, draftData);
   logger.info(`[blog:pipeline] Part 2 완료. 초안: ${draftData.contents?.length ?? 0}개`);
 
+  // Part 2.5: Blog QA — 정합성·흐름·분량 검수 + 자동 재작성
+  let qaData = draftData;
+  try {
+    qaData = await runBlogQA(draftData);
+    const rejected = qaData.contents?.filter((c) => c.blog_qa?.status === 'REJECTED').length ?? 0;
+    const approved = qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED').length ?? 0;
+    logger.info(`[blog:pipeline] Part 2.5 완료. 승인: ${approved}개 / 탈락: ${rejected}개`);
+    await writeJSON(`${outDir}/blog/qa_${date}.json`, qaData);
+
+    // REJECTED 항목은 발행에서 제외
+    qaData = {
+      ...qaData,
+      contents: qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? [],
+    };
+    if (qaData.contents.length === 0) {
+      logger.warn('[blog:pipeline] QA 통과 항목 없음. 종료.');
+      process.exit(0);
+    }
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 2.5 QA 실패 (${err.message}). 원본으로 계속.`);
+    qaData = draftData;
+  }
+
   // Part 3: Asset Builder
   let assetData;
   try {
-    assetData = await buildAllAssets(draftData);
+    assetData = await buildAllAssets(qaData);
     await writeJSON(`${outDir}/blog/assets_${date}.json`, assetData);
     logger.info('[blog:pipeline] Part 3 완료.');
   } catch (err) {
@@ -100,6 +144,27 @@ async function main() {
     logger.warn(`[blog:pipeline] Part 6 실패: ${err.message}`);
   }
 
+  // Part 6.5: 성과 부진 포스트 자동 재작성
+  try {
+    const underperformers = identifyUnderperformers();
+    if (underperformers.length > 0) {
+      logger.info(`[blog:pipeline] Part 6.5: ${underperformers.length}개 성과 부진 포스트 재작성 시작`);
+      const rewrites = await rewriteUnderperformers(underperformers);
+      if (rewrites.length > 0) {
+        const editResults = await editBlogPosts(rewrites);
+        const edited = editResults.filter((r) => r.edit_status === 'edited').length;
+        logger.info(`[blog:pipeline] Part 6.5 완료. 재작성 적용: ${edited}/${rewrites.length}건`);
+        await writeJSON(`${outDir}/analytics/rewrites_${date}.json`, {
+          rewritten_at: new Date().toISOString(), results: editResults,
+        });
+      }
+    } else {
+      logger.info('[blog:pipeline] Part 6.5: 재작성 대상 없음.');
+    }
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 6.5 성과 재작성 실패 (계속 진행): ${err.message}`);
+  }
+
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   logger.info(`[blog:pipeline] ===== 완료 (${elapsed}s) =====`);
 
@@ -109,6 +174,14 @@ async function main() {
     const s = c.blog_publish;
     console.log(`  [${s?.status ?? '?'}] ${c.keyword} → ${s?.url ?? '-'}`);
   });
+
+  // Part 7: 프로젝트 매니저 검수 — 전체 파이프라인 품질·이상 점검
+  try {
+    await runProjectManagerReview();
+    logger.info('[blog:pipeline] Part 7 (프로젝트 검수) 완료.');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 7 실패: ${err.message}`);
+  }
 }
 
 main().catch((err) => {

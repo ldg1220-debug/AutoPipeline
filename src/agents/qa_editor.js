@@ -507,7 +507,228 @@ export async function runQA(contentData) {
   return runVisionQA(textResult);
 }
 
-// 단독 실행
+// ─────────────────────────────────────────────────────────────
+// Content Director QA — 정합성·분량·포맷 결정·자동 재작성
+// ─────────────────────────────────────────────────────────────
+
+// 한국어 TTS 기준: 약 200자/분 (남성 내레이터 자연스러운 속도)
+const KO_TTS_CHARS_PER_SEC = 200 / 60;
+
+function estimateDeliverySeconds(text) {
+  return Math.round((text ?? '').replace(/\s+/g, '').length / KO_TTS_CHARS_PER_SEC);
+}
+
+function getShortsText(shorts) {
+  if (!shorts) return '';
+  return [shorts.hook, shorts.context, shorts.insight, shorts.summary, shorts.cta]
+    .filter(Boolean).join(' ');
+}
+
+/**
+ * 분량 계산 후 포맷 결정.
+ * 반환: { format, estimated_sec, reason }
+ *   format: 'ok' | 'condense' | 'series' | 'longform'
+ */
+function decideFormat(content) {
+  const shortsText = getShortsText(content.shortform_script ?? content.shorts);
+  const sec = estimateDeliverySeconds(shortsText);
+
+  if (sec <= 60) return { format: 'ok', estimated_sec: sec, reason: '55초 이내 적합' };
+  if (sec <= 120) return { format: 'condense', estimated_sec: sec, reason: `${sec}초 → 55초로 압축 필요` };
+  return { format: 'series', estimated_sec: sec, reason: `${sec}초 → 시리즈 분할 또는 롱폼 전환 필요` };
+}
+
+/** LLM 정합성 + 흐름 검사 */
+async function runCoherenceCheck(keyword, blogSections, longVideoSections) {
+  const blogPreview = (blogSections ?? [])
+    .map((s) => `[${s.heading}] ${(s.body ?? '').slice(0, 150)}`)
+    .join('\n');
+  const videoPreview = (longVideoSections ?? []).slice(0, 5)
+    .map((s) => `[${s.name}] ${(s.script ?? '').slice(0, 100)}`)
+    .join('\n');
+
+  const prompt =
+    `한국 경제 콘텐츠 편집장으로서 아래 블로그·영상 스크립트를 검토하고 JSON으로만 응답하세요.\n\n` +
+    `키워드: ${keyword}\n\n` +
+    `[블로그 섹션]\n${blogPreview || '(없음)'}\n\n` +
+    `[영상 섹션]\n${videoPreview || '(없음)'}\n\n` +
+    `검토 항목:\n` +
+    `1. coherence_score (0~100): 섹션 간 논리적 연결이 자연스러운가? 모순·비약 없는가?\n` +
+    `2. flow_score (0~100): 배경→문제→해결→결론 흐름이 매끄러운가?\n` +
+    `3. issues (string[]): 발견된 구체적 문제. 없으면 빈 배열.\n` +
+    `4. rewrite_targets (string[]): 수정이 필요한 섹션 제목 목록. 없으면 빈 배열.\n\n` +
+    `JSON만 반환: {"coherence_score":0,"flow_score":0,"issues":[],"rewrite_targets":[]}`;
+
+  await throttle(2000);
+  const res = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    },
+    {
+      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 30000,
+    }
+  );
+  return JSON.parse(res.data.choices[0].message.content);
+}
+
+/** 정합성 문제 섹션 재작성 */
+async function rewriteSection(keyword, section, issue) {
+  const prompt =
+    `한국 경제 블로그 작가로서 아래 섹션을 다음 지적 사항에 맞게 수정하세요.\n\n` +
+    `키워드: ${keyword}\n` +
+    `섹션 제목: ${section.heading ?? section.name}\n` +
+    `현재 본문: ${(section.body ?? section.script ?? '').slice(0, 500)}\n` +
+    `지적 사항: ${issue}\n\n` +
+    `수정된 본문만 반환 (JSON 아님):`;
+
+  await throttle(1500);
+  const res = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.5,
+    },
+    {
+      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 20000,
+    }
+  );
+  return res.data.choices[0].message.content.trim();
+}
+
+/** 숏폼 스크립트 분량 압축 재작성 */
+async function condenseShorts(keyword, shorts) {
+  const prompt =
+    `한국 유튜브 숏폼 PD로서 아래 스크립트를 55초(약 180자) 이내로 압축하세요.\n\n` +
+    `키워드: ${keyword}\n` +
+    `현재 스크립트:\n${JSON.stringify(shorts, null, 2)}\n\n` +
+    `규칙:\n` +
+    `- hook: 최대 12자, ?/!로 끝남\n` +
+    `- context+insight+summary 합산 150자 이내\n` +
+    `- cta: 20자 이내\n` +
+    `- 핵심 메시지는 유지\n\n` +
+    `JSON만 반환: {"hook":"","context":"","insight":"","summary":"","cta":""}`;
+
+  await throttle(1500);
+  const res = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.4,
+      response_format: { type: 'json_object' },
+    },
+    {
+      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 20000,
+    }
+  );
+  return JSON.parse(res.data.choices[0].message.content);
+}
+
+/**
+ * Content Director QA — unified pipeline Step 3 이후, 미디어 제작 이전에 호출.
+ *
+ * 각 콘텐츠에 대해:
+ *   1. 분량 계산 → 포맷 결정 (ok / condense / series)
+ *   2. 정합성·흐름 LLM 검사
+ *   3. 문제 있으면 해당 섹션만 자동 재작성
+ *   4. 숏폼이 55초 초과면 자동 압축
+ *
+ * 반환: 수정된 contents + director_qa 보고서 첨부
+ */
+export async function runContentDirectorQA(contentData) {
+  if (!config.openai.apiKey) {
+    logger.warn('[qa_editor] OPENAI_API_KEY 없음. Content Director QA 스킵.');
+    return contentData;
+  }
+
+  const contents = contentData?.contents ?? [];
+  if (contents.length === 0) return contentData;
+
+  const revised = [];
+  for (const content of contents) {
+    const keyword = content.keyword;
+    logger.info(`[qa_editor] Director QA 시작: ${keyword}`);
+
+    const report = { keyword, format_decision: null, coherence: null, rewrites: [] };
+
+    // 1. 분량 판단
+    const formatDecision = decideFormat(content);
+    report.format_decision = formatDecision;
+    logger.info(`[qa_editor] 분량 판단 [${keyword}]: ${formatDecision.reason}`);
+
+    let updatedContent = { ...content };
+
+    // 2. 숏폼 압축 (condense 또는 series 판정 시)
+    if (formatDecision.format !== 'ok') {
+      try {
+        const shorts = content.shortform_script ?? content.shorts;
+        if (shorts) {
+          const condensed = await condenseShorts(keyword, shorts);
+          updatedContent = { ...updatedContent, shortform_script: condensed, shorts: condensed };
+          const newSec = estimateDeliverySeconds(getShortsText(condensed));
+          report.rewrites.push(`숏폼 압축: ${formatDecision.estimated_sec}초 → ${newSec}초`);
+          logger.info(`[qa_editor] 숏폼 압축 완료 [${keyword}]: ${newSec}초`);
+        }
+      } catch (err) {
+        logger.warn(`[qa_editor] 숏폼 압축 실패 [${keyword}]: ${err.message}`);
+      }
+    }
+
+    // 3. 정합성 + 흐름 체크
+    try {
+      const blogSections = updatedContent.blog_draft?.sections ?? [];
+      const longSections = updatedContent.long_video?.sections ?? [];
+      const coherence = await runCoherenceCheck(keyword, blogSections, longSections);
+      report.coherence = coherence;
+
+      if (coherence.coherence_score < 65 || coherence.flow_score < 65) {
+        logger.warn(`[qa_editor] 정합성 미달 [${keyword}]: coherence=${coherence.coherence_score} flow=${coherence.flow_score}`);
+      }
+
+      // 4. 문제 섹션 재작성
+      const targets = coherence.rewrite_targets ?? [];
+      if (targets.length > 0 && coherence.issues?.length > 0) {
+        const issue = coherence.issues.join('; ');
+
+        // 블로그 섹션 재작성
+        const updatedBlogSections = await Promise.all(
+          (updatedContent.blog_draft?.sections ?? []).map(async (s) => {
+            if (!targets.includes(s.heading)) return s;
+            try {
+              const newBody = await rewriteSection(keyword, s, issue);
+              report.rewrites.push(`블로그 섹션 재작성: ${s.heading}`);
+              return { ...s, body: newBody };
+            } catch { return s; }
+          })
+        );
+
+        updatedContent = {
+          ...updatedContent,
+          blog_draft: updatedContent.blog_draft
+            ? { ...updatedContent.blog_draft, sections: updatedBlogSections }
+            : updatedContent.blog_draft,
+        };
+      }
+    } catch (err) {
+      logger.warn(`[qa_editor] 정합성 체크 실패 [${keyword}]: ${err.message}`);
+    }
+
+    revised.push({ ...updatedContent, director_qa: report });
+    logger.info(`[qa_editor] Director QA 완료: ${keyword} | 재작성: ${report.rewrites.length}건`);
+  }
+
+  return { ...contentData, director_qa_at: new Date().toISOString(), contents: revised };
+}
+
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {

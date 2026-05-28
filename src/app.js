@@ -8,7 +8,7 @@ import { sendDailyReport, sendErrorAlert } from './utils/notifier.js';
 import { checkSubscribers } from './utils/subscriberMonitor.js';
 import { fetchTrends } from './agents/trend_scraper.js';
 import { createContents } from './agents/content_creator.js';
-import { runTextQA, runVisionQA, runBlogQA } from './agents/qa_editor.js';
+import { runTextQA, runVisionQA, runBlogQA, runContentDirectorQA } from './agents/qa_editor.js';
 import { generateAllMedia, generateLongFormMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
@@ -22,6 +22,7 @@ import { groupSimilarTopics } from './agents/topic_grouper.js';
 import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
+import { runProjectManagerReview } from './agents/project_manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -283,6 +284,11 @@ async function runPipeline() {
       path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`),
       publishResults
     );
+    // 블로그 파이프라인이 cron으로 독립 실행될 때도 YouTube URL을 읽을 수 있도록 저장
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/youtube_results_${date}.json`),
+      publishResults
+    );
     logger.info(`[app] Agent 4 complete. Published: ${publishResults.results?.length ?? 0}`);
   } catch (err) {
     logger.error('[app] Agent 4 (auto_publisher) failed.', { message: err.message });
@@ -309,6 +315,11 @@ async function runPipeline() {
   // 구독자 마일스톤 체크 (실패해도 파이프라인 결과에 영향 없음)
   checkSubscribers().catch((err) =>
     logger.warn('[app] Subscriber check failed (non-critical):', { message: err.message })
+  );
+
+  // 프로젝트 매니저 검수 — 파이프라인 종료 후 전체 품질·이상 점검
+  runProjectManagerReview().catch((err) =>
+    logger.warn('[app] Project manager review failed (non-critical):', { message: err.message })
   );
 
   return publishResults; // 블로그 파이프라인에 youtube_url 전달용
@@ -348,6 +359,15 @@ async function runBlogPipeline(youtubeResults = null) {
   if (!keywordData.contents?.length) {
     logger.warn('[app] Blog Part 1: no new keywords. Skipping blog pipeline.');
     return;
+  }
+
+  // YouTube 발행 결과 로드 — 직접 전달 우선, 없으면 오늘 저장 파일에서 읽기
+  if (!youtubeResults?.results?.length) {
+    try {
+      const ytFile = path.resolve(__dirname, `../output/scripts/youtube_results_${date}.json`);
+      youtubeResults = JSON.parse(await import('fs').then((m) => m.promises.readFile(ytFile, 'utf-8')));
+      logger.info(`[app] Blog: loaded YouTube results from file (${youtubeResults.results?.length ?? 0}건)`);
+    } catch { /* 파일 없으면 youtube_url 없이 진행 */ }
   }
 
   // YouTube 발행 결과가 있으면 키워드별 youtube_url 매핑
@@ -527,6 +547,15 @@ export async function runUnifiedPipeline() {
     blogDraftData = await enhanceAllBlogDrafts(keywordInput);
     await writeJSON(path.resolve(__dirname, `../output/blog/unified_draft_${date}.json`), blogDraftData);
     logger.info(`[app] Unified Step 2 complete. Blog drafts: ${blogDraftData.contents?.length ?? 0}`);
+
+    // Blog QA: 초안 품질 검수 — REJECTED 항목은 이후 발행에서 제외
+    try {
+      blogDraftData = await runBlogQA(blogDraftData);
+      const passed = (blogDraftData.contents ?? []).filter((c) => c.blog_qa?.status !== 'REJECTED').length;
+      logger.info(`[app] Unified Step 2 (Blog QA) complete. Passed: ${passed}/${blogDraftData.contents?.length ?? 0}`);
+    } catch (err) {
+      logger.warn('[app] Unified Step 2 (Blog QA) failed. Continuing without QA filter.', { message: err.message });
+    }
   } catch (err) {
     logger.warn('[app] Unified Step 2 (blog draft) failed. Continuing with empty drafts.', { message: err.message });
     blogDraftData = { contents: trendData.selected_items.map((i) => ({ keyword: i.keyword, category: i.category, blog_draft: null })) };
@@ -564,70 +593,121 @@ export async function runUnifiedPipeline() {
   );
   logger.info(`[app] Unified Step 3 complete. ${triangleContents.length} items`);
 
-  // ── Step 4a: 숏폼 미디어 제작 ─────────────────────────────────────────────
+  // ── Step 3.5: Content Director QA — 정합성·분량·포맷 결정·자동 재작성 ──────
+  let directorQAData = { contents: triangleContents };
   try {
-    const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: triangleContents });
-    await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
-    logger.info(`[app] Unified Step 4a (shorts media) complete. Media: ${mediaResult.results?.length ?? 0}`);
+    directorQAData = await runContentDirectorQA(directorQAData);
+    const rewriteCount = directorQAData.contents.reduce(
+      (n, c) => n + (c.director_qa?.rewrites?.length ?? 0), 0
+    );
+    logger.info(`[app] Unified Step 3.5 (Director QA) complete. 재작성: ${rewriteCount}건`);
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/unified_qa_${date}.json`),
+      directorQAData
+    );
   } catch (err) {
-    logger.warn('[app] Unified Step 4a (shorts media) failed.', { message: err.message });
+    logger.warn(`[app] Unified Step 3.5 (Director QA) failed (${err.message}). 원본 콘텐츠로 계속.`);
   }
+  const qaContents = directorQAData.contents;
 
-  // ── Step 4b: 롱폼 영상 미디어 제작 ────────────────────────────────────────
+  // ── Step 4: 미디어 제작 ────────────────────────────────────────────────────
+  // 롱폼이 있는 콘텐츠: 롱폼 렌더링 → source_section 구간 자동 추출 → 숏폼 재사용
+  // 롱폼 없는 콘텐츠: 기존 방식으로 숏폼만 단독 생성
   const longFormResults = [];
-  for (const tc of triangleContents) {
-    if (!tc.long_video?.sections?.length) continue;
-    try {
-      logger.info(`[app] Unified Step 4b: long-form video for "${tc.keyword}"`);
-      const longResult = await generateLongFormMedia(tc);
-      longFormResults.push(longResult);
-    } catch (err) {
-      logger.warn(`[app] Unified Step 4b long-form failed for "${tc.keyword}": ${err.message}`);
+  const shortsOnlyContents = [];
+
+  for (const tc of qaContents) {
+    if (tc.long_video?.sections?.length) {
+      // 롱폼 렌더링 (내부에서 shorts_video 추출까지 처리)
+      try {
+        logger.info(`[app] Unified Step 4 (long-form+shorts extract): "${tc.keyword}"`);
+        const longResult = await generateLongFormMedia(tc);
+        longFormResults.push({ ...longResult, keyword: tc.keyword, content: tc });
+        logger.info(`[app] Unified Step 4 done: "${tc.keyword}" | long=${!!longResult.video} | shorts=${!!longResult.shorts_video}`);
+      } catch (err) {
+        logger.warn(`[app] Unified Step 4 long-form failed for "${tc.keyword}": ${err.message}`);
+      }
+    } else {
+      shortsOnlyContents.push(tc);
     }
   }
+
+  // 숏폼 전용 콘텐츠 (롱폼 없음) — 기존 방식 유지
+  if (shortsOnlyContents.length > 0) {
+    try {
+      const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: shortsOnlyContents });
+      await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
+      logger.info(`[app] Unified Step 4 (shorts-only) complete. Media: ${mediaResult.results?.length ?? 0}`);
+    } catch (err) {
+      logger.warn('[app] Unified Step 4 (shorts-only) failed.', { message: err.message });
+    }
+  }
+
   if (longFormResults.length > 0) {
     await writeJSON(
       path.resolve(__dirname, `../output/scripts/unified_longform_${date}.json`),
-      { generated_at: new Date().toISOString(), results: longFormResults }
+      { generated_at: new Date().toISOString(), results: longFormResults.map((r) => ({ keyword: r.keyword, video: r.video, shorts_video: r.shorts_video })) }
     );
-    logger.info(`[app] Unified Step 4b complete. Long-form videos: ${longFormResults.filter((r) => r.video).length}/${longFormResults.length}`);
-  } else {
-    logger.info('[app] Unified Step 4b: no long-form items to produce.');
+    logger.info(`[app] Unified Step 4 complete. Long-form: ${longFormResults.filter((r) => r.video).length}개 | Shorts extracted: ${longFormResults.filter((r) => r.shorts_video).length}개`);
   }
 
-  // ── Step 5: YouTube 발행 ──────────────────────────────────────────────────
-  // 생성된 콘텐츠 전체를 APPROVED로 자동 승인하여 업로드
-  const autoQA = {
-    evaluated_at: new Date().toISOString(),
-    reports: triangleContents.map((tc) => ({
-      keyword:              tc.keyword,
-      category:             tc.category,
-      final_decision:       'APPROVED',
-      fact_check_score:     90,
-      grammar_check:        'PASS',
-      banned_words_detected: false,
-      video_layout_check:   'PASS',
-      audio_sync_check:     'PASS',
-      revision_reason:      '',
-    })),
-  };
-  const unifiedContentData = { generated_at: new Date().toISOString(), contents: triangleContents };
+  // ── Step 5: YouTube QA + 발행 ─────────────────────────────────────────────
+  // Director QA를 통과한 qaContents를 대상으로 텍스트 QA → Vision QA 실행
+  let unifiedQAData;
+  try {
+    const textQAData = await runTextQA({ generated_at: new Date().toISOString(), contents: qaContents });
+    unifiedQAData    = await runVisionQA(textQAData);
+    const approved   = unifiedQAData.reports.filter((r) => r.final_decision === 'APPROVED').length;
+    const rejected   = unifiedQAData.reports.filter((r) => r.final_decision === 'REJECTED').length;
+    logger.info(`[app] Unified Step 5 QA: APPROVED ${approved} / REJECTED ${rejected}`);
+    await writeJSON(path.resolve(__dirname, `../output/qa_reports/unified_qa_${date}.json`), unifiedQAData);
+  } catch (err) {
+    // QA 자체가 실패하면 전체 승인 폴백 (파이프라인 중단 방지)
+    logger.warn(`[app] Unified Step 5 QA 실패 (${err.message}). 전체 APPROVED 폴백.`);
+    unifiedQAData = {
+      evaluated_at: new Date().toISOString(),
+      reports: qaContents.map((tc) => ({
+        keyword:               tc.keyword,
+        category:              tc.category,
+        final_decision:        'APPROVED',
+        fact_check_score:      80,
+        grammar_check:         'PASS',
+        banned_words_detected: false,
+        video_layout_check:    'PASS',
+        audio_sync_check:      'PASS',
+        revision_reason:       'QA 실패 폴백',
+      })),
+    };
+  }
+
+  // REJECTED 항목 제외 후 발행
+  const approvedKeywordsSet = new Set(
+    unifiedQAData.reports.filter((r) => r.final_decision === 'APPROVED').map((r) => r.keyword)
+  );
+  const approvedContents = qaContents.filter((tc) => approvedKeywordsSet.has(tc.keyword));
 
   let youtubeResults = null;
-  try {
-    youtubeResults = await publishContents(autoQA, unifiedContentData);
-    await writeJSON(path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`), youtubeResults);
-    const ytCount = youtubeResults.results?.filter((r) => r.youtube?.url).length ?? 0;
-    logger.info(`[app] Unified Step 5 (YouTube) complete. Uploaded: ${ytCount}`);
-  } catch (err) {
-    logger.warn('[app] Unified Step 5 (YouTube publish) failed.', { message: err.message });
+  if (approvedContents.length === 0) {
+    logger.warn('[app] Unified Step 5: QA 통과 항목 없음 — YouTube 발행 건너뜀');
+  } else {
+    const unifiedContentData = { generated_at: new Date().toISOString(), contents: approvedContents };
+    try {
+      youtubeResults = await publishContents(unifiedQAData, unifiedContentData);
+      await writeJSON(path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`), youtubeResults);
+      const ytCount = youtubeResults.results?.filter((r) => r.youtube?.url).length ?? 0;
+      logger.info(`[app] Unified Step 5 (YouTube) complete. Uploaded: ${ytCount}`);
+    } catch (err) {
+      logger.warn('[app] Unified Step 5 (YouTube publish) failed.', { message: err.message });
+    }
   }
 
   // ── Step 6: 블로그 발행 ───────────────────────────────────────────────────
+  // QA 통과 항목만 발행 (approvedContents 재사용, 없으면 qaContents 전체)
+  const blogPublishContents = approvedContents.length > 0 ? approvedContents : qaContents;
   try {
     const monetizedData = await monetizeAll({
       generated_at: new Date().toISOString(),
-      contents: triangleContents.map((tc) => ({
+      contents: blogPublishContents.map((tc) => ({
         ...tc,
         blog_draft: tc.blog_draft ?? { title: tc.keyword, sections: [], affiliate_hooks: [] },
         blog_qa: { status: 'APPROVED' },
@@ -638,7 +718,7 @@ export async function runUnifiedPipeline() {
     if (youtubeResults?.results) {
       for (const item of monetizedData.contents ?? []) {
         const yt = youtubeResults.results.find((r) => r.keyword === item.keyword);
-        if (yt?.youtube?.url) item.blog_post_url = yt.youtube.url;
+        if (yt?.youtube?.url) item.youtube_url = yt.youtube.url;
       }
     }
 
@@ -650,11 +730,40 @@ export async function runUnifiedPipeline() {
     logger.warn('[app] Unified Step 6 (blog publish) failed.', { message: err.message });
   }
 
+  // ── Step 7: Blog Analytics + 성과 부진 재작성 ────────────────────────────
+  try {
+    await runBlogAnalytics();
+    logger.info('[app] Unified Step 7 (blog analytics) complete.');
+    const underperformers = identifyUnderperformers();
+    if (underperformers.length > 0) {
+      logger.info(`[app] Unified Step 7: ${underperformers.length} underperformers found. Rewriting...`);
+      const rewrites = await rewriteUnderperformers(underperformers);
+      if (rewrites.length > 0) {
+        const editResults = await editBlogPosts(rewrites);
+        logger.info(`[app] Unified Step 7: rewritten ${editResults.filter((r) => r.edit_status === 'edited').length}/${rewrites.length}`);
+      }
+    }
+  } catch (err) {
+    logger.warn('[app] Unified Step 7 (analytics/rewrite) failed.', { message: err.message });
+  }
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  logger.info(`[app] ===== Unified Pipeline finished in ${elapsed}s =====`);
+  const unifSummary = {
+    date: new Date().toISOString().slice(0, 10),
+    elapsed_sec: elapsed,
+    total: triangleContents.length,
+    long_form: triangleContents.filter((c) => c.long_video?.sections?.length).length,
+    dry_run: config.runtime.dryRun,
+  };
+  logger.info(`[app] ===== Unified Pipeline finished in ${elapsed}s =====`, unifSummary);
+  await sendDailyReport(unifSummary);
 
   checkSubscribers().catch((err) =>
     logger.warn('[app] Subscriber check failed (non-critical):', { message: err.message })
+  );
+
+  runProjectManagerReview().catch((err) =>
+    logger.warn('[app] Project manager review failed (non-critical):', { message: err.message })
   );
 
   return triangleContents;

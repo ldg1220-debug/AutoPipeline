@@ -2,6 +2,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { throttle } from '../utils/rateLimiter.js';
+import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
 
 /**
  * Content triangle: blog draft → long-form video script (10~20 min) + Shorts extraction
@@ -20,10 +21,18 @@ export async function createLongFormAndShorts(item, blogDraft) {
 
   const blogContext = buildBlogContext(blogDraft);
 
+  // 경쟁 채널 YouTube 인사이트 주입 (캐시 사용, 없으면 빈 문자열)
+  let competitorCtx = '';
+  try {
+    const insights = await loadCompetitorInsights(item.category ?? 'economy');
+    competitorCtx  = formatInsightsForPrompt(insights);
+  } catch { /* 인사이트 없으면 스킵 */ }
+
   const prompt =
     `당신은 한국 경제 유튜브 채널 "매일읽어주는남자" 수석 PD입니다.\n\n` +
     `[키워드] ${item.keyword}\n` +
     `[카테고리] ${item.category ?? '경제'}\n\n` +
+    (competitorCtx ? `${competitorCtx}\n\n` : '') +
     `[블로그 초안]\n${blogContext}\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `위 블로그 내용을 기반으로 다음 두 가지를 동시에 제작하세요:\n\n` +

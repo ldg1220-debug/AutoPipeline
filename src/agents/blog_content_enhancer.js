@@ -6,7 +6,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
-import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
+import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -155,6 +155,46 @@ async function pass3Faq(keyword, faqItem, targetReader) {
   return callGPT4o(prompt, false);
 }
 
+// ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
+async function pass4FactCheck(keyword, sections) {
+  const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
+
+  const prompt = `아래 블로그 본문에서 허구이거나 검증되지 않은 인용을 찾아 수정하세요.
+
+【검토 대상】
+1. 특정 책 제목 (따옴표로 감싼 것)
+2. 저자 이름 직접 언급
+3. 특정 기사·논문·보고서 제목
+4. 출처 불명의 구체적 통계 수치 (예: "2024년 조사에 따르면 87%")
+
+【수정 규칙】
+- 위 항목 발견 시 → 일반적 표현으로 교체
+  예) "『부의 추월차선』에서는" → "여러 재테크 전문 서적에서는"
+  예) "홍길동 저자는" → "투자 전문가들은"
+  예) "2023년 금융연구원 보고서에 따르면 73%" → "금융 전문가들에 따르면"
+- 수정 없이 괜찮은 섹션은 원문 그대로 반환
+- 내용의 의미와 흐름은 유지
+
+키워드: ${keyword}
+
+본문:
+${fullText}
+
+응답 형식 (JSON):
+{ "sections": [{ "heading": "...", "body": "수정된 본문 또는 원문" }] }`;
+
+  try {
+    await throttle(2000);
+    const result = await callGPT4oMini(prompt);
+    if (Array.isArray(result?.sections) && result.sections.length === sections.length) {
+      return result.sections;
+    }
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] Pass 4 fact-check failed (${err.message}), using original`);
+  }
+  return sections;
+}
+
 // JSON-LD Article 스키마 생성
 function buildJsonLd(title, keyword, slug) {
   return {
@@ -173,7 +213,7 @@ function buildJsonLd(title, keyword, slug) {
   };
 }
 
-// 제휴 훅 포지션 결정 (상업적 의도 있을 때)
+// 제휴 훅 포지션 결정 — 중간 H2 섹션 1곳에만 고정 삽입 (SEO 패널티 방지 + 링크 보장)
 function buildAffiliateHooks(sections, affiliateCategory) {
   if (!affiliateCategory) return [];
   const h2Indices = sections
@@ -181,27 +221,14 @@ function buildAffiliateHooks(sections, affiliateCategory) {
     .filter((s) => s.level === 'h2')
     .map((s) => s.i);
 
-  const hooks = [];
-  if (h2Indices.length >= 2) {
-    hooks.push({
-      position: `section${h2Indices[1] + 1}_end`,
-      product_category: affiliateCategory,
-      anchor_text: `${affiliateCategory} 최저가 확인`,
-    });
-  }
-  if (h2Indices.length >= 4) {
-    hooks.push({
-      position: `section${h2Indices[3] + 1}_end`,
-      product_category: affiliateCategory,
-      anchor_text: `관련 상품 보러가기`,
-    });
-  }
-  hooks.push({
-    position: 'conclusion_top',
+  if (h2Indices.length === 0) return [];
+
+  const targetIdx = h2Indices[Math.floor(h2Indices.length / 2)];
+  return [{
+    position:         `section${targetIdx + 1}_end`,
     product_category: affiliateCategory,
-    anchor_text: `${affiliateCategory} 추천 상품`,
-  });
-  return hooks;
+    anchor_text:      `${affiliateCategory} 추천 상품 보기`,
+  }];
 }
 
 /**
@@ -228,11 +255,13 @@ async function enhanceBlogDraft(content) {
     logger.info(`[blog_content_enhancer] Benchmark rules injected (${benchmarkRules.based_on_posts}개 분석 기반)`);
   }
 
-  // 경쟁 채널 인사이트 로드 (7일 캐시 사용, 없으면 조용히 스킵)
+  // 경쟁 채널·블로그 인사이트 로드 (TTL 캐시 사용, 없으면 조용히 스킵)
   let competitorCtx = '';
   try {
-    const insights = await loadCompetitorInsights(category);
-    competitorCtx = formatInsightsForPrompt(insights);
+    const insights    = await loadCompetitorInsights(category);
+    const ytCtx       = formatInsightsForPrompt(insights);
+    const blogCtx     = formatBlogInsightsForPrompt(insights);
+    competitorCtx     = ytCtx + blogCtx;
     if (competitorCtx) logger.info(`[blog_content_enhancer] Competitor insights injected for: ${category}`);
   } catch {
     // 인사이트 없으면 스킵
@@ -283,7 +312,11 @@ async function enhanceBlogDraft(content) {
     faqSections.push({ q: faqItem.q, a: answer });
   }
 
-  const wordCount = completedSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등)
+  logger.info(`[blog_content_enhancer] Pass 4 (fact-check): ${keyword}`);
+  const checkedSections = await pass4FactCheck(keyword, completedSections);
+
+  const wordCount = checkedSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);
 
   return {
@@ -294,7 +327,7 @@ async function enhanceBlogDraft(content) {
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
       seo_keywords:     blog_draft?.seo_keywords ?? [keyword],
-      sections:         completedSections,
+      sections:         checkedSections,
       faq:              faqSections,
       affiliate_hooks:  buildAffiliateHooks(completedSections, intent.affiliate_category),
       json_ld:          buildJsonLd(outline.title || keyword, keyword, outline.slug || ''),

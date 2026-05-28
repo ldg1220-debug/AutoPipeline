@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<skin xmlns="http://www.tistory.com/2007/blog" version="1.5">
+  <information>
+    <name>매일읽어주는남자 Minimal</name>
+    <author>AutoPipeline</author>
+    <version>1.0.0</version>
+    <description>경제·생활 뉴스 블로그용 미니멀 스킨. Noto Sans KR, 2컬럼 카드 그리드.</description>
+  </information>
+  <preview>
+    <skin>images/preview.jpg</skin>
+  </preview>
+  <metatag>
+    <tag name="description" content="매일 경제·생활 정보를 짧고 쉽게 전달합니다" />
+    <tag name="theme-color" content="#2563eb" />
+  </metatag>
+</skin>
