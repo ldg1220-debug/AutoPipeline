@@ -46,7 +46,8 @@
     "project:review": "node scripts/run-project-review.js",
     "project:manager": "node src/agents/project_manager.js",
     "rerun:media": "node scripts/rerun-media-upload.js",
-    "rerun:media:fresh": "node scripts/rerun-media-upload.js --delete-old"
+    "rerun:media:fresh": "node scripts/rerun-media-upload.js --delete-old",
+    "retry:upload": "node scripts/retry-failed-uploads.js"
   },
   "dependencies": {
     "axios": "^1.7.2",

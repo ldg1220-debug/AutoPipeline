@@ -482,6 +482,9 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
+    // 롱폼-쇼츠 간 딜레이 (rate limit 방지)
+    await new Promise((r) => setTimeout(r, 8000));
+
     // 쇼츠 업로드 — 롱폼 URL을 설명에 포함
     try {
       const longFormUrl = result.youtube?.url ?? null;
@@ -493,6 +496,12 @@ export async function publishContents(qaData, contentData) {
     }
 
     results.push(result);
+
+    // 영상 간 딜레이 (rate limit 방지, 마지막 항목 제외)
+    if (results.length < approvedReports.length) {
+      logger.info(`[auto_publisher] 다음 업로드까지 30초 대기 중... (rate limit 방지)`);
+      await new Promise((r) => setTimeout(r, 30000));
+    }
   }
 
   return {
