@@ -128,6 +128,6 @@ export const config = {
     blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 15 * * 2,4,6',
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
-    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '2', 10),
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '5', 10),
   },
 };

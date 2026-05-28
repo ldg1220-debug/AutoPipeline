@@ -244,6 +244,7 @@ async function publishPost(page, content, blogName, context) {
     try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
     data.visibility = 20;  // 전체 공개
     data.content = html;   // 실제 본문 주입 (저장 시점에 TinyMCE가 비어있는 문제 해소)
+    if (bestCategory?.id) data.categoryId = bestCategory.id;  // UI 클릭 실패 대비 API 직접 주입
     try {
       const resp = await route.fetch({ postData: JSON.stringify(data) });
       publishApiResp = await resp.text();

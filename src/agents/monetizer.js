@@ -353,18 +353,16 @@ async function monetizeBlogDraft(content) {
   const html = [
     buildBlogStyles(content.category),
     jsonLdScript,
-    adsenseSlot('title_below'),
     `<div class="blog-intro"><span style="margin-right:6px">${getCategoryIcon(content.category)}</span>${blog_draft.meta_description || ''}</div>`,
     tldrHtml,                                     // TL;DR 박스
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 헤더 + 키워드 하이라이트
-    adsenseSlot('mid_content'),
+    adsenseSlot('mid_content'),                   // 애드센스 1개 (본문 중간)
     conclusionAffiliate,
     faqHtml,
     relatedPostsHtml,                             // 관련 포스트 내부 링크 카드
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
-    adsenseSlot('post_end'),
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
   ]
     .filter(Boolean)

@@ -37,15 +37,22 @@ async function main() {
 
   // 신규 키워드가 없으면 DB의 pending 키워드를 꺼내 재사용
   if (rawKeywords.length === 0) {
-    const postsPerDay = config.runtime.blogPostsPerDay ?? 2;
     const dbKeywords = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT ?`)
-      .all(postsPerDay);
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT 10`)
+      .all();
     if (dbKeywords.length > 0) {
       logger.info(`[blog:pipeline] 신규 키워드 없음 → DB pending ${dbKeywords.length}개 사용`);
       rawKeywords = dbKeywords;
     }
   }
+
+  // 점수 내림차순 정렬 → HOT 키워드(score≥70) 많으면 최대 10개, 기본 postsPerDay
+  rawKeywords.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const postsPerDay = config.runtime.blogPostsPerDay ?? 5;
+  const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
+  const postLimit = hotCount >= postsPerDay ? Math.min(10, rawKeywords.length) : Math.min(postsPerDay, rawKeywords.length);
+  rawKeywords = rawKeywords.slice(0, postLimit);
+  logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 한도:${postLimit})`);
 
   const contentData = {
     ...keywordData,
