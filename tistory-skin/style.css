@@ -1,0 +1,404 @@
+/* ═══════════════════════════════════════════════════════════
+   매일읽어주는남자 — Tistory Minimal Skin
+   디자인: 미니멀·심플 / 컬러: #2563eb (블루 계열)
+   폰트: Noto Sans KR (Google Fonts)
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 리셋 & 기본 ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+               'Malgun Gothic', sans-serif;
+  background: #f8fafc;
+  color: #1e293b;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; height: auto; display: block; }
+
+/* ── 레이아웃 래퍼 ── */
+.wrap {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ════════════════════════════════
+   헤더
+   ════════════════════════════════ */
+#site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 4px rgba(0,0,0,.05);
+}
+
+#site-header .wrap {
+  display: flex;
+  align-items: center;
+  height: 60px;
+  gap: 24px;
+}
+
+/* 로고 */
+.site-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 17px;
+  color: #1e293b;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.logo-badge { font-size: 20px; }
+.logo-text  { letter-spacing: -.3px; }
+
+/* GNB 카테고리 */
+#gnb { flex: 1; overflow: hidden; }
+#gnb ul { display: flex; gap: 4px; list-style: none; flex-wrap: wrap; }
+#gnb li a {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+#gnb li a:hover,
+#gnb li.on a {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* 모바일 메뉴 버튼 */
+.menu-toggle {
+  display: none;
+  border: none;
+  background: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: #475569;
+  flex-shrink: 0;
+}
+
+/* ════════════════════════════════
+   모바일 드로어
+   ════════════════════════════════ */
+.mobile-menu {
+  position: fixed;
+  top: 0; right: 0;
+  width: 260px;
+  height: 100vh;
+  background: #fff;
+  z-index: 200;
+  padding: 20px 24px;
+  transform: translateX(100%);
+  transition: transform .25s ease;
+  box-shadow: -4px 0 24px rgba(0,0,0,.12);
+}
+.mobile-menu.open { transform: translateX(0); }
+.menu-close {
+  display: block;
+  border: none;
+  background: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #64748b;
+  text-align: right;
+  width: 100%;
+  margin-bottom: 20px;
+}
+.mobile-menu ul { list-style: none; }
+.mobile-menu li { border-bottom: 1px solid #f1f5f9; }
+.mobile-menu li a {
+  display: block;
+  padding: 12px 4px;
+  font-size: 15px;
+  color: #334155;
+}
+.menu-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  z-index: 199;
+}
+.menu-overlay.show { display: block; }
+
+/* ════════════════════════════════
+   공지사항
+   ════════════════════════════════ */
+.notice-bar {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  margin: 24px 0 8px;
+}
+
+/* ════════════════════════════════
+   메인 영역
+   ════════════════════════════════ */
+#site-main { padding: 32px 0 64px; min-height: calc(100vh - 180px); }
+
+/* ════════════════════════════════
+   포스트 카드 그리드 (목록)
+   ════════════════════════════════ */
+.post-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-top: 8px;
+}
+
+.post-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  transition: transform .2s, box-shadow .2s;
+}
+.post-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(37,99,235,.1);
+}
+.post-card-link { display: block; }
+
+/* 썸네일 */
+.post-thumb { aspect-ratio: 16/9; overflow: hidden; background: #f1f5f9; }
+.post-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
+.post-card:hover .post-thumb img { transform: scale(1.04); }
+
+/* 카드 정보 */
+.post-info { padding: 16px 18px 20px; }
+
+.post-cat {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 2px 10px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+}
+
+.post-card .post-title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #1e293b;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.post-excerpt {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.post-meta { display: flex; align-items: center; gap: 8px; }
+.post-meta time { font-size: 12px; color: #94a3b8; }
+
+/* ── 페이지네이션 ── */
+.paging-wrap { margin: 40px 0 0; text-align: center; }
+.paging-wrap a,
+.paging-wrap strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  margin: 0 2px;
+  border-radius: 8px;
+  font-size: 14px;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  transition: background .15s, color .15s;
+}
+.paging-wrap a:hover,
+.paging-wrap strong {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+/* ════════════════════════════════
+   개별 포스트
+   ════════════════════════════════ */
+.single-post {
+  max-width: 780px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  padding: 40px 48px;
+}
+
+/* 포스트 헤더 */
+.post-header { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #f1f5f9; }
+.single-post .post-title {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -.4px;
+  color: #0f172a;
+  margin: 12px 0 14px;
+}
+.post-header .post-meta { color: #94a3b8; font-size: 13px; gap: 10px; }
+.view-count::before { content: '·'; margin-right: 10px; }
+
+/* 본문 */
+.post-body {
+  font-size: 16px;
+  line-height: 1.9;
+  color: #334155;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 포스트 내부 타이포그래피 (AI 생성 콘텐츠와 조화) */
+.post-body h2 { font-size: 21px; font-weight: 700; margin: 36px 0 12px; color: #0f172a; }
+.post-body h3 { font-size: 18px; font-weight: 700; margin: 28px 0 10px; color: #1e293b; }
+.post-body p  { margin: 0 0 16px; }
+.post-body ul,
+.post-body ol { padding-left: 22px; margin: 0 0 16px; }
+.post-body li { margin: 6px 0; }
+.post-body blockquote {
+  border-left: 4px solid #2563eb;
+  margin: 20px 0;
+  padding: 12px 20px;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 0 8px 8px 0;
+  font-style: italic;
+}
+.post-body strong { font-weight: 700; color: #1e293b; }
+.post-body a { color: #2563eb; text-decoration: underline; text-underline-offset: 2px; }
+.post-body a:hover { color: #1d4ed8; }
+.post-body img { border-radius: 10px; margin: 20px auto; }
+.post-body table {
+  width: 100%; border-collapse: collapse; font-size: 14px; margin: 20px 0;
+}
+.post-body th, .post-body td {
+  border: 1px solid #e2e8f0; padding: 10px 14px; text-align: left;
+}
+.post-body th { background: #f1f5f9; font-weight: 700; }
+.post-body code {
+  background: #f1f5f9; color: #e11d48; padding: 1px 6px; border-radius: 4px; font-size: .9em;
+}
+.post-body pre {
+  background: #1e293b; color: #e2e8f0; padding: 18px 20px; border-radius: 10px;
+  overflow-x: auto; font-size: 14px; margin: 20px 0; line-height: 1.6;
+}
+.post-body pre code { background: none; color: inherit; padding: 0; }
+
+/* 포스트 푸터 */
+.post-footer { margin-top: 40px; padding-top: 24px; border-top: 1px solid #f1f5f9; }
+
+/* 태그 */
+.post-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+.post-tags a {
+  font-size: 13px;
+  color: #3730a3;
+  background: #e0e7ff;
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-weight: 500;
+  transition: background .15s;
+}
+.post-tags a:hover { background: #c7d2fe; }
+
+/* 이전/다음 글 */
+.post-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 4px;
+}
+.post-nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  transition: background .15s;
+}
+.post-nav-item:hover { background: #eff6ff; border-color: #bfdbfe; }
+.post-nav-item.next { text-align: right; }
+.nav-dir  { font-size: 11px; color: #94a3b8; font-weight: 500; }
+.nav-title { font-size: 13px; color: #334155; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* 댓글 */
+#comments { max-width: 780px; margin: 24px auto 0; }
+#comments .title_comments { font-size: 18px; font-weight: 700; margin: 0 0 16px; color: #1e293b; }
+
+/* ════════════════════════════════
+   푸터
+   ════════════════════════════════ */
+#site-footer {
+  background: #1e293b;
+  color: #94a3b8;
+  padding: 28px 0;
+  text-align: center;
+}
+.footer-copy { font-size: 14px; margin-bottom: 4px; }
+.footer-copy a { color: #cbd5e1; }
+.footer-copy a:hover { color: #fff; }
+.footer-desc { font-size: 12px; color: #64748b; }
+
+/* ════════════════════════════════
+   반응형
+   ════════════════════════════════ */
+@media (max-width: 900px) {
+  .post-grid { grid-template-columns: 1fr 1fr; gap: 16px; }
+}
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 14px; }
+
+  /* 헤더 */
+  #gnb { display: none; }
+  .menu-toggle { display: block; }
+
+  /* 그리드 → 1열 */
+  .post-grid { grid-template-columns: 1fr; gap: 14px; }
+  #site-main { padding: 20px 0 40px; }
+
+  /* 포스트 */
+  .single-post { padding: 24px 18px; border-radius: 10px; border: none; }
+  .single-post .post-title { font-size: 21px; }
+  .post-body { font-size: 15px; }
+  .post-nav { grid-template-columns: 1fr; }
+  .post-nav-item.next { text-align: left; }
+}
+
+@media (max-width: 480px) {
+  .post-card .post-title { font-size: 14px; }
+}
