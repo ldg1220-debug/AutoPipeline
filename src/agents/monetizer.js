@@ -36,35 +36,92 @@ const CATEGORY_EMOJI = {
   social:        '👥',
 };
 
+// ── 마크다운 → HTML 변환 (GPT 출력의 **bold**, *italic*, 리스트 처리) ──────
+function markdownToHtml(text) {
+  if (!text) return '';
+  let html = text;
+
+  // 리스트 블록 처리 (연속된 - 항목을 <ul>로 묶기)
+  html = html.replace(/((?:^|\n)[*-] .+)+/g, (block) => {
+    const items = block.trim().split(/\n/).map((l) =>
+      `<li>${l.replace(/^[*-] /, '').trim()}</li>`
+    ).join('');
+    return `<ul style="padding-left:22px;margin:10px 0;line-height:1.9">${items}</ul>`;
+  });
+
+  // 순서 있는 리스트 블록
+  html = html.replace(/((?:^|\n)\d+\. .+)+/g, (block) => {
+    const items = block.trim().split(/\n/).map((l) =>
+      `<li>${l.replace(/^\d+\. /, '').trim()}</li>`
+    ).join('');
+    return `<ol style="padding-left:22px;margin:10px 0;line-height:1.9">${items}</ol>`;
+  });
+
+  // bold → strong
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // italic (남은 단일 * 또는 _)
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+
+  // 빈 줄 → 단락 구분
+  html = html.replace(/\n{2,}/g, '</p><p style="margin:0 0 14px;line-height:1.9">');
+  // 단순 줄바꿈
+  html = html.replace(/\n/g, '<br>');
+
+  return html;
+}
+
 // ── 블로그 스타일시트 (카테고리 테마 포함) ───────────────────────────────────
 function buildBlogStyles(category) {
   return `<style>
-.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:12px 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
-.tldr-box{background:linear-gradient(135deg,#1e3a8a,#1d4ed8);color:#fff;border-radius:12px;padding:20px 24px;margin:0 0 28px}
-.tldr-box h4{margin:0 0 10px;font-size:15px;opacity:.85;letter-spacing:.5px}
-.tldr-box ul{margin:0;padding-left:20px;font-size:14px;line-height:1.9}
+/* 포스트 전체 래퍼 — 기본 스킨에서도 가독성 확보 */
+.mae-wrap{max-width:780px;margin:0 auto;font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:16px;line-height:1.9;color:#1e293b;word-break:keep-all}
+.mae-wrap p{margin:0 0 14px}
+/* 헤더 진입 배너 */
+.mae-hero{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#fff;border-radius:14px;padding:28px 24px 22px;margin:0 0 28px;position:relative;overflow:hidden}
+.mae-hero::before{content:'';position:absolute;right:-20px;top:-20px;width:160px;height:160px;background:rgba(255,255,255,.04);border-radius:50%}
+.mae-hero .hero-tag{font-size:12px;background:rgba(255,255,255,.18);padding:3px 12px;border-radius:20px;display:inline-block;margin-bottom:10px;letter-spacing:.5px}
+.mae-hero h1{margin:0 0 8px;font-size:22px;font-weight:700;line-height:1.4}
+.mae-hero p{margin:0;font-size:14px;opacity:.85;line-height:1.7}
+/* 소개 */
+.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:0 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
+/* TL;DR */
+.tldr-box{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:12px;padding:20px 24px;margin:0 0 28px;box-shadow:0 4px 20px rgba(30,58,138,.25)}
+.tldr-box h4{margin:0 0 10px;font-size:14px;opacity:.8;letter-spacing:.5px;text-transform:uppercase}
+.tldr-box ul{margin:0;padding-left:20px;font-size:14px;line-height:2}
 .tldr-box li::marker{color:#93c5fd}
-.section-hdr{display:flex;align-items:center;gap:10px;margin:32px 0 6px;border-bottom:2px solid #e2e8f0;padding-bottom:8px}
-.section-hdr .s-num{background:var(--cat-color,#2563eb);color:#fff;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;flex-shrink:0}
-.section-hdr h2,.section-hdr h3{margin:0;font-size:20px;color:#1e293b}
-.blog-img-wrap{margin:18px 0 6px}
-.blog-img-wrap img{width:100%;border-radius:10px;display:block}
-.photo-credit{font-size:11px;color:#94a3b8;text-align:right;margin-top:3px}
-.callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:13px 18px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px;line-height:1.7;color:#1e3a8a}
-.callout b{font-weight:700}
-.keyword-mark{background:#fef9c3;padding:1px 4px;border-radius:3px;font-weight:700;color:#92400e}
-.faq-wrap{margin:20px 0}
-.faq-item{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin:10px 0}
-.faq-q{font-weight:700;color:#1e3a8a;margin-bottom:6px;font-size:15px}
-.faq-a{color:#374151;font-size:14px;line-height:1.7}
-.affiliate-block{background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:14px 18px;margin:16px 0}
-.affiliate-block ul{margin:6px 0 0;padding-left:20px}
-.affiliate-block li{margin:4px 0}
-.keyword-tags{margin:20px 0;display:flex;flex-wrap:wrap;gap:8px}
-.keyword-tag{background:#e0e7ff;color:#3730a3;font-size:13px;padding:4px 14px;border-radius:20px;font-weight:500}
-.cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:28px 24px;text-align:center;margin:32px 0}
-.cta-box h3{margin:0 0 10px;font-size:20px}
-.cta-box p{margin:0;font-size:14px;opacity:.9;line-height:1.7}
+/* 섹션 헤더 */
+.section-hdr{display:flex;align-items:center;gap:10px;margin:36px 0 8px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}
+.section-hdr .s-num{background:var(--cat-color,#2563eb);color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;flex-shrink:0;letter-spacing:.3px}
+.section-hdr h2,.section-hdr h3{margin:0;font-size:19px;color:#0f172a;font-weight:700}
+/* 이미지 */
+.blog-img-wrap{margin:18px 0 8px;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)}
+.blog-img-wrap img{width:100%;display:block}
+.photo-credit{font-size:11px;color:#94a3b8;text-align:right;margin-top:4px}
+/* callout */
+.callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:13px 18px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px;line-height:1.8;color:#1e40af}
+/* 키워드 하이라이트 */
+.keyword-mark{background:#fef3c7;padding:1px 5px;border-radius:3px;font-weight:700;color:#92400e}
+/* 인포카드 */
+.info-card-wrap{margin:20px 0;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.info-card-wrap img{width:100%;display:block}
+/* FAQ */
+.faq-wrap{margin:24px 0}
+.faq-item{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 22px;margin:12px 0;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.faq-item:hover{border-color:#93c5fd;box-shadow:0 2px 12px rgba(59,130,246,.1)}
+.faq-q{font-weight:700;color:#1e3a8a;margin-bottom:8px;font-size:15px}
+.faq-q::before{content:'Q. ';color:#3b82f6}
+.faq-a{color:#374151;font-size:14px;line-height:1.8}
+/* 제휴 */
+.affiliate-block{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;margin:18px 0}
+.affiliate-block ul{margin:8px 0 0;padding-left:20px;line-height:1.9}
+/* 키워드 태그 */
+.keyword-tags{margin:24px 0;display:flex;flex-wrap:wrap;gap:8px}
+.keyword-tag{background:#e0e7ff;color:#3730a3;font-size:12px;padding:5px 14px;border-radius:20px;font-weight:600}
+/* CTA */
+.cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:32px 24px;text-align:center;margin:36px 0;box-shadow:0 6px 24px rgba(30,58,138,.3)}
+.cta-box h3{margin:0 0 10px;font-size:20px;font-weight:700}
+.cta-box p{margin:0 0 16px;font-size:14px;opacity:.9;line-height:1.7}
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
 ${RELATED_POSTS_CSS}
 ${getThemeStyles(category)}
@@ -76,7 +133,9 @@ function buildTldrBox(sections) {
   const bullets = (sections ?? [])
     .slice(0, 5)
     .map((s) => {
-      const first = (s.body ?? '').split(/(?<=[.!?])\s+/)[0].trim();
+      // 마크다운 제거 후 첫 문장 추출
+      const plain = (s.body ?? '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1').replace(/_(.+?)_/g, '$1');
+      const first = plain.split(/(?<=[.!?])\s+/)[0].trim();
       return first ? `<li>${first}</li>` : null;
     })
     .filter(Boolean);
@@ -228,11 +287,12 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
           `</div>`
         : '';
 
-      // 키워드 하이라이트 적용
-      const bodyHighlighted = highlightKeywords(s.body ?? '', seoKeywords);
+      // 마크다운 → HTML 변환 후 키워드 하이라이트
+      const bodyHtml = highlightKeywords(markdownToHtml(s.body ?? ''), seoKeywords);
 
-      // 첫 문장을 callout 박스로 강조
-      const firstSentence = (s.body ?? '').split(/(?<=[.!?])\s+/)[0].trim();
+      // 첫 문장(마크다운 제거 후)을 callout 박스로 강조
+      const plainBody = (s.body ?? '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1');
+      const firstSentence = plainBody.split(/(?<=[.!?])\s+/)[0].trim();
       const calloutHtml = firstSentence
         ? `<div class="callout"><b>핵심:</b> ${firstSentence}</div>`
         : '';
@@ -244,7 +304,7 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         `<${tag}>${s.heading}</${tag}>\n` +
         `</div>\n` +
         `${imageHtml}\n` +
-        `<p>${bodyHighlighted}</p>\n` +
+        `<p style="margin:0 0 14px;line-height:1.9">${bodyHtml}</p>\n` +
         `${calloutHtml}${affiliateHtml}`
       );
     })
@@ -257,8 +317,8 @@ function renderFaq(faqList) {
     .map(
       (f) =>
         `<div class="faq-item">` +
-        `<div class="faq-q">Q. ${f.q}</div>` +
-        `<div class="faq-a">${f.a}</div>` +
+        `<div class="faq-q">${f.q}</div>` +
+        `<div class="faq-a">${markdownToHtml(f.a)}</div>` +
         `</div>`
     )
     .join('\n');
@@ -377,25 +437,35 @@ async function monetizeBlogDraft(content) {
     `▶ 채널 바로가기</a>` +
     `</div>`;
 
-  const html = [
-    buildBlogStyles(content.category),
-    jsonLdScript,
+  // hero 배너 (제목 + 메타설명)
+  const heroHtml =
+    `<div class="mae-hero">` +
+    `<span class="hero-tag">${getCategoryIcon(content.category)} ${content.category?.toUpperCase() ?? 'ISSUE'}</span>` +
+    `<h1>${blog_draft.title ?? keyword}</h1>` +
+    `<p>${blog_draft.meta_description ?? ''}</p>` +
+    `</div>`;
+
+  const innerHtml = [
+    heroHtml,
     adsenseSlot('title_below'),
-    `<div class="blog-intro"><span style="margin-right:6px">${getCategoryIcon(content.category)}</span>${blog_draft.meta_description || ''}</div>`,
     tldrHtml,                                     // TL;DR 박스
     infoCardHtml,                                 // 핵심 수치 인포그래픽
-    sectionsHtml,                                 // 섹션 헤더 + 키워드 하이라이트
+    sectionsHtml,                                 // 섹션 본문
     adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,
-    relatedPostsHtml,                             // 관련 포스트 내부 링크 카드
+    relatedPostsHtml,                             // 관련 포스트 내부 링크
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
     adsenseSlot('post_end'),
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  ].filter(Boolean).join('\n\n');
+
+  const html = [
+    buildBlogStyles(content.category),
+    jsonLdScript,
+    `<div class="mae-wrap">\n${innerHtml}\n</div>`,
+  ].filter(Boolean).join('\n\n');
 
   logger.info(`[monetizer] Monetized: ${keyword} (images: ${bodyImages.length}, affiliate links: ${Object.keys(affiliateMap).length})`);
 
