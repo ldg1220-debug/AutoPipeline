@@ -94,13 +94,44 @@ async function main() {
     logger.info(`[blog:pipeline] Part 2.5 완료. 승인: ${approved}개 / 탈락: ${rejected}개`);
     await writeJSON(`${outDir}/blog/qa_${date}.json`, qaData);
 
-    // REJECTED 항목은 발행에서 제외
-    qaData = {
-      ...qaData,
-      contents: qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? [],
-    };
+    // REJECTED 항목 → 재작성 1회 시도
+    const rejectedItems = qaData.contents?.filter((c) => c.blog_qa?.status === 'REJECTED') ?? [];
+    if (rejectedItems.length > 0) {
+      logger.info(`[blog:pipeline] QA 탈락 ${rejectedItems.length}개 → 재작성 시도`);
+      try {
+        // QA 피드백을 포함해 재작성
+        const retryInput = {
+          ...draftData,
+          contents: rejectedItems.map((c) => ({
+            ...c,
+            qa_feedback: c.blog_qa?.suggestions ?? [],
+          })),
+        };
+        const retryDraft = await enhanceAllBlogDrafts(retryInput);
+        const retryQa = await runBlogQA(retryDraft);
+        const retryApproved = retryQa.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? [];
+        logger.info(`[blog:pipeline] 재작성 후 승인: ${retryApproved.length}/${rejectedItems.length}개`);
+
+        // 재작성 통과한 것 합산
+        const passedKeywords = new Set(retryApproved.map((c) => c.keyword));
+        qaData = {
+          ...qaData,
+          contents: [
+            ...(qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? []),
+            ...retryApproved,
+          ],
+        };
+      } catch (retryErr) {
+        logger.warn(`[blog:pipeline] 재작성 실패 (${retryErr.message}). 원본 통과 항목만 사용.`);
+        qaData = {
+          ...qaData,
+          contents: qaData.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? [],
+        };
+      }
+    }
+
     if (qaData.contents.length === 0) {
-      logger.warn('[blog:pipeline] QA 통과 항목 없음. 종료.');
+      logger.warn('[blog:pipeline] QA 통과 항목 없음 (재작성 포함). 종료.');
       process.exit(0);
     }
   } catch (err) {
