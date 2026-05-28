@@ -12,6 +12,7 @@
 </head>
 <body>
 
+  <!-- ── 헤더 ── -->
   <header id="site-header">
     <div class="wrap">
       <a href="[##_blog_link_##]" class="site-logo">
@@ -27,6 +28,7 @@
     </div>
   </header>
 
+  <!-- ── 모바일 드로어 ── -->
   <div id="mobile-menu" class="mobile-menu">
     <button class="menu-close" id="menuClose">✕</button>
 
@@ -45,6 +47,7 @@
   </div>
   <div id="menu-overlay" class="menu-overlay"></div>
 
+  <!-- ── 메인 ── -->
   <main id="site-main">
     <div class="wrap">
 
@@ -52,83 +55,153 @@
         <div class="notice-bar">📌 [##_notice_##]</div>
       </s_notice>
 
-      <s_article_rep>
-        <div class="post-grid">
-          [##_article_rep_##]
-          <article class="post-card">
-            <a href="[##_article_rep_link_##]" class="post-card-link">
-              <s_article_rep_thumbnail>
-                <div class="post-thumb">
-                  <img src="[##_article_rep_thumbnail_##]" alt="[##_article_rep_title_##]" loading="lazy">
-                </div>
-              </s_article_rep_thumbnail>
-              <div class="post-info">
-                <span class="post-cat">[##_article_rep_category_##]</span>
-                <h2 class="post-title">[##_article_rep_title_##]</h2>
-                <p class="post-excerpt">[##_article_rep_desc_##]</p>
-                <div class="post-meta">
-                  <time>[##_article_rep_date_##]</time>
-                </div>
-              </div>
-            </a>
-          </article>
-          [/##_article_rep_##]
-        </div>
-        <div class="paging-wrap">
-          [##_paging_##]
-        </div>
-      </s_article_rep>
+      <!-- 본문 + 사이드바 2단 레이아웃 -->
+      <div class="layout-wrap">
 
-      <s_article>
-        <article id="post" class="single-post">
+        <!-- ── 메인 콘텐츠 ── -->
+        <div class="layout-main">
 
-          <header class="post-header">
-            <span class="post-cat">[##_article_category_##]</span>
-            <h1 class="post-title">[##_article_title_##]</h1>
-            <div class="post-meta">
-              <time>[##_article_date_##]</time>
-              <span class="view-count">[##_article_count_##]회 읽음</span>
+          <!-- ══ 포스트 목록 (메인 / 카테고리 / 검색) ══ -->
+          <s_article_rep>
+            <div class="post-grid">
+              [##_article_rep_##]
+              <article class="post-card">
+                <a href="[##_article_rep_link_##]" class="post-card-link">
+                  <s_article_rep_thumbnail>
+                    <div class="post-thumb">
+                      <img src="[##_article_rep_thumbnail_##]" alt="[##_article_rep_title_##]" loading="lazy">
+                    </div>
+                  </s_article_rep_thumbnail>
+                  <div class="post-info">
+                    <span class="post-cat">[##_article_rep_category_##]</span>
+                    <h2 class="post-title">[##_article_rep_title_##]</h2>
+                    <p class="post-excerpt">[##_article_rep_desc_##]</p>
+                    <div class="post-meta">
+                      <time>[##_article_rep_date_##]</time>
+                    </div>
+                  </div>
+                </a>
+              </article>
+              [/##_article_rep_##]
             </div>
-          </header>
+            <div class="paging-wrap">
+              [##_paging_##]
+            </div>
+          </s_article_rep>
 
-          <div class="post-body">
-            [##_article_content_##]
-          </div>
+          <!-- ══ 개별 포스트 ══ -->
+          <s_article>
+            <article id="post" class="single-post">
 
-          <footer class="post-footer">
-            <s_tag_label>
-              <div class="post-tags">
-                [##_article_tag_##]
+              <header class="post-header">
+                <span class="post-cat">[##_article_category_##]</span>
+                <h1 class="post-title">[##_article_title_##]</h1>
+                <div class="post-meta">
+                  <time>[##_article_date_##]</time>
+                  <span class="view-count">[##_article_count_##]회 읽음</span>
+                </div>
+              </header>
+
+              <div class="post-body">
+                [##_article_content_##]
               </div>
-            </s_tag_label>
 
-            <nav class="post-nav">
-              <s_article_prev>
-                <a href="[##_article_prev_link_##]" class="post-nav-item prev">
-                  <span class="nav-dir">← 이전 글</span>
-                  <span class="nav-title">[##_article_prev_title_##]</span>
-                </a>
-              </s_article_prev>
-              <s_article_next>
-                <a href="[##_article_next_link_##]" class="post-nav-item next">
-                  <span class="nav-dir">다음 글 →</span>
-                  <span class="nav-title">[##_article_next_title_##]</span>
-                </a>
-              </s_article_next>
-            </nav>
-          </footer>
+              <footer class="post-footer">
+                <s_tag_label>
+                  <div class="post-tags">
+                    [##_article_tag_##]
+                  </div>
+                </s_tag_label>
 
-        </article>
+                <nav class="post-nav">
+                  <s_article_prev>
+                    <a href="[##_article_prev_link_##]" class="post-nav-item prev">
+                      <span class="nav-dir">← 이전 글</span>
+                      <span class="nav-title">[##_article_prev_title_##]</span>
+                    </a>
+                  </s_article_prev>
+                  <s_article_next>
+                    <a href="[##_article_next_link_##]" class="post-nav-item next">
+                      <span class="nav-dir">다음 글 →</span>
+                      <span class="nav-title">[##_article_next_title_##]</span>
+                    </a>
+                  </s_article_next>
+                </nav>
+              </footer>
 
-        <section id="comments">
-          [##_article_comment_##]
-        </section>
+            </article>
 
-      </s_article>
+            <section id="comments">
+              [##_article_comment_##]
+            </section>
 
-    </div>
+          </s_article>
+
+        </div><!-- /layout-main -->
+
+        <!-- ── 사이드바 ── -->
+        <aside class="layout-sidebar">
+          <s_sidebar>
+
+            <s_sidebar_element>
+              <!-- 인기글 -->
+              <div class="widget">
+                <h4 class="widget-title">🔥 인기글</h4>
+                <ul class="widget-list">
+                  <s_rctps_popular_rep>
+                    <li>
+                      <a href="[##_rctps_rep_link_##]" class="widget-post-item">
+                        <s_rctps_rep_thumbnail>
+                          <img class="widget-thumb" src="[##_rctps_rep_thumbnail_##]" alt="">
+                        </s_rctps_rep_thumbnail>
+                        <span class="widget-post-title">[##_rctps_rep_title_##]</span>
+                      </a>
+                    </li>
+                  </s_rctps_popular_rep>
+                </ul>
+              </div>
+            </s_sidebar_element>
+
+            <s_sidebar_element>
+              <!-- 카테고리 -->
+              <div class="widget">
+                <h4 class="widget-title">📂 카테고리</h4>
+                <div class="widget-category">
+                  <s_category>
+                    [##_category_##]
+                  </s_category>
+                </div>
+              </div>
+            </s_sidebar_element>
+
+            <s_sidebar_element>
+              <!-- 최근글 -->
+              <div class="widget">
+                <h4 class="widget-title">🕐 최근글</h4>
+                <ul class="widget-list">
+                  <s_rctps_rep>
+                    <li>
+                      <a href="[##_rctps_rep_link_##]" class="widget-post-item">
+                        <s_rctps_rep_thumbnail>
+                          <img class="widget-thumb" src="[##_rctps_rep_thumbnail_##]" alt="">
+                        </s_rctps_rep_thumbnail>
+                        <span class="widget-post-title">[##_rctps_rep_title_##]</span>
+                      </a>
+                    </li>
+                  </s_rctps_rep>
+                </ul>
+              </div>
+            </s_sidebar_element>
+
+          </s_sidebar>
+        </aside>
+
+      </div><!-- /layout-wrap -->
+
+    </div><!-- /wrap -->
   </main>
 
+  <!-- ── 푸터 ── -->
   <footer id="site-footer">
     <div class="wrap">
       <p class="footer-copy">
