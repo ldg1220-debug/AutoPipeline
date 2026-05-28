@@ -7,6 +7,7 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { createTistoryContext, isLoggedIn } from '../utils/playwright_session.js';
 import db from '../db/db.js';
+import { pingSearchEngines } from '../utils/searchPing.js';
 import {
   loadTistoryCategories,
   matchBestCategory,
@@ -645,6 +646,7 @@ export async function publishBlogPosts(contentData) {
           content.youtube_url
         );
         updated.push({ ...content, blog_publish: { status: 'published', url: postUrl } });
+        pingSearchEngines(postUrl).catch(() => {});
       } else {
         updated.push({ ...content, blog_publish: { status: 'failed', error: 'URL not captured' } });
       }

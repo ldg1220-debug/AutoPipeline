@@ -217,9 +217,13 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
       const imgData = bodyImages.length > 0
         ? (bodyImages.find((img) => img.section_index === i) ?? bodyImages[i % bodyImages.length])
         : null;
+      // 첫 섹션 이미지에는 메인 키워드 포함 (SEO alt 최적화)
+      const altText = i === 0
+        ? `${seoKeywords[0] ?? ''} - ${s.heading}`.trim()
+        : `${s.heading} (${seoKeywords[0] ?? ''})`.trim();
       const imageHtml = imgData?.image_url
         ? `<div class="blog-img-wrap">\n` +
-          `<img src="${imgData.image_url}" alt="${s.heading}" loading="lazy" />\n` +
+          `<img src="${imgData.image_url}" alt="${altText}" loading="lazy" />\n` +
           `<p class="photo-credit">Photo by ${imgData.photographer ?? 'Pexels'} on Pexels</p>\n` +
           `</div>`
         : '';
@@ -320,9 +324,32 @@ async function monetizeBlogDraft(content) {
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor);
   const faqHtml      = renderFaq(blog_draft.faq);
 
-  const jsonLdScript = blog_draft.json_ld
-    ? `<script type="application/ld+json">${JSON.stringify(blog_draft.json_ld)}</script>`
-    : '';
+  // JSON-LD: Article + FAQPage 스키마 합산
+  const faqSchema = blog_draft.faq?.length
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: blog_draft.faq.map((f) => ({
+          '@type': 'Question',
+          name: f.q,
+          acceptedAnswer: { '@type': 'Answer', text: f.a },
+        })),
+      }
+    : null;
+  const jsonLdScript = [
+    blog_draft.json_ld
+      ? `<script type="application/ld+json">${JSON.stringify(blog_draft.json_ld)}</script>`
+      : '',
+    faqSchema
+      ? `<script type="application/ld+json">${JSON.stringify(faqSchema)}</script>`
+      : '',
+    // Open Graph + Twitter Card 메타태그
+    `<meta property="og:title" content="${(blog_draft.title ?? keyword).replace(/"/g, '&quot;')}" />`,
+    `<meta property="og:description" content="${(blog_draft.meta_description ?? '').replace(/"/g, '&quot;')}" />`,
+    `<meta property="og:type" content="article" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${(blog_draft.title ?? keyword).replace(/"/g, '&quot;')}" />`,
+  ].filter(Boolean).join('\n');
 
   // 내부 링크: 발행된 관련 포스트 조회 (최대 3개)
   const currentPostUrl = content.blog_post_url ?? null;
@@ -353,16 +380,18 @@ async function monetizeBlogDraft(content) {
   const html = [
     buildBlogStyles(content.category),
     jsonLdScript,
+    adsenseSlot('title_below'),
     `<div class="blog-intro"><span style="margin-right:6px">${getCategoryIcon(content.category)}</span>${blog_draft.meta_description || ''}</div>`,
     tldrHtml,                                     // TL;DR 박스
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 헤더 + 키워드 하이라이트
-    adsenseSlot('mid_content'),                   // 애드센스 1개 (본문 중간)
+    adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,
     relatedPostsHtml,                             // 관련 포스트 내부 링크 카드
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
+    adsenseSlot('post_end'),
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
   ]
     .filter(Boolean)
