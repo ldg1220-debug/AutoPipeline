@@ -9,6 +9,7 @@ import { monetizeAll } from '../src/agents/monetizer.js';
 import { publishBlogPosts } from '../src/agents/blog_publisher.js';
 import { runBlogAnalytics } from '../src/agents/blog_analytics.js';
 import { runBlogQA } from '../src/agents/qa_editor.js';
+import { runProjectManagerReview } from '../src/agents/project_manager.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -133,6 +134,14 @@ async function main() {
     const s = c.blog_publish;
     console.log(`  [${s?.status ?? '?'}] ${c.keyword} → ${s?.url ?? '-'}`);
   });
+
+  // Part 7: 프로젝트 매니저 검수 — 전체 파이프라인 품질·이상 점검
+  try {
+    await runProjectManagerReview();
+    logger.info('[blog:pipeline] Part 7 (프로젝트 검수) 완료.');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 7 실패: ${err.message}`);
+  }
 }
 
 main().catch((err) => {

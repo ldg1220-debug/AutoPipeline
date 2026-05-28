@@ -22,6 +22,7 @@ import { groupSimilarTopics } from './agents/topic_grouper.js';
 import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
+import { runProjectManagerReview } from './agents/project_manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -309,6 +310,11 @@ async function runPipeline() {
   // 구독자 마일스톤 체크 (실패해도 파이프라인 결과에 영향 없음)
   checkSubscribers().catch((err) =>
     logger.warn('[app] Subscriber check failed (non-critical):', { message: err.message })
+  );
+
+  // 프로젝트 매니저 검수 — 파이프라인 종료 후 전체 품질·이상 점검
+  runProjectManagerReview().catch((err) =>
+    logger.warn('[app] Project manager review failed (non-critical):', { message: err.message })
   );
 
   return publishResults; // 블로그 파이프라인에 youtube_url 전달용
