@@ -587,21 +587,75 @@ async function renderLabelPng(seriesName, outputPath) {
 async function renderSubtitlePngBuffer(text) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const fontSize = 36;
-  const lineH = Math.ceil(fontSize * 1.6);
-  const padding = 24;
+  const fontSize = 48;
+  const lineH = Math.ceil(fontSize * 1.55);
+  const padding = 28;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = wrapTextKorean(text, 22);
+  const lines = wrapTextKorean(text, 18);
   const boxH = lines.length * lineH + padding * 2;
-  const boxX = 90, boxW = 900;
-  const boxY = H - boxH - 115;
+  const boxX = 60, boxW = 960;
+  const boxY = H - boxH - 100;
+  // 텍스트 그림자 효과: 같은 텍스트를 살짝 오프셋으로 먼저 렌더링
+  const shadowElems = lines.map((line, i) => {
+    const y = boxY + padding + (i + 0.82) * lineH;
+    return `<text x="${W / 2 + 3}" y="${y + 3}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.6" text-anchor="middle">${esc(line)}</text>`;
+  }).join('\n');
   const textElems = lines.map((line, i) => {
-    const y = boxY + padding + (i + 0.8) * lineH;
+    const y = boxY + padding + (i + 0.82) * lineH;
     return `<text x="${W / 2}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(line)}</text>`;
   }).join('\n');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="14" fill="#000000" fill-opacity="0.82"/>
+    <defs>
+      <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000000" stop-opacity="0.75"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.92"/>
+      </linearGradient>
+    </defs>
+    <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="16" fill="url(#subGrad)"/>
+    <rect x="${boxX}" y="${boxY}" width="6" height="${boxH}" rx="3" fill="#FACC15"/>
+    ${shadowElems}
     ${textElems}
+  </svg>`;
+  return await sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+/** 첫 프레임 전용 — 주제(키워드)를 화면 중앙에 크게 배치 */
+async function renderFirstFramePngBuffer(keyword, seriesName) {
+  const W = 1080, H = 1920;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = wrapTextKorean(keyword, 12);
+  const titleSize = 96;
+  const lineH = Math.ceil(titleSize * 1.3);
+  const blockH = lines.length * lineH + 60;
+  const blockY = Math.round(H * 0.38);
+  const shadowElems = lines.map((line, i) =>
+    `<text x="${W / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}" font-family="${FONT}" font-size="${titleSize}" font-weight="bold" fill="#000000" fill-opacity="0.55" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+  const titleElems = lines.map((line, i) =>
+    `<text x="${W / 2}" y="${blockY + 48 + (i + 0.85) * lineH}" font-family="${FONT}" font-size="${titleSize}" font-weight="bold" fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <defs>
+      <linearGradient id="grad" x1="0" y1="0.3" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="45%" stop-color="#000000" stop-opacity="0.70"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.90"/>
+      </linearGradient>
+    </defs>
+    <!-- 하단 그라데이션 오버레이 -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#grad)"/>
+    <!-- 주제 타이틀 배경 박스 -->
+    <rect x="60" y="${blockY}" width="${W - 120}" height="${blockH}" rx="20" fill="#000000" fill-opacity="0.55"/>
+    <!-- 좌측 강조 바 -->
+    <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
+    <!-- ▶ TODAY 뱃지 -->
+    <rect x="${W / 2 - 120}" y="${blockY - 58}" width="240" height="48" rx="24" fill="#FACC15"/>
+    <text x="${W / 2}" y="${blockY - 22}" font-family="${FONT}" font-size="26" font-weight="bold" fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>
+    ${shadowElems}
+    ${titleElems}
+    <!-- 시리즈명 -->
+    <text x="${W / 2}" y="${blockY + blockH + 54}" font-family="${FONT}" font-size="34" fill="#94a3b8" text-anchor="middle">${esc(seriesName ?? '매일읽어주는남자')}</text>
   </svg>`;
   return await sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -664,7 +718,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
  *   subtitle — 하단 자막 텍스트 (null 허용)
  *   duration — 프레임 표시 시간(초)
  */
-async function renderFramesWithFfmpeg(frames, audioPath, outputPath) {
+async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, seriesName } = {}) {
   const sessionId = Date.now().toString(36);
   const tmpDir    = path.resolve(path.dirname(outputPath), 'tmp_ffmpeg');
   await fs.mkdir(tmpDir, { recursive: true });
@@ -692,8 +746,12 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath) {
       : fallbackBg;
 
     const composites = [];
-    if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
-    if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+    if (i === 0 && keyword) {
+      composites.push({ input: await renderFirstFramePngBuffer(keyword, seriesName) });
+    } else {
+      if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
+      if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+    }
 
     const frameBuf = composites.length
       ? await sharp(baseBuf).composite(composites).png().toBuffer()
@@ -1480,7 +1538,7 @@ async function generateMedia(content) {
       subtitle: scene.text,
       duration: scene.duration,
     }));
-    await renderFramesWithFfmpeg(frames, result.audio, videoPath);
+    await renderFramesWithFfmpeg(frames, result.audio, videoPath, { keyword: content.keyword, seriesName });
     result.video = videoPath;
   } catch (err) {
     logger.error(`[media_generator] Video render failed: ${content.keyword} | ${err.message}`);
@@ -1608,7 +1666,7 @@ async function generateLongFormMedia(content) {
   }));
 
   try {
-    await renderFramesWithFfmpeg(frames, mergedAudio, videoPath);
+    await renderFramesWithFfmpeg(frames, mergedAudio, videoPath, { keyword: content.keyword, seriesName: videoTitle });
     result.video = videoPath;
     logger.info(`[media_generator] Long-form video saved: ${videoPath}`);
   } catch (err) {
