@@ -52,6 +52,49 @@ async function uploadImageToEditor(page, imagePath) {
   }
 }
 
+// ── 대표 이미지 설정 (사이드바 .layer_publish 내 썸네일 영역) ────────────────
+async function setRepresentativeImage(page, imagePath) {
+  // 사이드바 내 대표 이미지 버튼/영역 후보 셀렉터
+  const thumbSelectors = [
+    '.layer_publish .btn-thumb',
+    '.layer_publish button[data-thumb]',
+    '.layer_publish .area_thumb button',
+    '.layer_publish [class*="thumb"] button',
+    '.layer_publish [class*="Thumb"] button',
+    '.layer_publish [data-tistory-react-app="Thumbnail"] button',
+    '.layer_publish button:has-text("대표이미지")',
+    '.layer_publish button:has-text("썸네일")',
+    '.layer_publish button:has-text("이미지 등록")',
+    '.layer_publish label[for*="thumb"]',
+    '.layer_publish input[type="file"][accept*="image"]',
+  ];
+
+  for (const sel of thumbSelectors) {
+    try {
+      const el = await page.$(sel);
+      if (!el) continue;
+      const visible = await el.isVisible().catch(() => false);
+      if (!visible) continue;
+
+      if (sel.includes('input[type="file"]')) {
+        // 파일 input이 직접 노출된 경우
+        await el.setInputFiles(imagePath);
+      } else {
+        const [fileChooser] = await Promise.all([
+          page.waitForFileChooser({ timeout: 4000 }),
+          el.click({ force: true }),
+        ]);
+        await fileChooser.setFiles(imagePath);
+      }
+      await page.waitForTimeout(1500);
+      logger.info(`[blog_publisher] Representative image set via: ${sel}`);
+      return true;
+    } catch { /* 다음 시도 */ }
+  }
+  logger.warn('[blog_publisher] Representative image: sidebar selector not found (API thumbnail will be used)');
+  return false;
+}
+
 // ── 유튜브 임베드 교체 ─────────────────────────────────────────────────────
 function injectYouTubeEmbed(html, youtubeUrl) {
   if (!youtubeUrl) return html.replace('{{YOUTUBE_EMBED}}', '');
@@ -188,11 +231,16 @@ async function publishPost(page, content, blogName, context) {
 
   logger.info(`[blog_publisher] URL[1-after-inject]: ${page.url()}`);
 
-  // 썸네일 업로드 (있을 때만) — 사이드바 열기 전에 처리
-  if (blog_assets?.thumbnail) {
+  // 대표 이미지 업로드 — CDN URL을 캡처해 발행 API에 thumbnail 필드로 주입
+  let thumbnailCdnUrl = null;
+  const thumbSrc = blog_assets?.thumbnail ?? blog_assets?.body_images?.[0]?.path ?? null;
+  if (thumbSrc) {
     try {
-      await uploadImageToEditor(page, blog_assets.thumbnail);
-    } catch { /* 썸네일 실패해도 발행 계속 */ }
+      thumbnailCdnUrl = await uploadImageToEditor(page, thumbSrc);
+      logger.info(`[blog_publisher] Thumbnail uploaded: ${thumbnailCdnUrl}`);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Thumbnail upload failed: ${err.message}`);
+    }
     logger.info(`[blog_publisher] URL[2-after-thumbnail]: ${page.url()}`);
   }
 
@@ -243,9 +291,10 @@ async function publishPost(page, content, blogName, context) {
   await page.route('**/manage/post.json', async (route) => {
     let data = {};
     try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
-    data.visibility = 20;  // 전체 공개
-    data.content = html;   // 실제 본문 주입 (저장 시점에 TinyMCE가 비어있는 문제 해소)
-    if (bestCategory?.id) data.categoryId = bestCategory.id;  // UI 클릭 실패 대비 API 직접 주입
+    data.visibility = 20;
+    data.content = html;
+    if (bestCategory?.id) data.categoryId = bestCategory.id;
+    if (thumbnailCdnUrl) data.thumbnail = thumbnailCdnUrl;  // 대표 이미지 API 직접 주입
     try {
       const resp = await route.fetch({ postData: JSON.stringify(data) });
       publishApiResp = await resp.text();
@@ -304,7 +353,7 @@ async function publishPost(page, content, blogName, context) {
     timeout: 5000,
   }).catch(() => page.waitForTimeout(2000));
 
-  // 사이드바 열린 후: 카테고리 + 태그 설정 (새 에디터는 사이드바 안에 위치)
+  // 사이드바 열린 후: 카테고리 + 태그 + 대표 이미지 설정
   if (bestCategory) {
     try {
       const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
@@ -318,6 +367,14 @@ async function publishPost(page, content, blogName, context) {
       await setTagsInEditor(page, generatedTags);
     } catch (err) {
       logger.warn(`[blog_publisher] Tag set failed: ${err.message}`);
+    }
+  }
+  // 대표 이미지 — 사이드바 UI에서 직접 설정 (API 주입 보완)
+  if (thumbSrc) {
+    try {
+      await setRepresentativeImage(page, thumbSrc);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Representative image set failed: ${err.message}`);
     }
   }
 

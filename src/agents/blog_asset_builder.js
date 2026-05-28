@@ -24,13 +24,23 @@ const PEXELS_QUERY = {
   social:        'society people community korea',
 };
 
-// DALL-E 3 썸네일 프롬프트 — 블로그 썸네일 스타일
+// DALL-E 3 썸네일 프롬프트 — 블로그 대표 이미지 스타일
 function buildThumbnailPrompt(content) {
-  const base = content.image_prompt || `${content.keyword} concept illustration`;
+  const base = content.image_prompt || `${content.keyword} concept`;
+  const categoryStyle = {
+    economy:       'dark blue gradient background, financial charts, bar graphs, upward arrows',
+    finance:       'dark navy background, gold coins, stock market charts, clean minimal',
+    realestate:    'aerial city view, apartment buildings, korea cityscape, modern architecture',
+    health:        'clean white background, green accents, wellness lifestyle, fresh minimalist',
+    entertainment: 'vibrant colorful background, media entertainment, dynamic composition',
+    social:        'warm tones, people silhouettes, community, social connection',
+  }[content.category] ?? 'clean gradient background, modern flat design';
+
   return (
-    `Clean modern infographic thumbnail for Korean blog post. Topic: "${content.keyword}". ` +
-    `Style: flat design, bold typography, ${base}. ` +
-    `16:9 ratio, white background, Korean economic blog aesthetic. No text in image.`
+    `Eye-catching blog thumbnail image. Topic: "${content.keyword}". ` +
+    `Style: ${categoryStyle}. ${base}. ` +
+    `16:9 aspect ratio, professional editorial look, visually striking. ` +
+    `No text, no letters, no words in the image.`
   );
 }
 
