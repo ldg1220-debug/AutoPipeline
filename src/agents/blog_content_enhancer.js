@@ -6,7 +6,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
-import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
+import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -268,11 +268,13 @@ async function enhanceBlogDraft(content) {
     logger.info(`[blog_content_enhancer] Benchmark rules injected (${benchmarkRules.based_on_posts}개 분석 기반)`);
   }
 
-  // 경쟁 채널 인사이트 로드 (7일 캐시 사용, 없으면 조용히 스킵)
+  // 경쟁 채널·블로그 인사이트 로드 (TTL 캐시 사용, 없으면 조용히 스킵)
   let competitorCtx = '';
   try {
-    const insights = await loadCompetitorInsights(category);
-    competitorCtx = formatInsightsForPrompt(insights);
+    const insights    = await loadCompetitorInsights(category);
+    const ytCtx       = formatInsightsForPrompt(insights);
+    const blogCtx     = formatBlogInsightsForPrompt(insights);
+    competitorCtx     = ytCtx + blogCtx;
     if (competitorCtx) logger.info(`[blog_content_enhancer] Competitor insights injected for: ${category}`);
   } catch {
     // 인사이트 없으면 스킵
