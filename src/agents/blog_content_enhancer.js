@@ -213,7 +213,7 @@ function buildJsonLd(title, keyword, slug) {
   };
 }
 
-// 제휴 훅 포지션 결정 (상업적 의도 있을 때)
+// 제휴 훅 포지션 결정 — 중간 H2 섹션 1곳에만 고정 삽입 (SEO 패널티 방지 + 링크 보장)
 function buildAffiliateHooks(sections, affiliateCategory) {
   if (!affiliateCategory) return [];
   const h2Indices = sections
@@ -221,27 +221,15 @@ function buildAffiliateHooks(sections, affiliateCategory) {
     .filter((s) => s.level === 'h2')
     .map((s) => s.i);
 
-  const hooks = [];
-  if (h2Indices.length >= 2) {
-    hooks.push({
-      position: `section${h2Indices[1] + 1}_end`,
-      product_category: affiliateCategory,
-      anchor_text: `${affiliateCategory} 최저가 확인`,
-    });
-  }
-  if (h2Indices.length >= 4) {
-    hooks.push({
-      position: `section${h2Indices[3] + 1}_end`,
-      product_category: affiliateCategory,
-      anchor_text: `관련 상품 보러가기`,
-    });
-  }
-  hooks.push({
-    position: 'conclusion_top',
+  if (h2Indices.length === 0) return [];
+
+  const targetIdx = h2Indices[Math.floor(h2Indices.length / 2)];
+  return [{
+    position:         `section${targetIdx + 1}_end`,
     product_category: affiliateCategory,
-    anchor_text: `${affiliateCategory} 추천 상품`,
-  });
-  return hooks;
+    anchor_text:      `${affiliateCategory} 추천 상품 보기`,
+  }];
+}
 }
 
 /**
