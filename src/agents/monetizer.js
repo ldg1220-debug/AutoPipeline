@@ -7,6 +7,7 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
 import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../utils/internalLinks.js';
+import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,8 +36,9 @@ const CATEGORY_EMOJI = {
   social:        '👥',
 };
 
-// ── 블로그 스타일시트 ──────────────────────────────────────────────────────
-const BLOG_STYLES = `<style>
+// ── 블로그 스타일시트 (카테고리 테마 포함) ───────────────────────────────────
+function buildBlogStyles(category) {
+  return `<style>
 .blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:12px 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
 .tldr-box{background:linear-gradient(135deg,#1e3a8a,#1d4ed8);color:#fff;border-radius:12px;padding:20px 24px;margin:0 0 28px}
 .tldr-box h4{margin:0 0 10px;font-size:15px;opacity:.85;letter-spacing:.5px}
@@ -65,7 +67,9 @@ const BLOG_STYLES = `<style>
 .cta-box p{margin:0;font-size:14px;opacity:.9;line-height:1.7}
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
 ${RELATED_POSTS_CSS}
+${getThemeStyles(category)}
 </style>`;
+}
 
 // ── ① TL;DR 박스 ──────────────────────────────────────────────────────────
 function buildTldrBox(sections) {
@@ -347,10 +351,10 @@ async function monetizeBlogDraft(content) {
     `</div>`;
 
   const html = [
-    BLOG_STYLES,
+    buildBlogStyles(content.category),
     jsonLdScript,
     adsenseSlot('title_below'),
-    `<div class="blog-intro">${blog_draft.meta_description || ''}</div>`,
+    `<div class="blog-intro"><span style="margin-right:6px">${getCategoryIcon(content.category)}</span>${blog_draft.meta_description || ''}</div>`,
     tldrHtml,                                     // TL;DR 박스
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 헤더 + 키워드 하이라이트
