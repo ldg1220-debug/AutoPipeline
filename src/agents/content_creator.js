@@ -265,6 +265,67 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   return JSON.parse(response.data.choices[0].message.content);
 }
 
+// ── 롱폼 대본 생성 (3~5분) ────────────────────────────────────────────────────
+async function generateLongVideoScript(item, competitorCtx = '') {
+  const trendCtx = [
+    item.source_url ? `참고 기사 URL: ${item.source_url}` : '',
+    item.summary    ? `기사 핵심 요약: ${item.summary}` : '',
+    item.figures    ? `핵심 수치/팩트: ${item.figures}` : '',
+  ].filter(Boolean).join('\n');
+
+  const prompt = `당신은 유튜브 채널 "매일읽어주는남자"의 롱폼(3~5분) 대본 작가입니다.
+아래 키워드로 총 270~300초(4.5~5분) 분량의 롱폼 나레이션 대본을 작성하세요.
+나레이터는 "매읽남" — 친근하고 명료한 경제 해설가 캐릭터입니다.
+
+키워드: ${item.keyword}
+카테고리: ${item.category}
+${trendCtx ? `\n[참고 데이터 — 아래 수치·팩트를 대본에 직접 인용할 것]\n${trendCtx}\n` : ''}
+${competitorCtx}
+━━━ 구성 원칙 ━━━
+- 한 문장 최대 30자, 구어체, TTS 친화적
+- 숫자는 한글 발음으로: "14.9퍼센트", "팔천억원"
+- 각 섹션은 자연스럽게 이어짐 (연결어 필수)
+- 추상 표현 금지: 반드시 구체 수치/사례로 뒷받침
+
+━━━ 섹션 구성 ━━━
+0. 인트로     (30초, ~150자)  : 강렬한 훅 + "오늘 다룰 내용" 예고
+1. 배경/현황   (60초, ~300자)  : 무슨 일이 일어났나? 맥락과 수치
+2. 핵심 분석   (90초, ~450자)  : 왜 중요한가? 원인·구조·메커니즘 심층 해설
+3. 영향과 전망 (60초, ~300자)  : 우리 생활/투자에 미치는 실질 영향
+4. 마무리/CTA  (30초, ~150자)  : 핵심 한 줄 정리 + 구독 유도
+
+JSON 형식으로만 응답 (다른 텍스트 금지):
+
+{
+  "sections": [
+    { "name": "인트로",     "script": "...", "key_point": "핵심 한 줄", "duration_seconds": 30 },
+    { "name": "배경",      "script": "...", "key_point": "핵심 한 줄", "duration_seconds": 60 },
+    { "name": "핵심분석",   "script": "...", "key_point": "핵심 한 줄", "duration_seconds": 90 },
+    { "name": "영향과전망", "script": "...", "key_point": "핵심 한 줄", "duration_seconds": 60 },
+    { "name": "마무리",    "script": "...", "key_point": "핵심 한 줄", "duration_seconds": 30 }
+  ]
+}`;
+
+  const response = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.75,
+      response_format: { type: 'json_object' },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${config.openai.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 90000,
+    }
+  );
+
+  return JSON.parse(response.data.choices[0].message.content);
+}
+
 export async function createContents(trendData) {
   const items = trendData?.selected_items ?? [];
 
@@ -305,11 +366,22 @@ export async function createContents(trendData) {
       // TTS 정규화: 숫자·약어를 한글 발음으로 변환
       const normalizedScript = normalizeScript(generated.shortform_script);
 
+      // 롱폼 대본 생성 (3~5분)
+      let longVideo = null;
+      try {
+        await throttle(1500);
+        longVideo = await generateLongVideoScript(item, competitorCtx);
+        logger.info(`[content_creator] Long-form script generated (${longVideo.sections?.length ?? 0}섹션): ${item.keyword}`);
+      } catch (err) {
+        logger.warn(`[content_creator] Long-form script failed, skipping: ${err.message}`);
+      }
+
       contents.push({
         keyword:             item.keyword,
         category:            item.category,
         series_name:         generated.series_name ?? item.series ?? '오늘 읽는 핫이슈',
         shortform_script:    normalizedScript ?? {},
+        long_video:          longVideo,
         youtube_title:       generated.youtube_title ?? item.keyword,
         youtube_description: generated.youtube_description ?? '',
         image_prompt:        `notebook paper background, handwritten Korean text style, 9:16 portrait, study desk aesthetic, ${item.category} theme, clean minimal layout`,
