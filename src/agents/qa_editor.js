@@ -353,9 +353,9 @@ export async function runVisionQA(textQaData) {
 // ─────────────────────────────────────────────────────────────
 // ③ 블로그 본문 QA — blog_content_enhancer 완료 후 실행
 // ─────────────────────────────────────────────────────────────
-const BLOG_MIN_SECTION_CHARS = 200;   // 섹션당 최소 글자 수
-const BLOG_MIN_FAQ_CHARS     = 60;    // FAQ 답변 최소 글자 수
-const BLOG_MIN_SECTION_COUNT = 3;     // 최소 섹션 수
+const BLOG_MIN_SECTION_CHARS = 400;   // 섹션당 최소 글자 수 (500~800자 목표, 400자 미만 탈락)
+const BLOG_MIN_FAQ_CHARS     = 80;    // FAQ 답변 최소 글자 수
+const BLOG_MIN_SECTION_COUNT = 4;     // 최소 섹션 수
 
 /**
  * LLM으로 블로그 본문 SEO 품질을 평가한다.

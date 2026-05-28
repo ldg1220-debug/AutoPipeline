@@ -34,6 +34,7 @@
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:login": "node scripts/tistory-login.js",
     "blog:setup-categories": "node scripts/setup-tistory-categories.js",
+    "blog:setup-pages": "node scripts/setup-blog-pages.js",
     "thumbnail:set": "node scripts/set-thumbnail.js",
     "thumbnail:swap": "node scripts/swap-thumbnails.js",
     "thumbnail:swap:dry": "cross-env DRY_RUN=true node scripts/swap-thumbnails.js",
