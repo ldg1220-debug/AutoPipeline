@@ -182,7 +182,50 @@ img { max-width: 100%; height: auto; display: block; }
 .post-card:hover .post-thumb img { transform: scale(1.04); }
 
 /* 카드 정보 */
-.post-info { padding: 16px 18px 20px; }
+.post-card-link { display: flex; flex-direction: column; height: 100%; }
+.post-info { padding: 16px 18px 20px; overflow: hidden; }
+
+/* 발췌문 클리핑 — 전체 HTML이 들어와도 고정 높이로 잘림 */
+.post-excerpt-wrap {
+  position: relative;
+  max-height: 64px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.excerpt-fade {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 28px;
+  background: linear-gradient(transparent, #fff);
+  pointer-events: none;
+}
+/* 발췌 내부 HTML 스타일 강제 초기화 */
+.post-excerpt,
+.post-excerpt * {
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  color: #64748b !important;
+  line-height: 1.6 !important;
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+/* 발췌 안의 이미지·버튼·링크 등 숨김 */
+.post-excerpt img,
+.post-excerpt button,
+.post-excerpt iframe,
+.post-excerpt .tldr-box,
+.post-excerpt .section-hdr,
+.post-excerpt .cta-box,
+.post-excerpt .faq-wrap,
+.post-excerpt .keyword-tags,
+.post-excerpt .affiliate-block,
+.post-excerpt .adsbygoogle,
+.post-excerpt style,
+.post-excerpt script { display: none !important; }
 
 .post-cat {
   display: inline-block;
