@@ -581,35 +581,45 @@ export async function runUnifiedPipeline() {
   }
   const qaContents = directorQAData.contents;
 
-  // ── Step 4a: 숏폼 미디어 제작 ─────────────────────────────────────────────
-  try {
-    const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: qaContents });
-    await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
-    logger.info(`[app] Unified Step 4a (shorts media) complete. Media: ${mediaResult.results?.length ?? 0}`);
-  } catch (err) {
-    logger.warn('[app] Unified Step 4a (shorts media) failed.', { message: err.message });
-  }
-
-  // ── Step 4b: 롱폼 영상 미디어 제작 ────────────────────────────────────────
+  // ── Step 4: 미디어 제작 ────────────────────────────────────────────────────
+  // 롱폼이 있는 콘텐츠: 롱폼 렌더링 → source_section 구간 자동 추출 → 숏폼 재사용
+  // 롱폼 없는 콘텐츠: 기존 방식으로 숏폼만 단독 생성
   const longFormResults = [];
+  const shortsOnlyContents = [];
+
   for (const tc of qaContents) {
-    if (!tc.long_video?.sections?.length) continue;
-    try {
-      logger.info(`[app] Unified Step 4b: long-form video for "${tc.keyword}"`);
-      const longResult = await generateLongFormMedia(tc);
-      longFormResults.push(longResult);
-    } catch (err) {
-      logger.warn(`[app] Unified Step 4b long-form failed for "${tc.keyword}": ${err.message}`);
+    if (tc.long_video?.sections?.length) {
+      // 롱폼 렌더링 (내부에서 shorts_video 추출까지 처리)
+      try {
+        logger.info(`[app] Unified Step 4 (long-form+shorts extract): "${tc.keyword}"`);
+        const longResult = await generateLongFormMedia(tc);
+        longFormResults.push({ ...longResult, keyword: tc.keyword, content: tc });
+        logger.info(`[app] Unified Step 4 done: "${tc.keyword}" | long=${!!longResult.video} | shorts=${!!longResult.shorts_video}`);
+      } catch (err) {
+        logger.warn(`[app] Unified Step 4 long-form failed for "${tc.keyword}": ${err.message}`);
+      }
+    } else {
+      shortsOnlyContents.push(tc);
     }
   }
+
+  // 숏폼 전용 콘텐츠 (롱폼 없음) — 기존 방식 유지
+  if (shortsOnlyContents.length > 0) {
+    try {
+      const mediaResult = await generateAllMedia({ generated_at: new Date().toISOString(), contents: shortsOnlyContents });
+      await writeJSON(path.resolve(__dirname, `../output/scripts/unified_media_${date}.json`), mediaResult);
+      logger.info(`[app] Unified Step 4 (shorts-only) complete. Media: ${mediaResult.results?.length ?? 0}`);
+    } catch (err) {
+      logger.warn('[app] Unified Step 4 (shorts-only) failed.', { message: err.message });
+    }
+  }
+
   if (longFormResults.length > 0) {
     await writeJSON(
       path.resolve(__dirname, `../output/scripts/unified_longform_${date}.json`),
-      { generated_at: new Date().toISOString(), results: longFormResults }
+      { generated_at: new Date().toISOString(), results: longFormResults.map((r) => ({ keyword: r.keyword, video: r.video, shorts_video: r.shorts_video })) }
     );
-    logger.info(`[app] Unified Step 4b complete. Long-form videos: ${longFormResults.filter((r) => r.video).length}/${longFormResults.length}`);
-  } else {
-    logger.info('[app] Unified Step 4b: no long-form items to produce.');
+    logger.info(`[app] Unified Step 4 complete. Long-form: ${longFormResults.filter((r) => r.video).length}개 | Shorts extracted: ${longFormResults.filter((r) => r.shorts_video).length}개`);
   }
 
   // ── Step 5: YouTube 발행 ──────────────────────────────────────────────────

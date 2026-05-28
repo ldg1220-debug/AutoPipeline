@@ -98,15 +98,21 @@ async function uploadVideoFile(videoPath, metadata, accessToken) {
  * #Shorts 해시태그를 제목·설명에 추가해 YouTube가 쇼츠로 인식하도록 한다.
  * 쇼츠는 예약 발행 대신 즉시 공개 처리한다.
  */
-async function publishShortsToYouTube(content, accessToken) {
+async function publishShortsToYouTube(content, accessToken, longFormUrl = null) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const mediaDir    = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
-  const videoPath   = path.resolve(mediaDir, `${safeKeyword}.mp4`);
+
+  // 롱폼에서 추출된 숏폼 우선 사용, 없으면 별도 생성된 숏폼 사용
+  const extractedPath = path.resolve(mediaDir, `${safeKeyword}_shorts.mp4`);
+  const standalonePath = path.resolve(mediaDir, `${safeKeyword}.mp4`);
+  const hasExtracted = await fs.access(extractedPath).then(() => true).catch(() => false);
+  const videoPath = hasExtracted ? extractedPath : standalonePath;
 
   try { await fs.access(videoPath); } catch {
     logger.warn(`[auto_publisher] Shorts file not found, skipping: ${videoPath}`);
     return { platform: 'youtube_shorts', status: 'skipped_no_video_file' };
   }
+  logger.info(`[auto_publisher] Shorts source: ${hasExtracted ? '롱폼 추출' : '단독 생성'} → ${videoPath}`);
 
   const blogPostUrl = content.blog_publish?.url ?? content.blog_post_url ?? null;
 
@@ -118,7 +124,11 @@ async function publishShortsToYouTube(content, accessToken) {
 
   // #Shorts 태그 필수 — 없으면 YouTube가 Shorts 피드에 노출하지 않음
   const shortsTitle = baseTitle.includes('#Shorts') ? baseTitle : `${baseTitle} #Shorts`;
-  const shortsDesc  = description.includes('#Shorts') ? description : `${description}\n\n#Shorts`;
+  // 롱폼 URL이 있으면 설명에 추가
+  const longFormLine = longFormUrl ? `\n\n▶ 풀버전 영상: ${longFormUrl}` : '';
+  const shortsDesc  = description.includes('#Shorts')
+    ? `${description}${longFormLine}`
+    : `${description}${longFormLine}\n\n#Shorts`;
   const shortsTags  = tags.includes('Shorts') ? tags : [...tags, 'Shorts', '쇼츠'];
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
@@ -488,9 +498,10 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // 쇼츠 업로드
+    // 쇼츠 업로드 — 롱폼 URL을 설명에 포함
     try {
-      result.youtube_shorts = await publishShortsToYouTube(content, accessToken);
+      const longFormUrl = result.youtube?.url ?? null;
+      result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl);
       logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
     } catch (err) {
       logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });

@@ -1615,6 +1615,42 @@ async function generateLongFormMedia(content) {
     logger.error(`[media_generator] Long-form ffmpeg render failed: ${err.message}`);
   }
 
+  // ── 6. 숏폼 추출 — source_section 구간을 롱폼에서 잘라냄 ──────────────
+  if (result.video) {
+    try {
+      const sourceIdx = (content.shorts?.source_section ?? content.shortform_script?.source_section ?? 5) - 1;
+      const clampedIdx = Math.max(0, Math.min(sourceIdx, sectionDurations.length - 1));
+
+      // 섹션 누적 시작 시간 계산
+      let sectionStart = 0;
+      for (let i = 0; i < clampedIdx; i++) sectionStart += sectionDurations[i];
+      const sectionDur = Math.min(sectionDurations[clampedIdx] ?? 60, 59); // 최대 59초
+
+      const shortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_shorts.mp4`);
+      const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')
+        .replace(/'/g, "\\'").replace(/:/g, '\\:');
+
+      // 구간 잘라내기 + 9:16 크롭 + CTA 텍스트 오버레이
+      await execFileAsync(ffmpegPath, [
+        '-ss', String(sectionStart),
+        '-t',  String(sectionDur),
+        '-i',  result.video,
+        '-vf', [
+          'crop=ih*9/16:ih:(iw-ih*9/16)/2:0',
+          `drawtext=text='${ctaText}':fontsize=28:fontcolor=white:x=(w-tw)/2:y=h-80:box=1:boxcolor=black@0.6:boxborderw=8`,
+        ].join(','),
+        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', shortsPath,
+      ]);
+
+      result.shorts_video = shortsPath;
+      result.shorts_section_idx = clampedIdx;
+      result.shorts_start_sec   = sectionStart;
+      logger.info(`[media_generator] Shorts extracted from section ${clampedIdx + 1} (${sectionStart}s~${sectionStart + sectionDur}s): ${shortsPath}`);
+    } catch (err) {
+      logger.warn(`[media_generator] Shorts extraction failed: ${err.message}`);
+    }
+  }
+
   return result;
 }
 
