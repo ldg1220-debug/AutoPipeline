@@ -386,6 +386,27 @@ async function publishPost(page, content, blogName, context) {
     timeout: 5000,
   }).catch(() => page.waitForTimeout(2000));
 
+  // 사이드바 열린 후: API/캐시에서 카테고리 로드 실패했으면 사이드바 select에서 직접 읽기
+  if (!bestCategory) {
+    try {
+      const sidebarCategories = await page.evaluate(() => {
+        const select =
+          document.querySelector('.layer_publish select[name="categoryId"]') ??
+          document.querySelector('select[name="categoryId"]');
+        if (!select) return [];
+        return [...select.options]
+          .filter((o) => o.value && o.value !== '0' && o.value !== '')
+          .map((o) => ({ id: o.value, name: o.text.trim(), parent: null }));
+      });
+      if (sidebarCategories.length > 0) {
+        logger.info(`[blog_publisher] Categories read from sidebar: ${sidebarCategories.map((c) => c.name).join(', ')}`);
+        bestCategory = await matchBestCategory(sidebarCategories, keyword, content.category ?? 'economy');
+      }
+    } catch (err) {
+      logger.warn(`[blog_publisher] Sidebar category read failed: ${err.message}`);
+    }
+  }
+
   // 사이드바 열린 후: 카테고리 + 태그 + 대표 이미지 설정
   if (bestCategory) {
     try {
