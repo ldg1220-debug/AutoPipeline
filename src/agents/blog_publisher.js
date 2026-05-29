@@ -386,41 +386,116 @@ async function publishPost(page, content, blogName, context) {
     timeout: 5000,
   }).catch(() => page.waitForTimeout(2000));
 
-  // 사이드바 열린 후: API/캐시에서 카테고리 로드 실패했으면 사이드바에서 직접 읽기
+  // 사이드바 열린 후: 카테고리 드롭다운을 열어 옵션을 읽고 설정
   if (!bestCategory) {
     try {
-      const sidebarCategories = await page.evaluate(() => {
-        // 1. 네이티브 <select> 시도
-        const select =
-          document.querySelector('.layer_publish select[name="categoryId"]') ??
-          document.querySelector('select[name="categoryId"]');
-        if (select) {
-          const opts = [...select.options]
-            .filter((o) => o.value && o.value !== '0' && o.value !== '')
-            .map((o) => ({ id: o.value, name: o.text.trim(), parent: null }));
-          if (opts.length > 0) return opts;
-        }
-        // 2. React 드롭다운 — data-id 속성이 있는 li/button 항목 수집
-        const items = document.querySelectorAll(
-          '.layer_publish [data-id], .layer_publish li[data-category-id], .layer_publish option'
-        );
-        if (items.length > 0) {
-          return [...items].map((el) => ({
-            id:   el.getAttribute('data-id') ?? el.getAttribute('data-category-id') ?? el.value ?? '',
-            name: (el.textContent ?? el.innerText ?? '').trim(),
-            parent: null,
-          })).filter((c) => c.id && c.name);
-        }
-        return [];
+      // 1단계: 사이드바 카테고리 영역 HTML 덤프 (진단 + 셀렉터 탐색)
+      const sidebarHtml = await page.evaluate(() => {
+        const el = document.querySelector('.layer_publish') ?? document.querySelector('[class*="publish"]');
+        return el ? el.innerHTML.slice(0, 4000) : '(사이드바 없음)';
       });
+      logger.info(`[blog_publisher] Sidebar HTML (first 4000): ${sidebarHtml}`);
+
+      // 2단계: 카테고리 드롭다운 버튼 클릭해서 옵션 펼치기
+      const categoryBtnSels = [
+        '.layer_publish button[class*="category" i]',
+        '.layer_publish [class*="CategorySelect"] button',
+        '.layer_publish [class*="category_select"] button',
+        '.layer_publish .category-btn',
+        '.layer_publish [class*="Category"] button',
+        '.layer_publish button:has-text("카테고리")',
+        '.layer_publish button:has-text("선택 안 함")',
+      ];
+      let dropdownOpened = false;
+      for (const sel of categoryBtnSels) {
+        try {
+          const btn = await page.$(sel);
+          if (!btn) continue;
+          await btn.click({ force: true });
+          await page.waitForTimeout(600);
+          logger.info(`[blog_publisher] Category dropdown opened via: ${sel}`);
+          dropdownOpened = true;
+          break;
+        } catch { /* 다음 */ }
+      }
+
+      // 3단계: 펼쳐진 옵션 읽기 (다양한 패턴 시도)
+      const sidebarCategories = await page.evaluate(() => {
+        // 네이티브 select
+        const select = document.querySelector('.layer_publish select') ?? document.querySelector('select[name="categoryId"]');
+        if (select?.options?.length > 1) {
+          return [...select.options]
+            .filter((o) => o.value && o.value !== '0')
+            .map((o) => ({ id: o.value, name: o.text.trim(), parent: null }));
+        }
+        // React 리스트 아이템 (data-id / data-value 등)
+        const candidates = [
+          ...document.querySelectorAll('.layer_publish li[data-id]'),
+          ...document.querySelectorAll('.layer_publish li[data-value]'),
+          ...document.querySelectorAll('.layer_publish [class*="category" i] li'),
+          ...document.querySelectorAll('.layer_publish [class*="Category"] li'),
+          ...document.querySelectorAll('.layer_publish [role="option"]'),
+          ...document.querySelectorAll('.layer_publish [role="listitem"]'),
+        ];
+        const seen = new Set();
+        return candidates
+          .map((el) => ({
+            id:   el.getAttribute('data-id') ?? el.getAttribute('data-value') ?? el.getAttribute('value') ?? '',
+            name: el.textContent?.trim() ?? '',
+          }))
+          .filter((c) => {
+            if (!c.name || c.name === '카테고리' || c.name === '선택 안 함') return false;
+            if (seen.has(c.name)) return false;
+            seen.add(c.name);
+            return true;
+          });
+      });
+
       if (sidebarCategories.length > 0) {
-        logger.info(`[blog_publisher] Categories read from sidebar: ${sidebarCategories.map((c) => c.name).join(', ')}`);
+        logger.info(`[blog_publisher] Categories from sidebar: ${sidebarCategories.map((c) => `${c.name}(${c.id})`).join(', ')}`);
         bestCategory = await matchBestCategory(sidebarCategories, keyword, content.category ?? 'economy');
+
+        // 드롭다운이 열려있는 동안 바로 옵션 클릭 (setCategoryInEditor의 이중-클릭 문제 방지)
+        if (dropdownOpened && bestCategory) {
+          const idStr = bestCategory.id ? String(bestCategory.id) : '';
+          let optClicked = false;
+          // id 기반 클릭
+          if (idStr) {
+            for (const optSel of [
+              `.layer_publish [data-id="${idStr}"]`,
+              `.layer_publish li[value="${idStr}"]`,
+              `.layer_publish [data-value="${idStr}"]`,
+              `[data-id="${idStr}"]`,
+            ]) {
+              try {
+                const opt = await page.$(optSel);
+                if (!opt) continue;
+                await opt.click({ force: true });
+                logger.info(`[blog_publisher] Category option clicked by id: "${bestCategory.name}"`);
+                optClicked = true;
+                bestCategory._alreadySet = true;
+                break;
+              } catch { /* 다음 */ }
+            }
+          }
+          // id 매칭 실패 → 텍스트로 클릭
+          if (!optClicked) {
+            try {
+              const textEl = await page.$(`.layer_publish :text-is("${bestCategory.name}")`).catch(() => null)
+                ?? await page.$(`text="${bestCategory.name}"`).catch(() => null);
+              if (textEl) {
+                await textEl.click({ force: true });
+                logger.info(`[blog_publisher] Category option clicked by text: "${bestCategory.name}"`);
+                bestCategory._alreadySet = true;
+              }
+            } catch { /* 실패 */ }
+          }
+        }
       } else {
-        // 진단용 스크린샷 (카테고리 못 찾은 경우)
+        // 진단용 스크린샷
         const dbgPath = path.resolve(__dirname, `../../output/blog/debug_category_${Date.now()}.png`);
         await page.screenshot({ path: dbgPath, fullPage: false }).catch(() => {});
-        logger.warn(`[blog_publisher] 사이드바에서 카테고리를 찾지 못했습니다. 스크린샷: ${dbgPath}`);
+        logger.warn(`[blog_publisher] 카테고리 못 찾음. 스크린샷: ${dbgPath}`);
       }
     } catch (err) {
       logger.warn(`[blog_publisher] Sidebar category read failed: ${err.message}`);
@@ -428,7 +503,7 @@ async function publishPost(page, content, blogName, context) {
   }
 
   // 사이드바 열린 후: 카테고리 + 태그 + 대표 이미지 설정
-  if (bestCategory) {
+  if (bestCategory && !bestCategory._alreadySet) {
     try {
       const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
       logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
