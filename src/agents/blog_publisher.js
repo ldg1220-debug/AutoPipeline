@@ -3,6 +3,17 @@ import path from 'path';
 import fs from 'fs/promises';
 import { chromium } from 'playwright';
 import { config } from '../config/index.js';
+
+// 회사 보안 정책으로 Playwright 내장 Chromium이 차단될 경우 시스템 브라우저를 사용한다.
+async function launchBrowser(headless = true) {
+  const channels = ['msedge', 'chrome'];
+  for (const channel of channels) {
+    try {
+      return await chromium.launch({ headless, channel });
+    } catch { /* 다음 채널 시도 */ }
+  }
+  return chromium.launch({ headless });
+}
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { createTistoryContext, isLoggedIn } from '../utils/playwright_session.js';
@@ -593,7 +604,7 @@ export async function editBlogPosts(rewrites) {
     return rewrites.map((r) => ({ ...r, edit_status: 'dry_run' }));
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser(true);
   const context  = await createTistoryContext(browser);
   if (!context) {
     await browser.close();
@@ -666,7 +677,7 @@ export async function publishBlogPosts(contentData) {
     };
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser(true);
   const context  = await createTistoryContext(browser);
 
   if (!context) {

@@ -20,11 +20,26 @@ const SESSION_PATH = path.resolve(__dirname, '../data/tistory_session.json');
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise((res) => rl.question(q, res));
 
+// 회사 보안 정책으로 Playwright 내장 Chromium이 차단될 경우 시스템 브라우저를 사용한다.
+async function launchBrowser() {
+  const channels = ['msedge', 'chrome'];
+  for (const channel of channels) {
+    try {
+      const b = await chromium.launch({ headless: false, channel });
+      console.log(`브라우저 채널: ${channel}`);
+      return b;
+    } catch { /* 다음 시도 */ }
+  }
+  // 최후 수단: Playwright 내장 Chromium
+  console.log('브라우저 채널: playwright-chromium (내장)');
+  return chromium.launch({ headless: false });
+}
+
 (async () => {
   console.log('\n[티스토리 로그인 헬퍼]');
   console.log('브라우저가 열리면 카카오 계정으로 로그인하세요.\n');
 
-  const browser = await chromium.launch({ headless: false });
+  const browser = await launchBrowser();
   const context  = await browser.newContext();
   const page     = await context.newPage();
 
