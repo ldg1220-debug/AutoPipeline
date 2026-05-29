@@ -1511,7 +1511,7 @@ async function generateLongFormMedia(content) {
   const sectionAudioPaths = [];
   for (let i = 0; i < sections.length; i++) {
     const audioPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_s${i}.mp3`);
-    const scriptText = normalizeScriptForTTS((sections[i].script ?? '').slice(0, 2000));
+    const scriptText = normalizeScriptForTTS((sections[i].script ?? '').slice(0, 4000));
     await throttle(500);
     try {
       await generateAudio(scriptText, audioPath);

@@ -482,17 +482,20 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // 롱폼-쇼츠 간 딜레이 (rate limit 방지)
-    await new Promise((r) => setTimeout(r, 8000));
-
-    // 쇼츠 업로드 — 롱폼 URL을 설명에 포함
-    try {
-      const longFormUrl = result.youtube?.url ?? null;
-      result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl);
-      logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
-    } catch (err) {
-      logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
-      result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
+    // 쇼츠 업로드 — PUBLISH_SHORTS=false 시 건너뜀
+    if (config.runtime.publishShorts) {
+      await new Promise((r) => setTimeout(r, 8000));
+      try {
+        const longFormUrl = result.youtube?.url ?? null;
+        result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl);
+        logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
+      } catch (err) {
+        logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
+        result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
+      }
+    } else {
+      logger.info(`[auto_publisher] Shorts 업로드 건너뜀 (PUBLISH_SHORTS=false): ${content.keyword}`);
+      result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped' };
     }
 
     results.push(result);
