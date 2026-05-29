@@ -49,7 +49,7 @@ async function generateImageGrokAurora(prompt, outputPath) {
   try {
     const res = await axios.post(
       'https://api.x.ai/v1/images/generations',
-      { model: 'grok-imagine-image', prompt, n: 1 },
+      { model: 'grok-2-image-1212', prompt, n: 1 },
       {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         timeout: 120000,
@@ -863,15 +863,21 @@ async function generateThumbnailTitle(keyword, hook) {
 
 // ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
 /**
- * YouTube Shorts는 세로 포맷 썸네일이 필요.
- * 캐릭터 이미지를 배경으로 깔고 상단에 채널명, 하단에 키워드 텍스트 오버레이.
+ * YouTube Shorts 세로 포맷 썸네일.
+ * - 상단: 채널명
+ * - 중앙 하단: hook 문장 (내용 노출용)
+ * - 하단: 키워드 강조 2줄 + 구독 CTA
  */
 async function generateShortsThumbnail(content, charImageUrl, outputPath) {
   const W = 1080, H = 1920;
-  const hook = content.shortform_script?.hook ?? content.keyword;
-  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
-  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const hook     = content.shortform_script?.hook ?? '';
+  const keyword  = content.keyword ?? '';
+  const { line1, line2 } = await generateThumbnailTitle(keyword, hook);
+  const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+
+  // hook 문장을 22자씩 줄바꿈 (최대 2줄)
+  const hookLines = wrapTextKorean(hook.slice(0, 50), 22).slice(0, 2);
 
   const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
     ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
@@ -882,7 +888,17 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
     .png()
     .toBuffer();
 
-  // 상단 + 하단 그라디언트 오버레이
+  const hookFontSize = 52;
+  const hookLineH    = Math.ceil(hookFontSize * 1.45);
+  const hookBlockH   = hookLines.length * hookLineH + 36;
+  const hookBlockY   = Math.round(H * 0.60);
+
+  const hookElems = hookLines.map((line, i) =>
+    `<text x="${W / 2}" y="${hookBlockY + 36 + (i + 0.85) * hookLineH}"
+      font-family="${FONT}" font-size="${hookFontSize}" font-weight="bold" fill="#FFFFFF"
+      text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+
   const overlay = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
       <defs>
@@ -892,27 +908,33 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
         </linearGradient>
         <linearGradient id="bot" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%"   stop-color="#000000" stop-opacity="0.0"/>
-          <stop offset="60%"  stop-color="#000000" stop-opacity="0.85"/>
+          <stop offset="45%"  stop-color="#000000" stop-opacity="0.80"/>
           <stop offset="100%" stop-color="#000000" stop-opacity="0.95"/>
         </linearGradient>
       </defs>
       <rect width="${W}" height="${H}" fill="url(#top)"/>
-      <rect y="${Math.round(H * 0.55)}" width="${W}" height="${Math.round(H * 0.45)}" fill="url(#bot)"/>
+      <rect y="${Math.round(H * 0.50)}" width="${W}" height="${Math.round(H * 0.50)}" fill="url(#bot)"/>
 
       <!-- 채널명 상단 -->
       <text x="${W / 2}" y="110"
         font-family="${FONT}" font-size="52" font-weight="bold" fill="white"
         text-anchor="middle">📺 매일읽어주는남자</text>
 
-      <!-- 키워드 텍스트 하단 -->
+      <!-- hook 문장 (내용 노출) — 중앙 하단 박스 -->
+      <rect x="60" y="${hookBlockY}" width="${W - 120}" height="${hookBlockH}" rx="16"
+        fill="#000000" fill-opacity="0.60"/>
+      <rect x="60" y="${hookBlockY}" width="8" height="${hookBlockH}" rx="4" fill="#FCD34D"/>
+      ${hookElems}
+
+      <!-- 키워드 강조 2줄 -->
       <text x="${W / 2}" y="${H - 280}"
         font-family="${FONT}" font-size="88" font-weight="bold" fill="#FCD34D"
         text-anchor="middle">${esc(line1)}</text>
-      ${line2 ? `<text x="${W / 2}" y="${H - 170}"
+      ${line2 ? `<text x="${W / 2}" y="${H - 175}"
         font-family="${FONT}" font-size="76" font-weight="bold" fill="white"
         text-anchor="middle">${esc(line2)}</text>` : ''}
 
-      <!-- 하단 구독 CTA -->
+      <!-- 구독 CTA -->
       <rect x="${W / 2 - 200}" y="${H - 110}" width="400" height="72" rx="36" fill="#FF0000"/>
       <text x="${W / 2}" y="${H - 62}"
         font-family="${FONT}" font-size="40" font-weight="bold" fill="white"
