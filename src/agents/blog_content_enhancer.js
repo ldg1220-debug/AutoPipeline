@@ -281,7 +281,22 @@ async function enhanceBlogDraft(content) {
     `- 수치는 반드시 기준 명시 (예: "1억 원 대출 기준", "서울 평균 기준")\n` +
     `- 추상적 전망 금지 — 독자가 실제로 느낄 수 있는 금액·시간·절차로 환산`;
 
-  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx;
+  // QA 탈락 피드백 주입 — 재작성 시 이전 탈락 사유·개선 제안을 프롬프트에 반영
+  const qaIssues   = content.qa_issues   ?? [];
+  const qaFeedback = content.qa_feedback ?? [];
+  let qaCtx = '';
+  if (qaIssues.length > 0 || qaFeedback.length > 0) {
+    const lines = [];
+    if (qaIssues.length > 0)   lines.push(`탈락 사유:\n${qaIssues.map((i) => `  - ${i}`).join('\n')}`);
+    if (qaFeedback.length > 0) lines.push(`개선 필요 사항:\n${qaFeedback.map((s) => `  - ${s}`).join('\n')}`);
+    qaCtx =
+      `\n\n[⚠️ 이전 QA 탈락 — 아래 문제를 반드시 해결해서 재작성]\n` +
+      lines.join('\n') +
+      `\n위 문제를 해결하는 방향으로 아웃라인·본문을 새로 구성하세요.`;
+    logger.info(`[blog_content_enhancer] QA 피드백 주입: 탈락사유 ${qaIssues.length}개 / 개선제안 ${qaFeedback.length}개`);
+  }
+
+  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx + qaCtx;
 
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
   const intent = await pass1Intent(keyword, category, combinedCtx);
@@ -302,7 +317,8 @@ async function enhanceBlogDraft(content) {
   const faqItems = outline.faq ?? [];
 
   logger.info(`[blog_content_enhancer] Pass 3 (body × ${bodySections.length}): ${keyword}`);
-  const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}`;
+  const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
+    (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
   const completedSections = [];
   for (const section of bodySections) {

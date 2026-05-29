@@ -140,7 +140,8 @@ async function main() {
           ...draftData,
           contents: rejectedItems.map((c) => ({
             ...c,
-            qa_feedback: c.blog_qa?.suggestions ?? [],
+            qa_feedback:    c.blog_qa?.suggestions ?? [],
+            qa_issues:      c.blog_qa?.issues ?? [],
             blog_draft: c.blog_draft ? {
               ...c.blog_draft,
               sections: (c.blog_draft.sections ?? []).map((s) => ({ ...s, body: '' })),
