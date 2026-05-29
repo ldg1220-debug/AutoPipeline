@@ -25,7 +25,7 @@ const outDir    = path.resolve(__dirname, '../output');
 // CLI 인자
 const args    = process.argv.slice(2);
 const topArg  = args.find((a) => a.startsWith('--top='));
-const TOP_N   = topArg ? parseInt(topArg.split('=')[1], 10) : 3;
+const TOP_N   = topArg ? parseInt(topArg.split('=')[1], 10) : 1;
 const DRY_RUN = args.includes('--dry') || process.env.DRY_RUN === 'true';
 const date    = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
