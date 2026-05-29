@@ -3,10 +3,22 @@ import path from 'path';
 import fs from 'fs/promises';
 import { chromium } from 'playwright';
 import { config } from '../config/index.js';
+
+// 회사 보안 정책으로 Playwright 내장 Chromium이 차단될 경우 시스템 브라우저를 사용한다.
+async function launchBrowser(headless = true) {
+  const channels = ['msedge', 'chrome'];
+  for (const channel of channels) {
+    try {
+      return await chromium.launch({ headless, channel });
+    } catch { /* 다음 채널 시도 */ }
+  }
+  return chromium.launch({ headless });
+}
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { createTistoryContext, isLoggedIn } from '../utils/playwright_session.js';
 import db from '../db/db.js';
+import { pingSearchEngines } from '../utils/searchPing.js';
 import {
   loadTistoryCategories,
   matchBestCategory,
@@ -33,7 +45,7 @@ function randomDelay(minMs = 30000, maxMs = 90000) {
 async function uploadImageToEditor(page, imagePath) {
   try {
     const [fileChooser] = await Promise.all([
-      page.waitForFileChooser({ timeout: 5000 }),
+      page.waitForEvent('filechooser', { timeout: 5000 }),
       page.click('button[data-tistory-react-app="ImageUpload"], .toolbar-image, [title="이미지"]'),
     ]);
     await fileChooser.setFiles(imagePath);
@@ -49,6 +61,57 @@ async function uploadImageToEditor(page, imagePath) {
     logger.warn(`[blog_publisher] Image upload failed: ${err.message}`);
     return null;
   }
+}
+
+// ── 대표 이미지 설정 (사이드바 .layer_publish 내 썸네일 영역) ────────────────
+async function setRepresentativeImage(page, imagePath) {
+  // 1. 파일 input이 직접 노출된 경우 (가장 안정적)
+  const fileInputSels = [
+    '.layer_publish input[type="file"]',
+    'input[type="file"][accept*="image"]',
+  ];
+  for (const sel of fileInputSels) {
+    try {
+      const el = await page.$(sel);
+      if (!el) continue;
+      await el.setInputFiles(imagePath);
+      await page.waitForTimeout(1500);
+      logger.info(`[blog_publisher] Representative image set via file input: ${sel}`);
+      return true;
+    } catch { /* 다음 시도 */ }
+  }
+
+  // 2. 버튼 클릭 → filechooser 이벤트 (waitForEvent 사용 — 신규 Playwright API)
+  const thumbBtnSels = [
+    '.layer_publish button:has-text("대표이미지")',
+    '.layer_publish button:has-text("이미지 등록")',
+    '.layer_publish button:has-text("썸네일")',
+    '.layer_publish [class*="thumbnail"] button',
+    '.layer_publish [class*="Thumbnail"] button',
+    '.layer_publish [class*="thumb"] button',
+    '.layer_publish .btn-thumb',
+    '.layer_publish button[data-thumb]',
+    '.layer_publish [data-tistory-react-app="Thumbnail"] button',
+  ];
+  for (const sel of thumbBtnSels) {
+    try {
+      const el = await page.$(sel);
+      if (!el) continue;
+      const visible = await el.isVisible().catch(() => false);
+      if (!visible) continue;
+      const [fileChooser] = await Promise.all([
+        page.waitForEvent('filechooser', { timeout: 4000 }),
+        el.click({ force: true }),
+      ]);
+      await fileChooser.setFiles(imagePath);
+      await page.waitForTimeout(1500);
+      logger.info(`[blog_publisher] Representative image set via: ${sel}`);
+      return true;
+    } catch { /* 다음 시도 */ }
+  }
+
+  logger.warn('[blog_publisher] Representative image: sidebar selector not found (API thumbnail will be used)');
+  return false;
 }
 
 // ── 유튜브 임베드 교체 ─────────────────────────────────────────────────────
@@ -156,44 +219,27 @@ async function publishPost(page, content, blogName, context) {
 
   // 새 글 작성 페이지 이동
   const writeUrl = `https://${blogName}.tistory.com/manage/newpost/`;
-  await page.goto(writeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(3000); // 에디터 JS 초기화 대기
+  await page.goto(writeUrl, { waitUntil: 'networkidle', timeout: 30000 });
 
-  // 현재 URL 로깅 (로그인 리디렉트 여부 확인)
-  logger.info(`[blog_publisher] Editor URL: ${page.url()}`);
-
-  // 제목 입력란 셀렉터 — 티스토리 에디터 버전별 대응
-  const titleSelectors = [
-    '#post-title-inp',
-    'input[name="title"]',
-    'textarea[name="title"]',
-    '.tit-post input',
-    '[placeholder*="제목"]',
-    '[aria-label*="제목"]',
-    '[data-placeholder*="제목"]',
-    'input[class*="title"]',
-    'textarea[class*="title"]',
-  ];
-
-  let titleEl = null;
-  for (const sel of titleSelectors) {
-    try {
-      titleEl = await page.waitForSelector(sel, { timeout: 5000, state: 'visible' });
-      if (titleEl) { logger.info(`[blog_publisher] Title selector matched: ${sel}`); break; }
-    } catch { /* 다음 셀렉터 시도 */ }
+  // 로그인 페이지로 리다이렉트됐으면 세션 만료
+  const currentUrl = page.url();
+  if (
+    currentUrl.includes('/login') ||
+    currentUrl.includes('/auth') ||
+    currentUrl.includes('accounts.kakao') ||
+    !currentUrl.includes('tistory.com/manage')
+  ) {
+    throw new Error(
+      `세션 만료 또는 미로그인 상태입니다. Windows에서 먼저 "npm run blog:login" 을 실행하세요. (현재 URL: ${currentUrl})`
+    );
   }
 
-  if (!titleEl) {
-    // 스크린샷 저장 후 에러
-    const ssPath = `output/blog/debug_title_${Date.now()}.png`;
-    await page.screenshot({ path: ssPath, fullPage: true }).catch(() => {});
-    logger.error(`[blog_publisher] Title input not found. Screenshot: ${ssPath}`);
-    throw new Error('Title input not found — check screenshot for current editor state');
-  }
+  // 에디터 로드 대기 (타임아웃 30초로 늘림)
+  await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 30000 });
 
   // 제목 입력
   const title = blog_draft?.title ?? keyword;
-  await titleEl.fill(title);
+  await page.fill('#post-title-inp, input[name="title"]', title);
 
   // 본문 HTML 구성
   let html = blog_draft?.monetized_html
@@ -217,11 +263,16 @@ async function publishPost(page, content, blogName, context) {
 
   logger.info(`[blog_publisher] URL[1-after-inject]: ${page.url()}`);
 
-  // 썸네일 업로드 (있을 때만) — 사이드바 열기 전에 처리
-  if (blog_assets?.thumbnail) {
+  // 대표 이미지 업로드 — CDN URL을 캡처해 발행 API에 thumbnail 필드로 주입
+  let thumbnailCdnUrl = null;
+  const thumbSrc = blog_assets?.thumbnail ?? blog_assets?.body_images?.[0]?.path ?? null;
+  if (thumbSrc) {
     try {
-      await uploadImageToEditor(page, blog_assets.thumbnail);
-    } catch { /* 썸네일 실패해도 발행 계속 */ }
+      thumbnailCdnUrl = await uploadImageToEditor(page, thumbSrc);
+      logger.info(`[blog_publisher] Thumbnail uploaded: ${thumbnailCdnUrl}`);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Thumbnail upload failed: ${err.message}`);
+    }
     logger.info(`[blog_publisher] URL[2-after-thumbnail]: ${page.url()}`);
   }
 
@@ -230,7 +281,8 @@ async function publishPost(page, content, blogName, context) {
   try {
     const availableCategories = await loadTistoryCategories(
       blogName,
-      config.tistory.accessToken
+      config.tistory.accessToken,
+      context   // Playwright 폴백: 토큰 없으면 카테고리 페이지 스크래핑
     );
     logger.info(`[blog_publisher] URL[3-after-categories]: ${page.url()}`);
     bestCategory = await matchBestCategory(
@@ -272,8 +324,10 @@ async function publishPost(page, content, blogName, context) {
   await page.route('**/manage/post.json', async (route) => {
     let data = {};
     try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
-    data.visibility = 20;  // 전체 공개
-    data.content = html;   // 실제 본문 주입 (저장 시점에 TinyMCE가 비어있는 문제 해소)
+    data.visibility = 20;
+    data.content = html;
+    if (bestCategory?.id) data.categoryId = bestCategory.id;
+    if (thumbnailCdnUrl) data.thumbnail = thumbnailCdnUrl;  // 대표 이미지 API 직접 주입
     try {
       const resp = await route.fetch({ postData: JSON.stringify(data) });
       publishApiResp = await resp.text();
@@ -332,8 +386,124 @@ async function publishPost(page, content, blogName, context) {
     timeout: 5000,
   }).catch(() => page.waitForTimeout(2000));
 
-  // 사이드바 열린 후: 카테고리 + 태그 설정 (새 에디터는 사이드바 안에 위치)
-  if (bestCategory) {
+  // 사이드바 열린 후: 카테고리 드롭다운을 열어 옵션을 읽고 설정
+  if (!bestCategory) {
+    try {
+      // 1단계: 사이드바 카테고리 영역 HTML 덤프 (진단 + 셀렉터 탐색)
+      const sidebarHtml = await page.evaluate(() => {
+        const el = document.querySelector('.layer_publish') ?? document.querySelector('[class*="publish"]');
+        return el ? el.innerHTML.slice(0, 4000) : '(사이드바 없음)';
+      });
+      logger.info(`[blog_publisher] Sidebar HTML (first 4000): ${sidebarHtml}`);
+
+      // 2단계: 카테고리 드롭다운 버튼 클릭해서 옵션 펼치기
+      const categoryBtnSels = [
+        '.layer_publish button[class*="category" i]',
+        '.layer_publish [class*="CategorySelect"] button',
+        '.layer_publish [class*="category_select"] button',
+        '.layer_publish .category-btn',
+        '.layer_publish [class*="Category"] button',
+        '.layer_publish button:has-text("카테고리")',
+        '.layer_publish button:has-text("선택 안 함")',
+      ];
+      let dropdownOpened = false;
+      for (const sel of categoryBtnSels) {
+        try {
+          const btn = await page.$(sel);
+          if (!btn) continue;
+          await btn.click({ force: true });
+          await page.waitForTimeout(600);
+          logger.info(`[blog_publisher] Category dropdown opened via: ${sel}`);
+          dropdownOpened = true;
+          break;
+        } catch { /* 다음 */ }
+      }
+
+      // 3단계: 펼쳐진 옵션 읽기 (다양한 패턴 시도)
+      const sidebarCategories = await page.evaluate(() => {
+        // 네이티브 select
+        const select = document.querySelector('.layer_publish select') ?? document.querySelector('select[name="categoryId"]');
+        if (select?.options?.length > 1) {
+          return [...select.options]
+            .filter((o) => o.value && o.value !== '0')
+            .map((o) => ({ id: o.value, name: o.text.trim(), parent: null }));
+        }
+        // React 리스트 아이템 (data-id / data-value 등)
+        const candidates = [
+          ...document.querySelectorAll('.layer_publish li[data-id]'),
+          ...document.querySelectorAll('.layer_publish li[data-value]'),
+          ...document.querySelectorAll('.layer_publish [class*="category" i] li'),
+          ...document.querySelectorAll('.layer_publish [class*="Category"] li'),
+          ...document.querySelectorAll('.layer_publish [role="option"]'),
+          ...document.querySelectorAll('.layer_publish [role="listitem"]'),
+        ];
+        const seen = new Set();
+        return candidates
+          .map((el) => ({
+            id:   el.getAttribute('data-id') ?? el.getAttribute('data-value') ?? el.getAttribute('value') ?? '',
+            name: el.textContent?.trim() ?? '',
+          }))
+          .filter((c) => {
+            if (!c.name || c.name === '카테고리' || c.name === '선택 안 함') return false;
+            if (seen.has(c.name)) return false;
+            seen.add(c.name);
+            return true;
+          });
+      });
+
+      if (sidebarCategories.length > 0) {
+        logger.info(`[blog_publisher] Categories from sidebar: ${sidebarCategories.map((c) => `${c.name}(${c.id})`).join(', ')}`);
+        bestCategory = await matchBestCategory(sidebarCategories, keyword, content.category ?? 'economy');
+
+        // 드롭다운이 열려있는 동안 바로 옵션 클릭 (setCategoryInEditor의 이중-클릭 문제 방지)
+        if (dropdownOpened && bestCategory) {
+          const idStr = bestCategory.id ? String(bestCategory.id) : '';
+          let optClicked = false;
+          // id 기반 클릭
+          if (idStr) {
+            for (const optSel of [
+              `.layer_publish [data-id="${idStr}"]`,
+              `.layer_publish li[value="${idStr}"]`,
+              `.layer_publish [data-value="${idStr}"]`,
+              `[data-id="${idStr}"]`,
+            ]) {
+              try {
+                const opt = await page.$(optSel);
+                if (!opt) continue;
+                await opt.click({ force: true });
+                logger.info(`[blog_publisher] Category option clicked by id: "${bestCategory.name}"`);
+                optClicked = true;
+                bestCategory._alreadySet = true;
+                break;
+              } catch { /* 다음 */ }
+            }
+          }
+          // id 매칭 실패 → 텍스트로 클릭
+          if (!optClicked) {
+            try {
+              const textEl = await page.$(`.layer_publish :text-is("${bestCategory.name}")`).catch(() => null)
+                ?? await page.$(`text="${bestCategory.name}"`).catch(() => null);
+              if (textEl) {
+                await textEl.click({ force: true });
+                logger.info(`[blog_publisher] Category option clicked by text: "${bestCategory.name}"`);
+                bestCategory._alreadySet = true;
+              }
+            } catch { /* 실패 */ }
+          }
+        }
+      } else {
+        // 진단용 스크린샷
+        const dbgPath = path.resolve(__dirname, `../../output/blog/debug_category_${Date.now()}.png`);
+        await page.screenshot({ path: dbgPath, fullPage: false }).catch(() => {});
+        logger.warn(`[blog_publisher] 카테고리 못 찾음. 스크린샷: ${dbgPath}`);
+      }
+    } catch (err) {
+      logger.warn(`[blog_publisher] Sidebar category read failed: ${err.message}`);
+    }
+  }
+
+  // 사이드바 열린 후: 카테고리 + 태그 + 대표 이미지 설정
+  if (bestCategory && !bestCategory._alreadySet) {
     try {
       const set = await setCategoryInEditor(page, bestCategory.id, bestCategory.name);
       logger.info(`[blog_publisher] Category set: "${bestCategory.name}" (${set ? 'ok' : 'failed'})`);
@@ -346,6 +516,14 @@ async function publishPost(page, content, blogName, context) {
       await setTagsInEditor(page, generatedTags);
     } catch (err) {
       logger.warn(`[blog_publisher] Tag set failed: ${err.message}`);
+    }
+  }
+  // 대표 이미지 — 사이드바 UI에서 직접 설정 (API 주입 보완)
+  if (thumbSrc) {
+    try {
+      await setRepresentativeImage(page, thumbSrc);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Representative image set failed: ${err.message}`);
     }
   }
 
@@ -370,6 +548,11 @@ async function publishPost(page, content, blogName, context) {
   await page.unroute('**/manage/post.json');
 
   logger.info(`[blog_publisher] API resp: ${(publishApiResp ?? '').slice(0, 150)}`);
+
+  // Tistory 일일 발행 한도 초과 감지
+  if ((publishApiResp ?? '').includes('하루에 새롭게 공개 발행할 수 있는')) {
+    throw new Error('DAILY_LIMIT_EXCEEDED: Tistory 하루 공개 발행 한도(15개) 초과. 오늘은 더 이상 발행할 수 없습니다.');
+  }
 
   // API 응답에서 entryUrl 추출 → 공개 포스트 URL
   let publishedUrl = null;
@@ -551,7 +734,7 @@ export async function editBlogPosts(rewrites) {
     return rewrites.map((r) => ({ ...r, edit_status: 'dry_run' }));
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser(true);
   const context  = await createTistoryContext(browser);
   if (!context) {
     await browser.close();
@@ -624,7 +807,7 @@ export async function publishBlogPosts(contentData) {
     };
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser(true);
   const context  = await createTistoryContext(browser);
 
   if (!context) {
@@ -635,11 +818,11 @@ export async function publishBlogPosts(contentData) {
 
   const page = await context.newPage();
 
-  // 로그인 상태 확인 (실제 manage URL로 검증 — 메인 페이지는 false positive 줌)
-  const loggedIn = await isLoggedIn(page, blogName);
+  // 로그인 상태 확인
+  const loggedIn = await isLoggedIn(page);
   if (!loggedIn) {
     await browser.close();
-    logger.error('[blog_publisher] Session expired. Run: npm run blog:login');
+    logger.error('[blog_publisher] Session expired. Run npm run blog:login.');
     return { ...contentData, contents };
   }
 
@@ -674,11 +857,21 @@ export async function publishBlogPosts(contentData) {
           content.youtube_url
         );
         updated.push({ ...content, blog_publish: { status: 'published', url: postUrl } });
+        pingSearchEngines(postUrl).catch(() => {});
       } else {
         updated.push({ ...content, blog_publish: { status: 'failed', error: 'URL not captured' } });
       }
     } catch (err) {
       logger.error(`[blog_publisher] Failed: ${content.keyword}`, { message: err.message });
+      // 일일 한도 초과 시 남은 글 모두 skipped 처리하고 루프 종료
+      if (err.message.startsWith('DAILY_LIMIT_EXCEEDED')) {
+        logger.warn('[blog_publisher] 일일 발행 한도 초과 — 오늘 남은 글은 내일 발행됩니다.');
+        const remaining = contents.slice(contents.indexOf(content));
+        for (const r of remaining) {
+          updated.push({ ...r, blog_publish: { status: 'skipped_daily_limit' } });
+        }
+        break;
+      }
       updated.push({ ...content, blog_publish: { status: 'failed', error: err.message } });
     }
 

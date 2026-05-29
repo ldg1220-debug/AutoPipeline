@@ -34,6 +34,7 @@
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:login": "node scripts/tistory-login.js",
     "blog:setup-categories": "node scripts/setup-tistory-categories.js",
+    "blog:setup-pages": "node scripts/setup-blog-pages.js",
     "thumbnail:set": "node scripts/set-thumbnail.js",
     "thumbnail:swap": "node scripts/swap-thumbnails.js",
     "thumbnail:swap:dry": "cross-env DRY_RUN=true node scripts/swap-thumbnails.js",
@@ -47,7 +48,9 @@
     "project:manager": "node src/agents/project_manager.js",
     "rerun:media": "node scripts/rerun-media-upload.js",
     "rerun:media:fresh": "node scripts/rerun-media-upload.js --delete-old",
-    "retry:upload": "node scripts/retry-failed-uploads.js"
+    "retry:upload": "node scripts/retry-failed-uploads.js",
+    "blog:to-youtube": "node scripts/run-blog-to-youtube.js",
+    "blog:to-youtube:dry": "node scripts/run-blog-to-youtube.js --dry"
   },
   "dependencies": {
     "axios": "^1.7.2",

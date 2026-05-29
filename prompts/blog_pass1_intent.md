@@ -3,6 +3,7 @@
 
 키워드: {keyword}
 카테고리: {category}
+오늘 날짜: {today}
 
 분석 항목:
 1. search_intent: "informational" | "commercial" | "navigational" 중 하나

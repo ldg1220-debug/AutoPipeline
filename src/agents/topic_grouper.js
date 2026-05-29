@@ -154,7 +154,20 @@ async function clusterWithModel(model, keywords) {
     if (!covered.has(i)) groups.push({ indices: [i], reasoning: '(자동 보완)' });
   });
 
-  return groups;
+  // 그룹당 최대 2개 제한 — 3개 이상이면 첫 2개만 묶고 나머지는 개별 분리
+  const limitedGroups = [];
+  for (const g of groups) {
+    if (g.indices.length <= 2) {
+      limitedGroups.push(g);
+    } else {
+      limitedGroups.push({ indices: g.indices.slice(0, 2), reasoning: g.reasoning });
+      for (const idx of g.indices.slice(2)) {
+        limitedGroups.push({ indices: [idx], reasoning: '(그룹 초과 분리)' });
+      }
+    }
+  }
+
+  return limitedGroups;
 }
 
 async function reviewGroupings(keywords, groups, reviewerModel) {

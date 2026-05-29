@@ -124,10 +124,10 @@ export const config = {
     // A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
     cronSchedule:     process.env.CRON_SCHEDULE      || '0 12 * * 1,3,5,0',
     cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 14 * * 2,4,6',
-    blogCronSchedule:  process.env.BLOG_CRON_SCHEDULE  || '0 13 * * 1,3,5,0',
-    blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 15 * * 2,4,6',
+    blogCronSchedule:  process.env.BLOG_CRON_SCHEDULE  || '0 22 * * 1,3,5,0',  // KST 07:00 오전 피크
+    blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 3 * * 2,4,6',    // KST 12:00 점심 피크
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
-    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '2', 10),
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '5', 10),
   },
 };

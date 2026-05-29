@@ -28,7 +28,7 @@ async function loadBenchmarkRules() {
     const raw  = await fs.readFile(BENCHMARK_PATH, 'utf8');
     const data = JSON.parse(raw);
     if (!data.rules?.length) return null;
-    const ageDays = (Date.now() - new Date(data.generated_at).getTime()) / 86_400_000;
+    const ageDays = (Date.now() - new Date(data.generated_at).getTime()) / 86400000;
     if (ageDays > BENCHMARK_MAX_AGE_DAYS) {
       logger.info('[blog_content_enhancer] Benchmark rules too old (>7d). Skipping injection.');
       return null;
@@ -101,7 +101,7 @@ async function callGPT4oMini(prompt) {
         Authorization: `Bearer ${config.openai.apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 30000,
+      timeout: 90000,
     }
   );
   return JSON.parse(response.data.choices[0].message.content);
@@ -110,7 +110,8 @@ async function callGPT4oMini(prompt) {
 // ── Pass 1: 검색 의도 분석 ──────────────────────────────────────────────────
 async function pass1Intent(keyword, category, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass1_intent.md');
-  const prompt   = fillTemplate(template, { keyword, category }) + benchmarkCtx;
+  const today    = new Date().toISOString().slice(0, 10);
+  const prompt   = fillTemplate(template, { keyword, category, today }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
 }
@@ -118,9 +119,11 @@ async function pass1Intent(keyword, category, benchmarkCtx = '') {
 // ── Pass 2: H2/H3 아웃라인 + FAQ 생성 ─────────────────────────────────────
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass2_outline.md');
+  const today    = new Date().toISOString().slice(0, 10);
   const prompt   = fillTemplate(template, {
     keyword,
     category,
+    today,
     search_intent:        intent.search_intent,
     target_reader:        intent.target_reader,
     competitor_structure: JSON.stringify(intent.competitor_structure),
@@ -134,12 +137,14 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
 async function pass3Body(keyword, section, targetReader, outlineContext) {
   const template = await loadPrompt('blog_pass3_body.md');
+  const today    = new Date().toISOString().slice(0, 10);
   const prompt = fillTemplate(template, {
     keyword,
     heading:       section.heading,
     key_points:    (section.key_points ?? []).join(', '),
     target_reader: targetReader,
     context:       outlineContext,
+    today,
   });
   await throttle(2000);
   // 본문은 자유 텍스트 반환 (JSON 아님)
@@ -158,30 +163,30 @@ async function pass3Faq(keyword, faqItem, targetReader) {
 // ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
 async function pass4FactCheck(keyword, sections) {
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
+  const today    = new Date().toISOString().slice(0, 10);
 
-  const prompt = `아래 블로그 본문에서 허구이거나 검증되지 않은 인용을 찾아 수정하세요.
-
-【검토 대상】
-1. 특정 책 제목 (따옴표로 감싼 것)
-2. 저자 이름 직접 언급
-3. 특정 기사·논문·보고서 제목
-4. 출처 불명의 구체적 통계 수치 (예: "2024년 조사에 따르면 87%")
-
-【수정 규칙】
-- 위 항목 발견 시 → 일반적 표현으로 교체
-  예) "『부의 추월차선』에서는" → "여러 재테크 전문 서적에서는"
-  예) "홍길동 저자는" → "투자 전문가들은"
-  예) "2023년 금융연구원 보고서에 따르면 73%" → "금융 전문가들에 따르면"
-- 수정 없이 괜찮은 섹션은 원문 그대로 반환
-- 내용의 의미와 흐름은 유지
-
-키워드: ${keyword}
-
-본문:
-${fullText}
-
-응답 형식 (JSON):
-{ "sections": [{ "heading": "...", "body": "수정된 본문 또는 원문" }] }`;
+  const prompt = `아래 블로그 본문에서 허구·검증 불가 인용과 시제 오류를 수정하세요.\n\n` +
+    `오늘 날짜: ${today}\n\n` +
+    `【검토 대상 1 — 허구 인용】\n` +
+    `1. 특정 책 제목 (따옴표로 감싼 것)\n` +
+    `2. 저자 이름 직접 언급\n` +
+    `3. 특정 기사·논문·보고서 제목\n` +
+    `4. 출처 불명의 구체적 통계 수치\n\n` +
+    `【검토 대상 2 — 시제 오류】\n` +
+    `5. 2023년·2024년 데이터를 "최신", "현재", "올해" 등으로 표현한 경우\n` +
+    `   → "최근 몇 년간", "과거 데이터 기준", "2023~2024년 당시" 등으로 수정\n\n` +
+    `【수정 규칙】\n` +
+    `- 허구 인용 → 일반적 표현으로 교체\n` +
+    `  예) "『부의 추월차선』에서는" → "여러 재테크 전문 서적에서는"\n` +
+    `  예) "2023년 조사에 따르면 73%" → "최근 조사에 따르면"\n` +
+    `- 시제 오류 → 날짜 맥락을 명확히\n` +
+    `  예) "현재 기준금리는 3.5%" → "2024년 기준금리는 3.5%였으며"\n` +
+    `- 수정 불필요한 섹션은 원문 그대로 반환\n` +
+    `- 내용의 의미와 흐름은 유지\n\n` +
+    `키워드: ${keyword}\n\n` +
+    `본문:\n${fullText}\n\n` +
+    '응답 형식 (JSON):\n' +
+    '{"sections":[{"heading":"섹션 제목","body":"수정된 본문 또는 원문"}]}';
 
   try {
     await throttle(2000);
@@ -276,7 +281,22 @@ async function enhanceBlogDraft(content) {
     `- 수치는 반드시 기준 명시 (예: "1억 원 대출 기준", "서울 평균 기준")\n` +
     `- 추상적 전망 금지 — 독자가 실제로 느낄 수 있는 금액·시간·절차로 환산`;
 
-  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx;
+  // QA 탈락 피드백 주입 — 재작성 시 이전 탈락 사유·개선 제안을 프롬프트에 반영
+  const qaIssues   = content.qa_issues   ?? [];
+  const qaFeedback = content.qa_feedback ?? [];
+  let qaCtx = '';
+  if (qaIssues.length > 0 || qaFeedback.length > 0) {
+    const lines = [];
+    if (qaIssues.length > 0)   lines.push(`탈락 사유:\n${qaIssues.map((i) => `  - ${i}`).join('\n')}`);
+    if (qaFeedback.length > 0) lines.push(`개선 필요 사항:\n${qaFeedback.map((s) => `  - ${s}`).join('\n')}`);
+    qaCtx =
+      `\n\n[⚠️ 이전 QA 탈락 — 아래 문제를 반드시 해결해서 재작성]\n` +
+      lines.join('\n') +
+      `\n위 문제를 해결하는 방향으로 아웃라인·본문을 새로 구성하세요.`;
+    logger.info(`[blog_content_enhancer] QA 피드백 주입: 탈락사유 ${qaIssues.length}개 / 개선제안 ${qaFeedback.length}개`);
+  }
+
+  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx + qaCtx;
 
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
   const intent = await pass1Intent(keyword, category, combinedCtx);
@@ -297,7 +317,8 @@ async function enhanceBlogDraft(content) {
   const faqItems = outline.faq ?? [];
 
   logger.info(`[blog_content_enhancer] Pass 3 (body × ${bodySections.length}): ${keyword}`);
-  const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}`;
+  const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
+    (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
   const completedSections = [];
   for (const section of bodySections) {

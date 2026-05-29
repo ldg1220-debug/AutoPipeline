@@ -15,9 +15,9 @@
 const USD_TO_KRW = 1380;
 
 const PRICING = {
-  gpt4o: { input: 2.50 / 1_000_000, output: 10.00 / 1_000_000 },
-  geminiFlash: { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
-  elevenlabs: { perChar: 0.30 / 1_000 },
+  gpt4o: { input: 2.50 / 1000000, output: 10.00 / 1000000 },
+  geminiFlash: { input: 0.075 / 1000000, output: 0.30 / 1000000 },
+  elevenlabs: { perChar: 0.30 / 1000 },
   shotstack: { perRender: 0.05 },
 };
 
@@ -70,7 +70,7 @@ const qaCost = qa_in * PRICING.gpt4o.input + qa_out * PRICING.gpt4o.output;
 row(`Agent 3 텍스트 QA (GPT-4o x${ITEMS})`, qaCost);
 
 // Agent 3: Gemini Vision QA (영상 1개 ~10,000 tokens 입력 추정, 출력 ~100)
-const vision_in = 10_000 * ITEMS, vision_out = 100 * ITEMS;
+const vision_in = 10000 * ITEMS, vision_out = 100 * ITEMS;
 const visionCost = vision_in * PRICING.geminiFlash.input + vision_out * PRICING.geminiFlash.output;
 row(`Agent 3 Vision QA (Gemini Flash x${ITEMS})`, visionCost);
 

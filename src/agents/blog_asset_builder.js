@@ -24,13 +24,23 @@ const PEXELS_QUERY = {
   social:        'society people community korea',
 };
 
-// DALL-E 3 썸네일 프롬프트 — 블로그 썸네일 스타일
+// DALL-E 3 썸네일 프롬프트 — 블로그 대표 이미지 스타일
 function buildThumbnailPrompt(content) {
-  const base = content.image_prompt || `${content.keyword} concept illustration`;
+  const base = content.image_prompt || `${content.keyword} concept`;
+  const categoryStyle = {
+    economy:       'dark blue gradient background, financial charts, bar graphs, upward arrows',
+    finance:       'dark navy background, gold coins, stock market charts, clean minimal',
+    realestate:    'aerial city view, apartment buildings, korea cityscape, modern architecture',
+    health:        'clean white background, green accents, wellness lifestyle, fresh minimalist',
+    entertainment: 'vibrant colorful background, media entertainment, dynamic composition',
+    social:        'warm tones, people silhouettes, community, social connection',
+  }[content.category] ?? 'clean gradient background, modern flat design';
+
   return (
-    `Clean modern infographic thumbnail for Korean blog post. Topic: "${content.keyword}". ` +
-    `Style: flat design, bold typography, ${base}. ` +
-    `16:9 ratio, white background, Korean economic blog aesthetic. No text in image.`
+    `Eye-catching blog thumbnail image. Topic: "${content.keyword}". ` +
+    `Style: ${categoryStyle}. ${base}. ` +
+    `16:9 aspect ratio, professional editorial look, visually striking. ` +
+    `No text, no letters, no words in the image.`
   );
 }
 
@@ -138,6 +148,7 @@ function buildSectionQuery(keyword, sectionHeading, category) {
 /**
  * 섹션 헤딩 기반으로 각 섹션에 맞는 이미지를 검색한다.
  * 섹션마다 다른 쿼리를 사용해 내용과 관련된 이미지를 가져온다.
+ * 같은 포스트 내에서 동일한 Pexels 사진이 재사용되지 않도록 ID를 추적한다.
  */
 async function fetchSectionImages(sections, keyword, category, destDir) {
   const apiKey = config.pexels.apiKey;
@@ -145,20 +156,25 @@ async function fetchSectionImages(sections, keyword, category, destDir) {
 
   const paths = [];
   const count = Math.min(sections.length, 3);
+  const usedIds = new Set();  // 포스트 내 중복 방지
 
   for (let i = 0; i < count; i++) {
     const section = sections[i];
     const query = buildSectionQuery(keyword, section.heading ?? '', category);
     try {
       await throttle(300);
+      // per_page를 10으로 늘려서 중복 회피 여지 확보
       const res = await axios.get('https://api.pexels.com/v1/search', {
-        params: { query, per_page: 5, orientation: 'landscape', page: i + 1 },
+        params: { query, per_page: 10, orientation: 'landscape', page: 1 },
         headers: { Authorization: apiKey },
         timeout: 10000,
       });
 
-      const photo = (res.data.photos ?? [])[0];
+      const photos = res.data.photos ?? [];
+      // 이미 사용된 ID는 건너뜀
+      const photo = photos.find((p) => !usedIds.has(p.id));
       if (!photo) continue;
+      usedIds.add(photo.id);
 
       const srcUrl = photo.src.large;
       const destPath = path.join(destDir, `section_${i + 1}_raw.jpg`);
@@ -177,7 +193,7 @@ async function fetchSectionImages(sections, keyword, category, destDir) {
         photographer:    photo.photographer,
         pexels_url:      photo.url,
       });
-      logger.info(`[blog_asset_builder] Section img [${section.heading}] ← "${query}"`);
+      logger.info(`[blog_asset_builder] Section img [${section.heading}] ← "${query}" (id:${photo.id})`);
     } catch (err) {
       logger.warn(`[blog_asset_builder] Section img failed [${section.heading}]: ${err.message}`);
     }
@@ -312,7 +328,8 @@ async function buildAssets(content) {
       result.thumbnail = await generateDalleThumbnail(content, thumbPath);
       logger.info(`[blog_asset_builder] Thumbnail (DALL-E 3): ${content.keyword}`);
     } catch (err) {
-      logger.warn(`[blog_asset_builder] DALL-E 3 failed, falling back to Pexels: ${err.message}`);
+      const detail = err.response?.data?.error?.message ?? err.message;
+      logger.warn(`[blog_asset_builder] DALL-E 3 failed (${err.response?.status ?? 'no-resp'}): ${detail}`);
     }
   }
 
@@ -334,13 +351,30 @@ async function buildAssets(content) {
     }
   }
 
-  // 3. 썸네일 폴백 — DALL-E 실패했고 Pexels 이미지가 있으면 첫 번째를 활용
-  if (!result.thumbnail && result.body_images.length > 0) {
-    const fallbackSrc = result.body_images[0].path;
-    const thumbPath = path.join(assetDir, 'thumbnail.jpg');
-    await sharp(fallbackSrc).resize(800, 450, { fit: 'cover' }).jpeg({ quality: 90 }).toFile(thumbPath);
-    result.thumbnail = thumbPath;
-    logger.info(`[blog_asset_builder] Thumbnail (Pexels fallback): ${content.keyword}`);
+  // 3. 썸네일 폴백 — DALL-E 실패 시 섹션 이미지와 겹치지 않는 별도 Pexels 이미지 사용
+  if (!result.thumbnail && config.pexels.apiKey) {
+    try {
+      const usedBodyIds = new Set(result.body_images.map((b) => b.pexels_id).filter(Boolean));
+      const thumbQuery = PEXELS_QUERY[content.category] ?? `${content.keyword} korea`;
+      await throttle(300);
+      const thumbRes = await axios.get('https://api.pexels.com/v1/search', {
+        params: { query: thumbQuery, per_page: 15, orientation: 'landscape', page: 1 },
+        headers: { Authorization: config.pexels.apiKey },
+        timeout: 10000,
+      });
+      const thumbPhoto = (thumbRes.data.photos ?? []).find((p) => !usedBodyIds.has(p.id));
+      if (thumbPhoto) {
+        const rawPath = path.join(assetDir, 'thumbnail_raw.jpg');
+        const thumbPath = path.join(assetDir, 'thumbnail.jpg');
+        await downloadImage(thumbPhoto.src.large, rawPath);
+        await sharp(rawPath).resize(800, 450, { fit: 'cover' }).jpeg({ quality: 90 }).toFile(thumbPath);
+        await fs.unlink(rawPath).catch(() => {});
+        result.thumbnail = thumbPath;
+        logger.info(`[blog_asset_builder] Thumbnail (Pexels fallback, id:${thumbPhoto.id}): ${content.keyword}`);
+      }
+    } catch (err) {
+      logger.warn(`[blog_asset_builder] Thumbnail fallback failed: ${err.message}`);
+    }
   }
 
   // 4. ③ 인포그래픽 카드 — 핵심 수치 추출 → Playwright 스크린샷

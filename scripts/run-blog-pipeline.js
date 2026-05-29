@@ -35,17 +35,30 @@ async function main() {
   // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
   let rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
 
-  // 신규 키워드가 없으면 DB의 pending 키워드를 꺼내 재사용
-  if (rawKeywords.length === 0) {
-    const postsPerDay = config.runtime.blogPostsPerDay ?? 2;
+  // 신규 키워드가 목표치에 못 미치면 DB pending으로 채움
+  const postsPerDay = config.runtime.blogPostsPerDay ?? 5;
+  const fetchMultiplier = 2;
+  const targetCount = postsPerDay * fetchMultiplier;
+
+  if (rawKeywords.length < targetCount) {
+    const need = targetCount - rawKeywords.length;
+    const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
     const dbKeywords = db
       .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT ?`)
-      .all(postsPerDay);
-    if (dbKeywords.length > 0) {
-      logger.info(`[blog:pipeline] 신규 키워드 없음 → DB pending ${dbKeywords.length}개 사용`);
-      rawKeywords = dbKeywords;
+      .all(need * 2);  // 중복 제거 여분 확보
+    const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
+    if (fillKws.length > 0) {
+      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending ${fillKws.length}개 보충`);
+      rawKeywords = [...rawKeywords, ...fillKws];
     }
   }
+
+  // 점수 내림차순 정렬
+  rawKeywords.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
+  const postLimit = Math.min(targetCount, rawKeywords.length);
+  rawKeywords = rawKeywords.slice(0, postLimit);
+  logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 목표:${postsPerDay}개×${fetchMultiplier})`);
 
   const contentData = {
     ...keywordData,
@@ -70,6 +83,33 @@ async function main() {
     logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.5 Topic Grouper 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.55: 이미 발행된 포스트와 중복 주제 제거
+  try {
+    const published = db
+      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published'`)
+      .all()
+      .map((r) => r.keyword.replace(/[\s&]/g, '').toLowerCase());
+
+    const normalize = (kw) => (kw ?? '').replace(/[\s&]/g, '').toLowerCase();
+
+    const before = contentData.contents.length;
+    contentData.contents = contentData.contents.filter((c) => {
+      const kwNorm = normalize(c.keyword);
+      // 이미 발행된 키워드 중 하나가 현재 키워드에 포함되거나 반대인 경우 중복으로 판단
+      return !published.some((pk) => {
+        if (pk.length < 2 || kwNorm.length < 2) return false;
+        const shorter = pk.length <= kwNorm.length ? pk : kwNorm;
+        const longer  = pk.length <= kwNorm.length ? kwNorm : pk;
+        return longer.includes(shorter);
+      });
+    });
+    const removed = before - contentData.contents.length;
+    if (removed > 0) logger.info(`[blog:pipeline] Part 1.55: 중복 주제 ${removed}개 제외 (이미 발행됨)`);
+    else logger.info('[blog:pipeline] Part 1.55: 중복 없음');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.55 중복 체크 실패 (계속 진행): ${err.message}`);
   }
 
   // Part 1.6: Competitor Analyzer — 인사이트 캐시 (7일 주기)
@@ -99,12 +139,17 @@ async function main() {
     if (rejectedItems.length > 0) {
       logger.info(`[blog:pipeline] QA 탈락 ${rejectedItems.length}개 → 재작성 시도`);
       try {
-        // QA 피드백을 포함해 재작성
+        // QA 피드백을 포함해 재작성 — body 초기화해야 enhancer가 스킵하지 않음
         const retryInput = {
           ...draftData,
           contents: rejectedItems.map((c) => ({
             ...c,
-            qa_feedback: c.blog_qa?.suggestions ?? [],
+            qa_feedback:    c.blog_qa?.suggestions ?? [],
+            qa_issues:      c.blog_qa?.issues ?? [],
+            blog_draft: c.blog_draft ? {
+              ...c.blog_draft,
+              sections: (c.blog_draft.sections ?? []).map((s) => ({ ...s, body: '' })),
+            } : null,
           })),
         };
         const retryDraft = await enhanceAllBlogDrafts(retryInput);
