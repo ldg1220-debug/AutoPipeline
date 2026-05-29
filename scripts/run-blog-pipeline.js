@@ -35,24 +35,28 @@ async function main() {
   // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
   let rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
 
-  // 신규 키워드가 없으면 DB의 pending 키워드를 꺼내 재사용
-  if (rawKeywords.length === 0) {
+  // 신규 키워드가 목표치에 못 미치면 DB pending으로 채움
+  const postsPerDay = config.runtime.blogPostsPerDay ?? 5;
+  const fetchMultiplier = 2;
+  const targetCount = postsPerDay * fetchMultiplier;
+
+  if (rawKeywords.length < targetCount) {
+    const need = targetCount - rawKeywords.length;
+    const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
     const dbKeywords = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT 10`)
-      .all();
-    if (dbKeywords.length > 0) {
-      logger.info(`[blog:pipeline] 신규 키워드 없음 → DB pending ${dbKeywords.length}개 사용`);
-      rawKeywords = dbKeywords;
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT ?`)
+      .all(need * 2);  // 중복 제거 여분 확보
+    const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
+    if (fillKws.length > 0) {
+      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending ${fillKws.length}개 보충`);
+      rawKeywords = [...rawKeywords, ...fillKws];
     }
   }
 
   // 점수 내림차순 정렬
   rawKeywords.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const postsPerDay = config.runtime.blogPostsPerDay ?? 5;
   const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
-  // 목표 발행 수(postsPerDay)를 실제로 달성하려면 토픽 그루핑 + QA 탈락 감안해 2배 선택
-  const fetchMultiplier = 2;
-  const postLimit = Math.min(postsPerDay * fetchMultiplier, rawKeywords.length);
+  const postLimit = Math.min(targetCount, rawKeywords.length);
   rawKeywords = rawKeywords.slice(0, postLimit);
   logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 목표:${postsPerDay}개×${fetchMultiplier})`);
 

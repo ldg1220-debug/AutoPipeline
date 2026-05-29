@@ -386,21 +386,41 @@ async function publishPost(page, content, blogName, context) {
     timeout: 5000,
   }).catch(() => page.waitForTimeout(2000));
 
-  // 사이드바 열린 후: API/캐시에서 카테고리 로드 실패했으면 사이드바 select에서 직접 읽기
+  // 사이드바 열린 후: API/캐시에서 카테고리 로드 실패했으면 사이드바에서 직접 읽기
   if (!bestCategory) {
     try {
       const sidebarCategories = await page.evaluate(() => {
+        // 1. 네이티브 <select> 시도
         const select =
           document.querySelector('.layer_publish select[name="categoryId"]') ??
           document.querySelector('select[name="categoryId"]');
-        if (!select) return [];
-        return [...select.options]
-          .filter((o) => o.value && o.value !== '0' && o.value !== '')
-          .map((o) => ({ id: o.value, name: o.text.trim(), parent: null }));
+        if (select) {
+          const opts = [...select.options]
+            .filter((o) => o.value && o.value !== '0' && o.value !== '')
+            .map((o) => ({ id: o.value, name: o.text.trim(), parent: null }));
+          if (opts.length > 0) return opts;
+        }
+        // 2. React 드롭다운 — data-id 속성이 있는 li/button 항목 수집
+        const items = document.querySelectorAll(
+          '.layer_publish [data-id], .layer_publish li[data-category-id], .layer_publish option'
+        );
+        if (items.length > 0) {
+          return [...items].map((el) => ({
+            id:   el.getAttribute('data-id') ?? el.getAttribute('data-category-id') ?? el.value ?? '',
+            name: (el.textContent ?? el.innerText ?? '').trim(),
+            parent: null,
+          })).filter((c) => c.id && c.name);
+        }
+        return [];
       });
       if (sidebarCategories.length > 0) {
         logger.info(`[blog_publisher] Categories read from sidebar: ${sidebarCategories.map((c) => c.name).join(', ')}`);
         bestCategory = await matchBestCategory(sidebarCategories, keyword, content.category ?? 'economy');
+      } else {
+        // 진단용 스크린샷 (카테고리 못 찾은 경우)
+        const dbgPath = path.resolve(__dirname, `../../output/blog/debug_category_${Date.now()}.png`);
+        await page.screenshot({ path: dbgPath, fullPage: false }).catch(() => {});
+        logger.warn(`[blog_publisher] 사이드바에서 카테고리를 찾지 못했습니다. 스크린샷: ${dbgPath}`);
       }
     } catch (err) {
       logger.warn(`[blog_publisher] Sidebar category read failed: ${err.message}`);
@@ -453,6 +473,11 @@ async function publishPost(page, content, blogName, context) {
   await page.unroute('**/manage/post.json');
 
   logger.info(`[blog_publisher] API resp: ${(publishApiResp ?? '').slice(0, 150)}`);
+
+  // Tistory 일일 발행 한도 초과 감지
+  if ((publishApiResp ?? '').includes('하루에 새롭게 공개 발행할 수 있는')) {
+    throw new Error('DAILY_LIMIT_EXCEEDED: Tistory 하루 공개 발행 한도(15개) 초과. 오늘은 더 이상 발행할 수 없습니다.');
+  }
 
   // API 응답에서 entryUrl 추출 → 공개 포스트 URL
   let publishedUrl = null;
@@ -763,6 +788,15 @@ export async function publishBlogPosts(contentData) {
       }
     } catch (err) {
       logger.error(`[blog_publisher] Failed: ${content.keyword}`, { message: err.message });
+      // 일일 한도 초과 시 남은 글 모두 skipped 처리하고 루프 종료
+      if (err.message.startsWith('DAILY_LIMIT_EXCEEDED')) {
+        logger.warn('[blog_publisher] 일일 발행 한도 초과 — 오늘 남은 글은 내일 발행됩니다.');
+        const remaining = contents.slice(contents.indexOf(content));
+        for (const r of remaining) {
+          updated.push({ ...r, blog_publish: { status: 'skipped_daily_limit' } });
+        }
+        break;
+      }
       updated.push({ ...content, blog_publish: { status: 'failed', error: err.message } });
     }
 
