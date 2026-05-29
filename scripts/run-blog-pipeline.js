@@ -46,13 +46,15 @@ async function main() {
     }
   }
 
-  // 점수 내림차순 정렬 → HOT 키워드(score≥70) 많으면 최대 10개, 기본 postsPerDay
+  // 점수 내림차순 정렬
   rawKeywords.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const postsPerDay = config.runtime.blogPostsPerDay ?? 5;
   const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
-  const postLimit = hotCount >= postsPerDay ? Math.min(10, rawKeywords.length) : Math.min(postsPerDay, rawKeywords.length);
+  // 목표 발행 수(postsPerDay)를 실제로 달성하려면 토픽 그루핑 + QA 탈락 감안해 2배 선택
+  const fetchMultiplier = 2;
+  const postLimit = Math.min(postsPerDay * fetchMultiplier, rawKeywords.length);
   rawKeywords = rawKeywords.slice(0, postLimit);
-  logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 한도:${postLimit})`);
+  logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 목표:${postsPerDay}개×${fetchMultiplier})`);
 
   const contentData = {
     ...keywordData,
@@ -77,6 +79,33 @@ async function main() {
     logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.5 Topic Grouper 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.55: 이미 발행된 포스트와 중복 주제 제거
+  try {
+    const published = db
+      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published'`)
+      .all()
+      .map((r) => r.keyword.replace(/[\s&]/g, '').toLowerCase());
+
+    const normalize = (kw) => (kw ?? '').replace(/[\s&]/g, '').toLowerCase();
+
+    const before = contentData.contents.length;
+    contentData.contents = contentData.contents.filter((c) => {
+      const kwNorm = normalize(c.keyword);
+      // 이미 발행된 키워드 중 하나가 현재 키워드에 포함되거나 반대인 경우 중복으로 판단
+      return !published.some((pk) => {
+        if (pk.length < 2 || kwNorm.length < 2) return false;
+        const shorter = pk.length <= kwNorm.length ? pk : kwNorm;
+        const longer  = pk.length <= kwNorm.length ? kwNorm : pk;
+        return longer.includes(shorter);
+      });
+    });
+    const removed = before - contentData.contents.length;
+    if (removed > 0) logger.info(`[blog:pipeline] Part 1.55: 중복 주제 ${removed}개 제외 (이미 발행됨)`);
+    else logger.info('[blog:pipeline] Part 1.55: 중복 없음');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.55 중복 체크 실패 (계속 진행): ${err.message}`);
   }
 
   // Part 1.6: Competitor Analyzer — 인사이트 캐시 (7일 주기)
