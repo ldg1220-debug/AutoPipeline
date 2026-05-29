@@ -49,7 +49,7 @@ async function generateImageGrokAurora(prompt, outputPath) {
   try {
     const res = await axios.post(
       'https://api.x.ai/v1/images/generations',
-      { model: 'grok-2-image-1212', prompt, n: 1 },
+      { model: 'grok-imagine-image', prompt, n: 1 },
       {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         timeout: 120000,
@@ -1511,7 +1511,7 @@ async function generateLongFormMedia(content) {
   const sectionAudioPaths = [];
   for (let i = 0; i < sections.length; i++) {
     const audioPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_s${i}.mp3`);
-    const scriptText = normalizeScriptForTTS((sections[i].script ?? '').slice(0, 2000));
+    const scriptText = normalizeScriptForTTS((sections[i].script ?? '').slice(0, 4000));
     await throttle(500);
     try {
       await generateAudio(scriptText, audioPath);
