@@ -57,10 +57,10 @@ async function generateDalleThumbnail(content, destPath) {
   const res = await axios.post(
     'https://api.openai.com/v1/images/generations',
     {
-      model: 'dall-e-3',
+      model: 'gpt-image-1',
       prompt: buildThumbnailPrompt(content),
       n: 1,
-      size: '1792x1024',  // 16:9 가장 근접
+      size: '1024x1024',
       quality: 'standard',
     },
     {
