@@ -322,7 +322,8 @@ async function buildAssets(content) {
       result.thumbnail = await generateDalleThumbnail(content, thumbPath);
       logger.info(`[blog_asset_builder] Thumbnail (DALL-E 3): ${content.keyword}`);
     } catch (err) {
-      logger.warn(`[blog_asset_builder] DALL-E 3 failed, falling back to Pexels: ${err.message}`);
+      const detail = err.response?.data?.error?.message ?? err.message;
+      logger.warn(`[blog_asset_builder] DALL-E 3 failed (${err.response?.status ?? 'no-resp'}): ${detail}`);
     }
   }
 

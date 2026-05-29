@@ -45,7 +45,7 @@ function randomDelay(minMs = 30000, maxMs = 90000) {
 async function uploadImageToEditor(page, imagePath) {
   try {
     const [fileChooser] = await Promise.all([
-      page.waitForFileChooser({ timeout: 5000 }),
+      page.waitForEvent('filechooser', { timeout: 5000 }),
       page.click('button[data-tistory-react-app="ImageUpload"], .toolbar-image, [title="이미지"]'),
     ]);
     await fileChooser.setFiles(imagePath);

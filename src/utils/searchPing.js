@@ -14,13 +14,20 @@ import { config } from '../config/index.js';
 
 const BLOG_URL = `https://${config.tistory?.blogName ?? ''}.tistory.com`;
 
-// ── 사이트맵 핑 (인증 불필요) ─────────────────────────────────────────────
-async function pingSitemap(engine, pingUrl) {
+// ── Bing IndexNow (Google/Bing 사이트맵 핑 엔드포인트는 2023년 이후 폐기됨) ──
+async function indexNowBing(postUrl) {
+  // IndexNow API 키가 없으면 조용히 스킵
+  const indexNowKey = process.env.INDEXNOW_KEY;
+  if (!indexNowKey || !postUrl) return;
   try {
-    await axios.get(pingUrl, { timeout: 8000 });
-    logger.info(`[searchPing] ${engine} sitemap ping OK`);
+    await axios.post(
+      'https://api.indexnow.org/indexnow',
+      { host: `${config.tistory?.blogName}.tistory.com`, key: indexNowKey, urlList: [postUrl] },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
+    );
+    logger.info(`[searchPing] IndexNow submitted: ${postUrl}`);
   } catch (err) {
-    logger.warn(`[searchPing] ${engine} sitemap ping failed: ${err.message}`);
+    logger.warn(`[searchPing] IndexNow failed: ${err.message}`);
   }
 }
 
@@ -76,11 +83,8 @@ async function googleIndexingApi(postUrl) {
 export async function pingSearchEngines(postUrl = null) {
   if (!config.tistory?.blogName) return;
 
-  const sitemapUrl = encodeURIComponent(`${BLOG_URL}/sitemap.xml`);
-
   await Promise.allSettled([
-    pingSitemap('Google', `https://www.google.com/ping?sitemap=${sitemapUrl}`),
-    pingSitemap('Bing',   `https://www.bing.com/ping?sitemap=${sitemapUrl}`),
     postUrl ? googleIndexingApi(postUrl) : Promise.resolve(),
+    indexNowBing(postUrl),
   ]);
 }

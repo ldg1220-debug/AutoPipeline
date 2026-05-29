@@ -428,19 +428,26 @@ function validateBlogStructure(content) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
   }
 
-  // 공백 정규화 후 포함 여부 확인 (한국어 띄어쓰기 변형 대응)
-  const bodyNorm = sections.map((s) => s.body ?? '').join(' ').replace(/\s+/g, '');
+  // SEO 키워드 포함 여부 — 공백 제거 후 토큰 단위 검사 (한국어 복합어 대응)
+  // 하드 실패 대상이 아닌 소프트 경고만 기록 (LLM seoScore가 실질 판단)
+  const bodyText = sections.map((s) => s.body ?? '').join(' ');
+  const bodyNorm = bodyText.replace(/\s+/g, '');
   const primaryKw = (content.keyword ?? '').split('&').map((k) => k.trim());
   const seoKeywords = draft.seo_keywords ?? primaryKw;
-  // 기본 키워드(복합 키워드는 각 부분)도 후보에 포함
   const allKws = [...new Set([...seoKeywords, ...primaryKw])];
   const missingSeo = allKws.filter((kw) => {
-    const kwNorm = kw.replace(/\s+/g, '');
-    return kwNorm.length > 1 && !bodyNorm.includes(kwNorm);
+    // 공백이 있는 키워드는 각 토큰이 body에 포함되는지 확인
+    const tokens = kw.trim().split(/\s+/).filter((t) => t.length > 1);
+    if (tokens.length > 1) {
+      return tokens.some((t) => !bodyText.includes(t));
+    }
+    // 단일 토큰은 공백 제거 후 포함 여부 확인
+    return kw.length > 1 && !bodyNorm.includes(kw.replace(/\s+/g, ''));
   });
-  // 절반 이상 누락 시에만 구조 이슈로 처리 (일부 동의어 표현 허용)
-  if (missingSeo.length > 0 && missingSeo.length >= Math.ceil(allKws.length / 2)) {
-    issues.push(`SEO 키워드 본문 미포함: [${missingSeo.join(', ')}]`);
+  // SEO 키워드 누락은 소프트 경고로만 기록 — hardFail 대상에서 제외
+  // (실제 품질은 LLM seoScore < 50 기준으로 판단)
+  if (missingSeo.length > 0) {
+    issues.push(`SEO 키워드 확인 필요: [${missingSeo.join(', ')}]`);
   }
 
   return issues;
@@ -477,7 +484,9 @@ export async function runBlogQA(contentData) {
     }
 
     const allIssues = [...structureIssues, ...llmIssues];
-    const hardFail  = structureIssues.length > 0 || seoScore < 50 || readabilityScore < 50;
+    // SEO 키워드 확인 필요 메시지는 소프트 경고 — hardFail 제외
+    const hardStructureIssues = structureIssues.filter((i) => !i.startsWith('SEO 키워드 확인 필요'));
+    const hardFail  = hardStructureIssues.length > 0 || seoScore < 50 || readabilityScore < 50;
     const status    = hardFail ? 'REJECTED' : 'APPROVED';
 
     if (allIssues.length > 0) {
