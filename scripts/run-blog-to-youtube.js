@@ -12,12 +12,14 @@
 
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 import { createLongFormAndShorts } from '../src/agents/long_form_creator.js';
 import { generateAllMedia } from '../src/agents/media_generator.js';
 import { publishContents } from '../src/agents/auto_publisher.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import logger from '../src/utils/logger.js';
 import db from '../src/db/db.js';
+import { config } from '../src/config/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir    = path.resolve(__dirname, '../output');
@@ -28,6 +30,53 @@ const topArg  = args.find((a) => a.startsWith('--top='));
 const TOP_N   = topArg ? parseInt(topArg.split('=')[1], 10) : 1;
 const DRY_RUN = args.includes('--dry') || process.env.DRY_RUN === 'true';
 const date    = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+/**
+ * 네이버 Datalab으로 키워드 목록의 최근 30일 검색 트렌드 비율(0~100) 조회.
+ * API 한 번에 최대 5개 그룹 → 배치로 처리.
+ * 실패 시 빈 객체 반환 (폴백: DB score 사용).
+ */
+async function fetchDatalabScores(keywords) {
+  const clientId     = config.naver?.clientId     ?? process.env.NAVER_CLIENT_ID;
+  const clientSecret = config.naver?.clientSecret ?? process.env.NAVER_CLIENT_SECRET;
+  if (!clientId || !clientSecret || keywords.length === 0) return {};
+
+  const endDate   = new Date().toISOString().slice(0, 10);
+  const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const result    = {};
+
+  // 5개씩 배치
+  for (let i = 0; i < keywords.length; i += 5) {
+    const batch = keywords.slice(i, i + 5);
+    try {
+      const res = await axios.post(
+        'https://openapi.naver.com/v1/datalab/search',
+        {
+          startDate,
+          endDate,
+          timeUnit: 'week',
+          keywordGroups: batch.map((kw) => ({ groupName: kw, keywords: [kw] })),
+        },
+        {
+          headers: {
+            'X-Naver-Client-Id':     clientId,
+            'X-Naver-Client-Secret': clientSecret,
+            'Content-Type':          'application/json',
+          },
+          timeout: 10000,
+        },
+      );
+      for (const group of res.data?.results ?? []) {
+        const data = group.data ?? [];
+        const avg  = data.reduce((s, d) => s + (d.ratio ?? 0), 0) / (data.length || 1);
+        result[group.title] = Math.round(avg * 10) / 10; // 0~100 소수 1자리
+      }
+    } catch (err) {
+      logger.warn(`[blog→youtube] Datalab 조회 실패 (배치 ${i}~${i + 5}): ${err.message}`);
+    }
+  }
+  return result;
+}
 
 async function loadBlogDraftForKeyword(keyword) {
   // 오늘 발행된 JSON 파일에서 blog_draft 추출 시도
@@ -53,25 +102,43 @@ async function main() {
   const start = Date.now();
   logger.info(`[blog→youtube] ===== 시작 (DRY_RUN: ${DRY_RUN}, TOP_N: ${TOP_N}) =====`);
 
-  // 1. 오늘 발행된 포스트 중 점수 상위 N개 조회
-  const todayPosts = db.prepare(`
+  // 1. 오늘 발행된 포스트 전체 조회 (Datalab 재정렬 후 TOP_N 선택)
+  const allPosts = db.prepare(`
     SELECT bp.keyword, bp.post_url, bp.title,
-           COALESCE(k.score, 0) AS score,
+           COALESCE(k.score, 0) AS db_score,
            COALESCE(k.category, 'economy') AS category
     FROM blog_posts bp
     LEFT JOIN keywords k ON k.keyword = bp.keyword
     WHERE bp.status = 'published'
       AND date(bp.published_at, 'localtime') = date('now', 'localtime')
-    ORDER BY score DESC
-    LIMIT ?
-  `).all(TOP_N);
+    ORDER BY db_score DESC
+  `).all();
 
-  if (todayPosts.length === 0) {
+  if (allPosts.length === 0) {
     logger.warn('[blog→youtube] 오늘 발행된 포스트가 없습니다. 종료.');
     process.exit(0);
   }
+
+  // 2. 네이버 Datalab으로 실제 검색 트렌드 점수 조회
+  logger.info(`[blog→youtube] Datalab 트렌드 조회 중... (${allPosts.length}개 키워드)`);
+  const datalabScores = await fetchDatalabScores(allPosts.map((p) => p.keyword));
+
+  // Datalab 점수 병합 후 내림차순 정렬 → TOP_N 선택
+  const todayPosts = allPosts
+    .map((p) => ({
+      ...p,
+      trend_score:  datalabScores[p.keyword] ?? 0,
+      final_score:  (datalabScores[p.keyword] ?? 0) > 0
+        ? datalabScores[p.keyword]   // Datalab 있으면 우선
+        : p.db_score * 10,           // 없으면 DB score 스케일 보정
+    }))
+    .sort((a, b) => b.final_score - a.final_score)
+    .slice(0, TOP_N);
+
   logger.info(`[blog→youtube] 선택된 포스트 ${todayPosts.length}개:`);
-  todayPosts.forEach((p) => logger.info(`  - [${p.score}점] ${p.keyword}`));
+  todayPosts.forEach((p) =>
+    logger.info(`  - [트렌드:${p.trend_score} / DB:${p.db_score}] ${p.keyword}`),
+  );
 
   // 2. 각 포스트에 대해 롱폼 + 쇼츠 스크립트 생성
   const contents = [];
