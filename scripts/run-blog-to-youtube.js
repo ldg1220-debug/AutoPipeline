@@ -25,11 +25,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir    = path.resolve(__dirname, '../output');
 
 // CLI 인자
-const args    = process.argv.slice(2);
-const topArg  = args.find((a) => a.startsWith('--top='));
-const TOP_N   = topArg ? parseInt(topArg.split('=')[1], 10) : 1;
-const DRY_RUN = args.includes('--dry') || process.env.DRY_RUN === 'true';
-const date    = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+const args       = process.argv.slice(2);
+const topArg     = args.find((a) => a.startsWith('--top='));
+const TOP_N      = topArg ? parseInt(topArg.split('=')[1], 10) : 1;
+const DRY_RUN    = args.includes('--dry') || process.env.DRY_RUN === 'true';
+const UPLOAD_ONLY = args.includes('--upload-only');
+const date       = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 /**
  * 네이버 Datalab으로 키워드 목록의 최근 30일 검색 트렌드 비율(0~100) 조회.
@@ -100,7 +101,33 @@ async function loadBlogDraftForKeyword(keyword) {
 
 async function main() {
   const start = Date.now();
-  logger.info(`[blog→youtube] ===== 시작 (DRY_RUN: ${DRY_RUN}, TOP_N: ${TOP_N}) =====`);
+  logger.info(`[blog→youtube] ===== 시작 (DRY_RUN: ${DRY_RUN}, TOP_N: ${TOP_N}, UPLOAD_ONLY: ${UPLOAD_ONLY}) =====`);
+
+  // --upload-only: 미디어 생성 건너뛰고 저장된 스크립트로 바로 업로드
+  if (UPLOAD_ONLY) {
+    const { readJSON } = await import('../src/utils/fileIO.js');
+    let contentData;
+    try {
+      contentData = await readJSON(path.resolve(outDir, `scripts/blog_to_youtube_${date}.json`));
+      logger.info(`[blog→youtube] 저장된 스크립트 로드: ${contentData.contents?.length ?? 0}개`);
+    } catch {
+      logger.error(`[blog→youtube] blog_to_youtube_${date}.json 없음. 먼저 일반 실행하세요.`);
+      process.exit(1);
+    }
+    const qaData = {
+      reports: contentData.contents.map((c) => ({ keyword: c.keyword, final_decision: 'APPROVED' })),
+    };
+    logger.info('[blog→youtube] YouTube 업로드 시작 (업로드 전용)...');
+    const publishResults = await publishContents(qaData, contentData);
+    await writeJSON(path.resolve(outDir, `scripts/blog_to_youtube_publish_${date}.json`), publishResults);
+    console.log('\n발행 결과:');
+    for (const r of publishResults.results ?? []) {
+      console.log(`  [${r.keyword}]`);
+      console.log(`    롱폼:  ${r.youtube?.url ?? r.youtube?.status ?? '-'}`);
+      console.log(`    쇼츠:  ${r.youtube_shorts?.url ?? r.youtube_shorts?.status ?? '-'}`);
+    }
+    return;
+  }
 
   // 1. 오늘 발행된 포스트 전체 조회 (Datalab 재정렬 후 TOP_N 선택)
   const allPosts = db.prepare(`
