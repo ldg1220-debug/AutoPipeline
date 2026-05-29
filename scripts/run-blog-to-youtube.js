@@ -25,12 +25,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir    = path.resolve(__dirname, '../output');
 
 // CLI 인자
-const args       = process.argv.slice(2);
-const topArg     = args.find((a) => a.startsWith('--top='));
-const TOP_N      = topArg ? parseInt(topArg.split('=')[1], 10) : 1;
-const DRY_RUN    = args.includes('--dry') || process.env.DRY_RUN === 'true';
+const args        = process.argv.slice(2);
+const topArg      = args.find((a) => a.startsWith('--top='));
+const kwArg       = args.find((a) => a.startsWith('--keyword='));
+const TOP_N       = topArg ? parseInt(topArg.split('=')[1], 10) : 1;
+const FORCE_KW    = kwArg ? kwArg.split('=').slice(1).join('=') : null;
+const DRY_RUN     = args.includes('--dry') || process.env.DRY_RUN === 'true';
 const UPLOAD_ONLY = args.includes('--upload-only');
-const date       = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+const date        = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 /**
  * 네이버 Datalab으로 키워드 목록의 최근 30일 검색 트렌드 비율(0~100) 조회.
@@ -120,6 +122,60 @@ async function main() {
     logger.info('[blog→youtube] YouTube 업로드 시작 (업로드 전용)...');
     const publishResults = await publishContents(qaData, contentData);
     await writeJSON(path.resolve(outDir, `scripts/blog_to_youtube_publish_${date}.json`), publishResults);
+    console.log('\n발행 결과:');
+    for (const r of publishResults.results ?? []) {
+      console.log(`  [${r.keyword}]`);
+      console.log(`    롱폼:  ${r.youtube?.url ?? r.youtube?.status ?? '-'}`);
+      console.log(`    쇼츠:  ${r.youtube_shorts?.url ?? r.youtube_shorts?.status ?? '-'}`);
+    }
+    return;
+  }
+
+  // --keyword=키워드: 특정 키워드 스크립트 재생성 + 기존 영상 파일로 바로 업로드
+  if (FORCE_KW) {
+    logger.info(`[blog→youtube] --keyword 모드: "${FORCE_KW}"`);
+    const post = db.prepare(`
+      SELECT bp.keyword, bp.post_url, COALESCE(k.category, 'economy') AS category
+      FROM blog_posts bp
+      LEFT JOIN keywords k ON k.keyword = bp.keyword
+      WHERE bp.keyword = ? AND bp.status = 'published'
+      LIMIT 1
+    `).get(FORCE_KW);
+
+    if (!post) {
+      logger.error(`[blog→youtube] DB에서 "${FORCE_KW}" 포스트를 찾을 수 없습니다.`);
+      process.exit(1);
+    }
+
+    const blogDraft = await loadBlogDraftForKeyword(post.keyword);
+    const triangle  = await createLongFormAndShorts(
+      { keyword: post.keyword, category: post.category },
+      blogDraft,
+    );
+    const contentData = {
+      generated_at: new Date().toISOString(),
+      contents: [{
+        keyword:             post.keyword,
+        category:            post.category,
+        series_name:         '매일읽어주는남자',
+        shortform_script:    triangle.shorts,
+        youtube_title:       triangle.shorts?.hook
+          ? `${post.keyword}: ${triangle.shorts.hook}`
+          : `${post.keyword} 핵심 정리`,
+        youtube_description: triangle.long_video?.youtube_description ?? '',
+        image_prompt:        `${post.keyword} korean economic news concept`,
+        long_video:          triangle.long_video,
+        cross_refs:          triangle.cross_refs,
+        blog_draft:          blogDraft,
+        blog_publish:        { url: post.post_url },
+      }],
+    };
+    const qaData = {
+      reports: [{ keyword: post.keyword, final_decision: 'APPROVED' }],
+    };
+    await writeJSON(path.resolve(outDir, `scripts/blog_to_youtube_${post.keyword.replace(/\s/g, '_')}_${date}.json`), contentData);
+    logger.info(`[blog→youtube] 스크립트 저장 완료. YouTube 업로드 시작...`);
+    const publishResults = await publishContents(qaData, contentData);
     console.log('\n발행 결과:');
     for (const r of publishResults.results ?? []) {
       console.log(`  [${r.keyword}]`);
