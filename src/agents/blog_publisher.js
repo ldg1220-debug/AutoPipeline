@@ -65,43 +65,51 @@ async function uploadImageToEditor(page, imagePath) {
 
 // ── 대표 이미지 설정 (사이드바 .layer_publish 내 썸네일 영역) ────────────────
 async function setRepresentativeImage(page, imagePath) {
-  // 사이드바 내 대표 이미지 버튼/영역 후보 셀렉터
-  const thumbSelectors = [
+  // 1. 파일 input이 직접 노출된 경우 (가장 안정적)
+  const fileInputSels = [
+    '.layer_publish input[type="file"]',
+    'input[type="file"][accept*="image"]',
+  ];
+  for (const sel of fileInputSels) {
+    try {
+      const el = await page.$(sel);
+      if (!el) continue;
+      await el.setInputFiles(imagePath);
+      await page.waitForTimeout(1500);
+      logger.info(`[blog_publisher] Representative image set via file input: ${sel}`);
+      return true;
+    } catch { /* 다음 시도 */ }
+  }
+
+  // 2. 버튼 클릭 → filechooser 이벤트 (waitForEvent 사용 — 신규 Playwright API)
+  const thumbBtnSels = [
+    '.layer_publish button:has-text("대표이미지")',
+    '.layer_publish button:has-text("이미지 등록")',
+    '.layer_publish button:has-text("썸네일")',
+    '.layer_publish [class*="thumbnail"] button',
+    '.layer_publish [class*="Thumbnail"] button',
+    '.layer_publish [class*="thumb"] button',
     '.layer_publish .btn-thumb',
     '.layer_publish button[data-thumb]',
-    '.layer_publish .area_thumb button',
-    '.layer_publish [class*="thumb"] button',
-    '.layer_publish [class*="Thumb"] button',
     '.layer_publish [data-tistory-react-app="Thumbnail"] button',
-    '.layer_publish button:has-text("대표이미지")',
-    '.layer_publish button:has-text("썸네일")',
-    '.layer_publish button:has-text("이미지 등록")',
-    '.layer_publish label[for*="thumb"]',
-    '.layer_publish input[type="file"][accept*="image"]',
   ];
-
-  for (const sel of thumbSelectors) {
+  for (const sel of thumbBtnSels) {
     try {
       const el = await page.$(sel);
       if (!el) continue;
       const visible = await el.isVisible().catch(() => false);
       if (!visible) continue;
-
-      if (sel.includes('input[type="file"]')) {
-        // 파일 input이 직접 노출된 경우
-        await el.setInputFiles(imagePath);
-      } else {
-        const [fileChooser] = await Promise.all([
-          page.waitForFileChooser({ timeout: 4000 }),
-          el.click({ force: true }),
-        ]);
-        await fileChooser.setFiles(imagePath);
-      }
+      const [fileChooser] = await Promise.all([
+        page.waitForEvent('filechooser', { timeout: 4000 }),
+        el.click({ force: true }),
+      ]);
+      await fileChooser.setFiles(imagePath);
       await page.waitForTimeout(1500);
       logger.info(`[blog_publisher] Representative image set via: ${sel}`);
       return true;
     } catch { /* 다음 시도 */ }
   }
+
   logger.warn('[blog_publisher] Representative image: sidebar selector not found (API thumbnail will be used)');
   return false;
 }
@@ -273,7 +281,8 @@ async function publishPost(page, content, blogName, context) {
   try {
     const availableCategories = await loadTistoryCategories(
       blogName,
-      config.tistory.accessToken
+      config.tistory.accessToken,
+      context   // Playwright 폴백: 토큰 없으면 카테고리 페이지 스크래핑
     );
     logger.info(`[blog_publisher] URL[3-after-categories]: ${page.url()}`);
     bestCategory = await matchBestCategory(

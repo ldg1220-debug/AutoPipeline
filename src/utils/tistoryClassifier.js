@@ -93,10 +93,13 @@ async function fetchCategoriesFromPage(context, blogName) {
   }
 }
 
-// ── 카테고리 목록 로드 (캐시 → API) ──────────────────────────────────────
-// Playwright 폴백(fetchCategoriesFromPage)은 제거 — 에디터 페이지 이동 위험
-// 카테고리 사용하려면 .env에 TISTORY_ACCESS_TOKEN 설정 필요
-export async function loadTistoryCategories(blogName, accessToken) {
+// ── 카테고리 목록 로드 (캐시 → API → Playwright 스크래핑 폴백) ─────────────
+/**
+ * @param {string} blogName
+ * @param {string|null} accessToken
+ * @param {import('playwright').BrowserContext|null} context  Playwright 컨텍스트 (토큰 없을 때 폴백)
+ */
+export async function loadTistoryCategories(blogName, accessToken, context = null) {
   // 1. 캐시 조회
   const cached = getCachedCategories(blogName);
   if (cached.length > 0) {
@@ -114,6 +117,20 @@ export async function loadTistoryCategories(blogName, accessToken) {
       }
     } catch (err) {
       logger.warn(`[tistoryClassifier] API fetch failed: ${err.message}`);
+    }
+  }
+
+  // 3. Playwright 폴백 — 카테고리 관리 페이지에서 직접 스크래핑
+  if (context) {
+    try {
+      const categories = await fetchCategoriesFromPage(context, blogName);
+      if (categories.length > 0) {
+        saveCategoriesCache(blogName, categories);
+        logger.info(`[tistoryClassifier] Categories scraped from page: ${categories.map((c) => c.name).join(', ')}`);
+        return categories;
+      }
+    } catch (err) {
+      logger.warn(`[tistoryClassifier] Page scrape failed: ${err.message}`);
     }
   }
 
