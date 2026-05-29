@@ -62,7 +62,7 @@ const CATEGORY_PERSONA = {
 function numberToKorean(n) {
   if (n === 0) return '0';
   const units = ['', '만', '억', '조'];
-  const bases = [1, 10_000, 100_000_000, 1_000_000_000_000];
+  const bases = [1, 10000, 100000000, 1000000000000];
   let result = '';
   let remaining = n;
   for (let i = bases.length - 1; i >= 0; i--) {

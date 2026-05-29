@@ -28,7 +28,7 @@ async function loadBenchmarkRules() {
     const raw  = await fs.readFile(BENCHMARK_PATH, 'utf8');
     const data = JSON.parse(raw);
     if (!data.rules?.length) return null;
-    const ageDays = (Date.now() - new Date(data.generated_at).getTime()) / 86_400_000;
+    const ageDays = (Date.now() - new Date(data.generated_at).getTime()) / 86400000;
     if (ageDays > BENCHMARK_MAX_AGE_DAYS) {
       logger.info('[blog_content_enhancer] Benchmark rules too old (>7d). Skipping injection.');
       return null;

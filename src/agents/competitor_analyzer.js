@@ -466,13 +466,13 @@ async function loadCache() {
 
 function isYouTubeFresh(cache) {
   if (!cache?.youtube_generated_at) return false;
-  const ageDays = (Date.now() - new Date(cache.youtube_generated_at).getTime()) / 86_400_000;
+  const ageDays = (Date.now() - new Date(cache.youtube_generated_at).getTime()) / 86400000;
   return ageDays <= YOUTUBE_TTL_DAYS;
 }
 
 function isBlogFresh(cache) {
   if (!cache?.blog_generated_at) return false;
-  const ageDays = (Date.now() - new Date(cache.blog_generated_at).getTime()) / 86_400_000;
+  const ageDays = (Date.now() - new Date(cache.blog_generated_at).getTime()) / 86400000;
   return ageDays <= BLOG_TTL_DAYS;
 }
 
