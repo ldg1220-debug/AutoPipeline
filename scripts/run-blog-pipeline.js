@@ -106,12 +106,16 @@ async function main() {
     if (rejectedItems.length > 0) {
       logger.info(`[blog:pipeline] QA 탈락 ${rejectedItems.length}개 → 재작성 시도`);
       try {
-        // QA 피드백을 포함해 재작성
+        // QA 피드백을 포함해 재작성 — body 초기화해야 enhancer가 스킵하지 않음
         const retryInput = {
           ...draftData,
           contents: rejectedItems.map((c) => ({
             ...c,
             qa_feedback: c.blog_qa?.suggestions ?? [],
+            blog_draft: c.blog_draft ? {
+              ...c.blog_draft,
+              sections: (c.blog_draft.sections ?? []).map((s) => ({ ...s, body: '' })),
+            } : null,
           })),
         };
         const retryDraft = await enhanceAllBlogDrafts(retryInput);

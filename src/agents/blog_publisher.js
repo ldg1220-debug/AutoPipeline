@@ -202,8 +202,21 @@ async function publishPost(page, content, blogName, context) {
   const writeUrl = `https://${blogName}.tistory.com/manage/newpost/`;
   await page.goto(writeUrl, { waitUntil: 'networkidle', timeout: 30000 });
 
-  // 에디터 로드 대기
-  await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 15000 });
+  // 로그인 페이지로 리다이렉트됐으면 세션 만료
+  const currentUrl = page.url();
+  if (
+    currentUrl.includes('/login') ||
+    currentUrl.includes('/auth') ||
+    currentUrl.includes('accounts.kakao') ||
+    !currentUrl.includes('tistory.com/manage')
+  ) {
+    throw new Error(
+      `세션 만료 또는 미로그인 상태입니다. Windows에서 먼저 "npm run blog:login" 을 실행하세요. (현재 URL: ${currentUrl})`
+    );
+  }
+
+  // 에디터 로드 대기 (타임아웃 30초로 늘림)
+  await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 30000 });
 
   // 제목 입력
   const title = blog_draft?.title ?? keyword;

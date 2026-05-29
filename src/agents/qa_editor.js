@@ -428,10 +428,18 @@ function validateBlogStructure(content) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
   }
 
-  const bodyAll = sections.map((s) => s.body ?? '').join(' ');
-  const seoKeywords = draft.seo_keywords ?? [content.keyword];
-  const missingSeo = seoKeywords.filter((kw) => !bodyAll.includes(kw));
-  if (missingSeo.length > 0) {
+  // 공백 정규화 후 포함 여부 확인 (한국어 띄어쓰기 변형 대응)
+  const bodyNorm = sections.map((s) => s.body ?? '').join(' ').replace(/\s+/g, '');
+  const primaryKw = (content.keyword ?? '').split('&').map((k) => k.trim());
+  const seoKeywords = draft.seo_keywords ?? primaryKw;
+  // 기본 키워드(복합 키워드는 각 부분)도 후보에 포함
+  const allKws = [...new Set([...seoKeywords, ...primaryKw])];
+  const missingSeo = allKws.filter((kw) => {
+    const kwNorm = kw.replace(/\s+/g, '');
+    return kwNorm.length > 1 && !bodyNorm.includes(kwNorm);
+  });
+  // 절반 이상 누락 시에만 구조 이슈로 처리 (일부 동의어 표현 허용)
+  if (missingSeo.length > 0 && missingSeo.length >= Math.ceil(allKws.length / 2)) {
     issues.push(`SEO 키워드 본문 미포함: [${missingSeo.join(', ')}]`);
   }
 
