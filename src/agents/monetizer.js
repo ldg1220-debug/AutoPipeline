@@ -36,6 +36,15 @@ const CATEGORY_EMOJI = {
   social:        '👥',
 };
 
+const CATEGORY_KR = {
+  economy:       '경제·금융',
+  finance:       '재테크·금융',
+  realestate:    '부동산',
+  health:        '건강',
+  entertainment: '연예·사회',
+  social:        '생활·사회',
+};
+
 // ── 마크다운 → HTML 변환 (GPT 출력의 **bold**, *italic*, 리스트 처리) ──────
 function markdownToHtml(text) {
   if (!text) return '';
@@ -440,7 +449,7 @@ async function monetizeBlogDraft(content) {
   // hero 배너 (제목 + 메타설명)
   const heroHtml =
     `<div class="mae-hero">` +
-    `<span class="hero-tag">${getCategoryIcon(content.category)} ${content.category?.toUpperCase() ?? 'ISSUE'}</span>` +
+    `<span class="hero-tag">${getCategoryIcon(content.category)} ${CATEGORY_KR[content.category] ?? '경제·이슈'}</span>` +
     `<h1>${blog_draft.title ?? keyword}</h1>` +
     `<p>${blog_draft.meta_description ?? ''}</p>` +
     `</div>`;
