@@ -292,6 +292,25 @@ async function runPipeline() {
       publishResults
     );
     logger.info(`[app] Agent 4 complete. Published: ${publishResults.results?.length ?? 0}`);
+
+    // 롱폼 대본에서 추출된 "다음 영상 예고" 키워드를 DB에 저장 → 다음 파이프라인이 우선 처리
+    for (const content of contentData.contents) {
+      const nextKw = content.long_video?.promised_next_keyword;
+      if (!nextKw) continue;
+      try {
+        db.prepare(
+          `INSERT INTO keywords (keyword, category, score, status, sources)
+           VALUES (?, ?, 80, 'promised', 'script_promise')
+           ON CONFLICT(keyword) DO UPDATE SET
+             status = 'promised',
+             score  = MAX(score, 80),
+             used_at = NULL`
+        ).run(nextKw, content.category ?? 'economy');
+        logger.info(`[app] 다음 영상 예고 키워드 저장: "${nextKw}" ← ${content.keyword}`);
+      } catch (err) {
+        logger.warn(`[app] 예고 키워드 저장 실패 (${nextKw}): ${err.message}`);
+      }
+    }
   } catch (err) {
     logger.error('[app] Agent 4 (auto_publisher) failed.', { message: err.message });
     await sendErrorAlert('auto_publisher', err.message);
