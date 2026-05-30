@@ -61,7 +61,7 @@ async function generateDalleThumbnail(content, destPath) {
       prompt: buildThumbnailPrompt(content),
       n: 1,
       size: '1024x1024',
-      quality: 'standard',
+      quality: 'medium',
     },
     {
       headers: {

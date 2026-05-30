@@ -70,21 +70,71 @@ async function fetchCategoriesFromPage(context, blogName) {
   let tempPage = null;
   try {
     tempPage = await context.newPage();
+
+    // 전략 1: 관리 페이지 로드 시 Tistory가 내부적으로 호출하는 category API를 인터셉트
+    let intercepted = [];
+    await tempPage.route('**tistory.com/apis/category**', async (route) => {
+      const resp = await route.fetch();
+      try {
+        const text = await resp.text();
+        const data = JSON.parse(text);
+        const raw = data?.tistory?.item?.categories?.category ?? [];
+        const list = Array.isArray(raw) ? raw : (raw?.id ? [raw] : []);
+        intercepted = list
+          .filter((c) => c.id && c.name)
+          .map((c) => ({ id: String(c.id), name: c.name, parent: c.parent || null }));
+      } catch { /* 파싱 실패 시 무시 */ }
+      await route.fulfill({ response: resp });
+    });
+
     await tempPage.goto(`https://${blogName}.tistory.com/manage/category/`, {
       waitUntil: 'networkidle',
       timeout: 20000,
     });
+    await tempPage.waitForTimeout(1500);
 
+    if (intercepted.length > 0) {
+      logger.info(`[tistoryClassifier] Categories intercepted from manage page: ${intercepted.map((c) => c.name).join(', ')}`);
+      return intercepted;
+    }
+
+    // 전략 2: React 렌더링 후 DOM 직접 탐색 (다양한 셀렉터 시도)
     const categories = await tempPage.evaluate(() => {
-      const rows = document.querySelectorAll('.category-list li[data-id], tr[data-id]');
-      return [...rows].map((row) => ({
-        id:   row.getAttribute('data-id') ?? '',
-        name: row.querySelector('.name, td:first-child')?.textContent?.trim() ?? '',
-        parent: null,
-      })).filter((c) => c.id && c.name);
+      // 패턴 A: data-id 속성 보유 li 요소 (구 에디터)
+      const byDataId = [
+        ...document.querySelectorAll('.category-list li[data-id]'),
+        ...document.querySelectorAll('li[data-id]'),
+        ...document.querySelectorAll('tr[data-id]'),
+      ];
+      if (byDataId.length > 0) {
+        return byDataId.map((el) => ({
+          id: el.getAttribute('data-id') ?? '',
+          name: (el.querySelector('.name, td:first-child, span') ?? el).textContent?.trim() ?? '',
+          parent: null,
+        })).filter((c) => c.id && c.name);
+      }
+
+      // 패턴 B: React 컴포넌트 — class에 category가 포함된 li/div
+      const byClass = [
+        ...document.querySelectorAll('[class*="category"][class*="item"], [class*="Category"][class*="Item"]'),
+        ...document.querySelectorAll('[class*="categoryItem"], [class*="CategoryItem"]'),
+      ];
+      if (byClass.length > 0) {
+        return byClass.map((el) => ({
+          id: el.getAttribute('data-id') ?? el.id ?? '',
+          name: el.querySelector('[class*="name"], [class*="Name"]')?.textContent?.trim()
+            ?? el.textContent?.trim() ?? '',
+          parent: null,
+        })).filter((c) => c.name && c.name.length > 0 && c.name !== '카테고리');
+      }
+
+      return [];
     });
 
-    return categories;
+    if (categories.length > 0) return categories;
+
+    logger.warn(`[tistoryClassifier] Category page scrape returned 0 — page structure may have changed`);
+    return [];
   } catch (err) {
     logger.warn(`[tistoryClassifier] Category page scrape failed: ${err.message}`);
     return [];

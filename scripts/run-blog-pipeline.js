@@ -112,6 +112,64 @@ async function main() {
     logger.warn(`[blog:pipeline] Part 1.55 중복 체크 실패 (계속 진행): ${err.message}`);
   }
 
+  // Part 1.56: 당일 유사 테마 중복 제한 — 같은 루트 키워드는 하루 1개만
+  try {
+    const normalize = (s) => (s ?? '').replace(/[\s&]/g, '').toLowerCase();
+
+    // 각 포스트 키워드에서 2글자 이상의 공통 토큰을 뽑아 테마 클러스터 생성
+    const contents = contentData.contents;
+    const assigned = new Array(contents.length).fill(-1); // 클러스터 인덱스
+    let clusterIdx = 0;
+
+    for (let i = 0; i < contents.length; i++) {
+      if (assigned[i] !== -1) continue;
+      const kwI = normalize(contents[i].keyword);
+      assigned[i] = clusterIdx;
+      for (let j = i + 1; j < contents.length; j++) {
+        if (assigned[j] !== -1) continue;
+        const kwJ = normalize(contents[j].keyword);
+        // 한쪽이 다른 쪽에 4글자 이상 포함되거나, 4글자 이상 공통 부분문자열 존재
+        const shorter = kwI.length <= kwJ.length ? kwI : kwJ;
+        const longer  = kwI.length <= kwJ.length ? kwJ : kwI;
+        let shared = false;
+        if (shorter.length >= 4 && longer.includes(shorter)) {
+          shared = true;
+        } else {
+          // 4글자 이상 공통 부분문자열 탐색
+          for (let len = 4; len <= shorter.length && !shared; len++) {
+            for (let s = 0; s <= shorter.length - len && !shared; s++) {
+              if (longer.includes(shorter.slice(s, s + len))) shared = true;
+            }
+          }
+        }
+        if (shared) assigned[j] = clusterIdx;
+      }
+      clusterIdx++;
+    }
+
+    // 클러스터별로 첫 번째 포스트만 유지
+    const keepSet = new Set();
+    for (let ci = 0; ci < clusterIdx; ci++) {
+      const idxs = assigned.map((a, i) => (a === ci ? i : -1)).filter((i) => i >= 0);
+      if (idxs.length > 1) {
+        const kept = idxs[0];
+        keepSet.add(kept);
+        const deferred = idxs.slice(1).map((i) => contents[i].keyword);
+        logger.info(`[blog:pipeline] Part 1.56: 같은 테마 클러스터 — 유지: "${contents[kept].keyword}" / 내일로 연기: ${deferred.map((k) => `"${k}"`).join(', ')}`);
+      } else {
+        keepSet.add(idxs[0]);
+      }
+    }
+
+    const before156 = contentData.contents.length;
+    contentData.contents = contentData.contents.filter((_, i) => keepSet.has(i));
+    const deferred156 = before156 - contentData.contents.length;
+    if (deferred156 > 0) logger.info(`[blog:pipeline] Part 1.56 완료: ${deferred156}개 연기 (DB pending 유지)`);
+    else logger.info('[blog:pipeline] Part 1.56: 유사 테마 중복 없음');
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.56 실패 (계속 진행): ${err.message}`);
+  }
+
   // Part 1.6: Competitor Analyzer — 인사이트 캐시 (7일 주기)
   try {
     await analyzeCompetitors();
