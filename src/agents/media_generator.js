@@ -762,32 +762,43 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, 
     framePaths.push({ path: framePath, duration });
   }
 
-  // concat 리스트 파일 (마지막 프레임 2회 추가로 끊김 방지)
-  const concatLines = framePaths.map(({ path: p, duration }) =>
-    `file '${p.replace(/\\/g, '/')}'\nduration ${duration}`
-  );
-  if (framePaths.length > 0) {
-    concatLines.push(`file '${framePaths.at(-1).path.replace(/\\/g, '/')}'`);
-  }
-  const concatFile = path.resolve(tmpDir, `list_${sessionId}.txt`);
-  await fs.writeFile(concatFile, concatLines.join('\n'));
-
-  // ffmpeg 실행
+  // 프레임별 개별 클립 생성 후 concat — PNG concat demuxer의 버퍼 overflow 방지
+  // (long-form 180초+ 구간에서 1000+ 버퍼 대기 → Cannot allocate memory 해결)
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  const args = [
-    '-f', 'concat', '-safe', '0', '-i', concatFile,
-    ...(audioPath ? ['-i', audioPath] : []),
-    '-vf', 'fps=30,scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
-    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-    ...(audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : []),
-    '-y', outputPath,
-  ];
+  const clipPaths = [];
   try {
-    await execFileAsync(ffmpegPath, args, { maxBuffer: 50 * 1024 * 1024 });
+    for (let i = 0; i < framePaths.length; i++) {
+      const { path: fp, duration } = framePaths[i];
+      const clipPath = path.resolve(tmpDir, `clip_${sessionId}_${i}.mp4`);
+      await execFileAsync(ffmpegPath, [
+        '-loop', '1', '-t', String(Math.max(1, duration)),
+        '-i', fp,
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-pix_fmt', 'yuv420p', '-r', '24', '-an',
+        '-y', clipPath,
+      ], { maxBuffer: 30 * 1024 * 1024 });
+      clipPaths.push(clipPath);
+    }
+
+    // 클립 concat (스트림 복사) + 오디오 합성
+    const concatFile = path.resolve(tmpDir, `clips_${sessionId}.txt`);
+    await fs.writeFile(concatFile, clipPaths.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n'));
+    try {
+      await execFileAsync(ffmpegPath, [
+        '-f', 'concat', '-safe', '0', '-i', concatFile,
+        ...(audioPath ? ['-i', audioPath] : []),
+        '-c:v', 'copy',
+        ...(audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : []),
+        '-y', outputPath,
+      ], { maxBuffer: 50 * 1024 * 1024 });
+    } finally {
+      await fs.unlink(concatFile).catch(() => {});
+    }
   } finally {
     await Promise.allSettled([
-      ...framePaths.map(({ path: p }) => fs.unlink(p)),
-      fs.unlink(concatFile),
+      ...framePaths.map(({ path: p }) => fs.unlink(p).catch(() => {})),
+      ...clipPaths.map((p) => fs.unlink(p).catch(() => {})),
     ]);
   }
 
