@@ -23,9 +23,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(__dirname, '../output');
 const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
+// ── CLI 인자 파싱 ──────────────────────────────────────────────────────────
+// --force-keyword "키워드"  : 특정 키워드를 무조건 최우선 처리
+const args = process.argv.slice(2);
+const forceKwIdx = args.indexOf('--force-keyword');
+const forceKeyword = forceKwIdx !== -1 ? args[forceKwIdx + 1] : null;
+// --force-category "카테고리"  : force-keyword의 카테고리 지정 (기본 economy)
+const forceCatIdx = args.indexOf('--force-category');
+const forceCategory = forceCatIdx !== -1 ? args[forceCatIdx + 1] : 'economy';
+
 async function main() {
   const start = Date.now();
   logger.info('[blog:pipeline] ===== 블로그 파이프라인 시작 =====');
+  if (forceKeyword) logger.info(`[blog:pipeline] --force-keyword: "${forceKeyword}" (카테고리: ${forceCategory})`);
 
   // Part 1: Keyword Miner
   const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
@@ -53,8 +63,52 @@ async function main() {
     }
   }
 
-  // 점수 내림차순 정렬
-  rawKeywords.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  // ── 예고(promised) 키워드 최우선 배치 ──────────────────────────────────
+  // 이전 영상 대본에서 "다음 영상 예고"로 추출된 키워드를 가장 앞에 배치한다.
+  try {
+    const promisedRows = db
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' ORDER BY score DESC`)
+      .all();
+    if (promisedRows.length > 0) {
+      const promisedSet = new Set(promisedRows.map((r) => r.keyword.toLowerCase()));
+      // 기존 목록에서 promised와 중복되는 항목 제거 후 promised를 앞에 삽입
+      rawKeywords = [
+        ...promisedRows,
+        ...rawKeywords.filter((k) => !promisedSet.has((k.keyword ?? k).toLowerCase())),
+      ];
+      logger.info(`[blog:pipeline] 예고 키워드 ${promisedRows.length}개 최우선 배치: ${promisedRows.map((r) => `"${r.keyword}"`).join(', ')}`);
+      // promised → pending 상태로 복원 (발행 후 used로 전환됨)
+      db.prepare(`UPDATE keywords SET status = 'pending' WHERE status = 'promised'`).run();
+    }
+  } catch (err) {
+    logger.warn(`[blog:pipeline] 예고 키워드 로드 실패 (계속 진행): ${err.message}`);
+  }
+
+  // ── --force-keyword 처리: 지정된 키워드를 맨 앞에 삽입 ─────────────────
+  if (forceKeyword) {
+    const forcedKw = { keyword: forceKeyword, category: forceCategory, score: 100, forced: true };
+    rawKeywords = [
+      forcedKw,
+      ...rawKeywords.filter((k) => (k.keyword ?? k).toLowerCase() !== forceKeyword.toLowerCase()),
+    ];
+    // DB에도 등록해서 중복 체크 등이 정상 작동하도록 보장
+    try {
+      db.prepare(
+        `INSERT INTO keywords (keyword, category, score, status, sources)
+         VALUES (?, ?, 100, 'pending', 'force_keyword')
+         ON CONFLICT(keyword) DO UPDATE SET status = 'pending', score = MAX(score, 100)`
+      ).run(forceKeyword, forceCategory);
+    } catch { /* 무시 */ }
+  }
+
+  // 점수 내림차순 정렬 (promised/forced는 이미 앞에 있으므로 그것들 제외하고 나머지만 정렬)
+  const pinnedCount = (forceKeyword ? 1 : 0) +
+    rawKeywords.filter((k) => k.forced).length;
+  const pinned = rawKeywords.slice(0, pinnedCount);
+  const rest   = rawKeywords.slice(pinnedCount);
+  rest.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  rawKeywords = [...pinned, ...rest];
+
   const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
   const postLimit = Math.min(targetCount, rawKeywords.length);
   rawKeywords = rawKeywords.slice(0, postLimit);
