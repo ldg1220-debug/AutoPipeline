@@ -1,16 +1,18 @@
 /**
- * ElevenLabs 재더빙 + 영상 재제작 + YouTube 재업로드 스크립트
+ * 영상 재제작 + YouTube 업로드 스크립트
  *
  * 사용법:
- *   node scripts/rerun-media-upload.js              ← 오늘 날짜
+ *   node scripts/rerun-media-upload.js              ← 오늘 날짜, 영상 재제작 + 업로드
  *   node scripts/rerun-media-upload.js 20260528     ← 특정 날짜
+ *   node scripts/rerun-media-upload.js --upload-only          ← 업로드만 (영상 재제작 건너뜀)
+ *   node scripts/rerun-media-upload.js 20260528 --upload-only ← 특정 날짜 업로드만
  *   node scripts/rerun-media-upload.js 20260528 --delete-old  ← 기존 YouTube 영상 삭제 후 재업로드
  *
  * 동작 순서:
  *   1. output/scripts/pd_<date>.json  → 콘텐츠 데이터 로드
  *   2. output/qa_reports/qa_<date>.json → QA 결과 로드
  *   3. --delete-old 플래그 시: publish_<date>.json의 videoId 삭제
- *   4. generateAllMedia() → ElevenLabs TTS + ffmpeg 영상 재제작
+ *   4. generateAllMedia() → TTS + ffmpeg 영상 재제작  (--upload-only 시 건너뜀)
  *   5. publishContents()  → YouTube 롱폼 + 쇼츠 업로드
  */
 
@@ -28,10 +30,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir    = path.resolve(__dirname, '../output');
 
 // ── CLI 인자 파싱 ─────────────────────────────────────────────────────────────
-const args      = process.argv.slice(2);
-const dateArg   = args.find((a) => /^\d{8}$/.test(a));
-const deleteOld = args.includes('--delete-old');
-const date      = dateArg ?? new Date().toISOString().slice(0, 10).replace(/-/g, '');
+const args       = process.argv.slice(2);
+const dateArg    = args.find((a) => /^\d{8}$/.test(a));
+const deleteOld  = args.includes('--delete-old');
+const uploadOnly = args.includes('--upload-only');
+const date       = dateArg ?? new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 // ── YouTube access token 갱신 ─────────────────────────────────────────────────
 async function refreshAccessToken(channelCfg) {
@@ -97,7 +100,7 @@ async function deleteOldVideos() {
 async function main() {
   const start = Date.now();
   logger.info(`[rerun] ===== 미디어 재실행 시작 [${date}] =====`);
-  logger.info(`[rerun] --delete-old: ${deleteOld}`);
+  logger.info(`[rerun] --delete-old: ${deleteOld} | --upload-only: ${uploadOnly}`);
 
   // 1. 콘텐츠 데이터 로드 (pd 있으면 pd 우선, 없으면 content)
   let contentData;
@@ -135,16 +138,20 @@ async function main() {
     await deleteOldVideos();
   }
 
-  // 4. 미디어 재생성 (ElevenLabs + ffmpeg)
-  logger.info('[rerun] 미디어 재생성 시작 (ElevenLabs TTS)...');
-  let mediaResult;
-  try {
-    mediaResult = await generateAllMedia(contentData);
-    await writeJSON(path.resolve(outDir, `scripts/media_rerun_${date}.json`), mediaResult);
-    logger.info(`[rerun] 미디어 재생성 완료: ${mediaResult.results?.length ?? 0}개`);
-  } catch (err) {
-    logger.error(`[rerun] 미디어 생성 실패: ${err.message}`);
-    process.exit(1);
+  // 4. 미디어 재생성 (--upload-only 시 건너뜀)
+  if (uploadOnly) {
+    logger.info('[rerun] --upload-only 모드: 미디어 재생성 건너뜀 (기존 output/media 파일 사용)');
+  } else {
+    logger.info('[rerun] 미디어 재생성 시작 (TTS + ffmpeg)...');
+    let mediaResult;
+    try {
+      mediaResult = await generateAllMedia(contentData);
+      await writeJSON(path.resolve(outDir, `scripts/media_rerun_${date}.json`), mediaResult);
+      logger.info(`[rerun] 미디어 재생성 완료: ${mediaResult.results?.length ?? 0}개`);
+    } catch (err) {
+      logger.error(`[rerun] 미디어 생성 실패: ${err.message}`);
+      process.exit(1);
+    }
   }
 
   // 5. YouTube 업로드
