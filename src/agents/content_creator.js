@@ -336,7 +336,7 @@ JSON 형식으로만 응답 (다른 텍스트 없이):
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.75,
       response_format: { type: 'json_object' },
-      max_tokens: 4000,
+      max_tokens: 8000,
     },
     {
       headers: {
