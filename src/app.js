@@ -28,6 +28,13 @@ import { runProjectManagerReview } from './agents/project_manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ── CLI 인자 파싱 (node src/app.js --force-keyword "키워드" --force-category realestate) ──
+const _cliArgs = process.argv.slice(2);
+const _forceKwIdx = _cliArgs.indexOf('--force-keyword');
+const _forceKeyword = _forceKwIdx !== -1 ? _cliArgs[_forceKwIdx + 1] : null;
+const _forceCatIdx = _cliArgs.indexOf('--force-category');
+const _forceCategory = _forceCatIdx !== -1 ? _cliArgs[_forceCatIdx + 1] : 'economy';
+
 /**
  * 파이프라인 1회 실행 함수.
  *
@@ -65,6 +72,25 @@ async function runPipeline() {
     logger.error('[app] Agent 1 (trend_scraper) failed. Aborting.', { message: err.message });
     await sendErrorAlert('trend_scraper', err.message);
     return;
+  }
+
+  // ── --force-keyword: 지정 키워드를 맨 앞에 삽입 ───────────────────────────
+  if (_forceKeyword) {
+    const forcedItem = {
+      keyword: _forceKeyword,
+      category: _forceCategory,
+      virality: 100,
+      commercial_value: 100,
+      freshness_hours: 0,
+      niche_premium: 0,
+      source_url: 'forced',
+      forced: true,
+    };
+    const others = (trendData.selected_items ?? []).filter(
+      (i) => i.keyword.toLowerCase() !== _forceKeyword.toLowerCase()
+    );
+    trendData.selected_items = [forcedItem, ...others];
+    logger.info(`[app] --force-keyword: "${_forceKeyword}" (카테고리: ${_forceCategory}) → 최우선 처리`);
   }
 
   // TEST_LIMIT: 테스트 시 처리 개수 제한 (토큰 절약)
@@ -850,6 +876,10 @@ async function askUploadOption() {
 const _isDirectEntry = fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '');
 if (_isDirectEntry) {
   (async () => {
+    if (_forceKeyword) {
+      logger.info(`[app] --force-keyword 모드: "${_forceKeyword}" (카테고리: ${_forceCategory})`);
+    }
+
     const doYouTubeUpload = await askUploadOption();
     config.runtime.youtubeUpload = doYouTubeUpload;
 
