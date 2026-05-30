@@ -120,6 +120,7 @@ async function main() {
       keyword:    k.keyword ?? k,
       category:   k.category ?? 'economy',
       score:      k.score ?? 0,
+      forced:     k.forced ?? false,
       blog_draft: null,
     })),
   };
@@ -137,6 +138,17 @@ async function main() {
     logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.5 Topic Grouper 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Topic Grouper 후 forced 플래그 전파 — 그룹 키워드에 forceKeyword가 포함되면 강제 표시
+  if (forceKeyword) {
+    const forceNorm = forceKeyword.toLowerCase().replace(/\s/g, '');
+    for (const c of contentData.contents) {
+      if (!c.forced && c.keyword.toLowerCase().replace(/[\s&]/g, '').includes(forceNorm)) {
+        c.forced = true;
+        logger.info(`[blog:pipeline] 강제 키워드 포함 그룹 보호: "${c.keyword}"`);
+      }
+    }
   }
 
   // Part 1.55: 이미 발행된 포스트와 중복 주제 제거 (4글자 공통 부분문자열 기준)
@@ -164,6 +176,7 @@ async function main() {
 
     const before = contentData.contents.length;
     contentData.contents = contentData.contents.filter((c) => {
+      if (c.forced) return true;  // --force-keyword 지정 항목은 중복 체크 면제
       const kwNorm = normalize(c.keyword);
       const dupPub = published.find((pk) => isSimilar(kwNorm, pk));
       if (dupPub) {
@@ -214,14 +227,16 @@ async function main() {
       clusterIdx++;
     }
 
-    // 클러스터별로 첫 번째 포스트만 유지
+    // 클러스터별로 첫 번째 포스트만 유지 (forced 항목은 항상 유지)
     const keepSet = new Set();
     for (let ci = 0; ci < clusterIdx; ci++) {
       const idxs = assigned.map((a, i) => (a === ci ? i : -1)).filter((i) => i >= 0);
       if (idxs.length > 1) {
-        const kept = idxs[0];
+        // forced 항목이 있으면 그것을 우선 유지
+        const forcedIdx = idxs.find((i) => contents[i].forced);
+        const kept = forcedIdx ?? idxs[0];
         keepSet.add(kept);
-        const deferred = idxs.slice(1).map((i) => contents[i].keyword);
+        const deferred = idxs.filter((i) => i !== kept).map((i) => contents[i].keyword);
         logger.info(`[blog:pipeline] Part 1.56: 같은 테마 클러스터 — 유지: "${contents[kept].keyword}" / 내일로 연기: ${deferred.map((k) => `"${k}"`).join(', ')}`);
       } else {
         keepSet.add(idxs[0]);
