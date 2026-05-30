@@ -72,9 +72,16 @@ async function generateDalleThumbnail(content, destPath) {
     }
   );
 
-  const imageUrl = res.data.data[0].url;
+  const item = res.data.data[0];
   const rawPath = destPath.replace('.jpg', '_raw.png');
-  await downloadImage(imageUrl, rawPath);
+  if (item.b64_json) {
+    await fs.mkdir(path.dirname(rawPath), { recursive: true });
+    await fs.writeFile(rawPath, Buffer.from(item.b64_json, 'base64'));
+  } else if (item.url) {
+    await downloadImage(item.url, rawPath);
+  } else {
+    throw new Error('gpt-image-1: b64_json과 url 모두 없음');
+  }
 
   // 블로그 썸네일 표준 사이즈 800×450 (16:9) 으로 리사이즈
   await sharp(rawPath)
