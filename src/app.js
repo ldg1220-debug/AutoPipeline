@@ -1,5 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createInterface } from 'readline';
 import { config } from './config/index.js';
 import logger from './utils/logger.js';
 import { writeJSON } from './utils/fileIO.js';
@@ -769,31 +770,64 @@ export async function runUnifiedPipeline() {
   return triangleContents;
 }
 
+// ── 업로드 옵션 선택 프롬프트 ─────────────────────────────────────────────
+// TTY 없는 환경(스케줄러, CI 등)에서는 30초 대기 없이 전체 플로우(옵션 1) 자동 선택
+async function askUploadOption() {
+  if (!process.stdin.isTTY) return true;
+
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const timer = setTimeout(() => {
+      rl.close();
+      process.stdout.write('\n[자동 선택] 30초 초과 → 전체 플로우 진행\n');
+      resolve(true);
+    }, 30000);
+
+    rl.question(
+      '\n실행 옵션을 선택하세요:\n' +
+      '  1. 전체 플로우  (영상 제작 + 블로그 + YouTube 업로드)\n' +
+      '  2. 업로드 전까지 (영상 제작 + 블로그만, 업로드는 나중에)\n\n' +
+      '선택 [1/2] (기본값 1, 30초 후 자동 선택): ',
+      (answer) => {
+        clearTimeout(timer);
+        rl.close();
+        resolve(answer.trim() !== '2');
+      }
+    );
+  });
+}
+
 // ── 스케줄러 / 단독 실행 ──────────────────────────────────────────────────
 // import()로 불러올 때는 실행하지 않고, node src/app.js 직접 실행 시에만 동작한다.
 // (run-unified-pipeline.js 등 외부 스크립트가 import해도 스케줄러가 뜨지 않는다)
 const _isDirectEntry = fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '');
 if (_isDirectEntry) {
-  if (config.runtime.dryRun) {
-    logger.info('[app] DRY_RUN mode — running once and exiting.');
-    runPipeline().then(() => process.exit(0));
-  } else {
-    // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
-    startScheduler(runPipeline, config.runtime.cronSchedule);
-    startScheduler(runPipeline, config.runtime.cronScheduleB);
-    // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
-    startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
-    startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+  (async () => {
+    const doYouTubeUpload = await askUploadOption();
+    config.runtime.youtubeUpload = doYouTubeUpload;
 
-    // 최초 기동 시 두 파이프라인 모두 순차 실행
-    // YouTube 완료 후 publish 결과를 블로그에 전달 (youtube_url 임베드)
-    (async () => {
+    if (!doYouTubeUpload) {
+      logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+    }
+
+    if (config.runtime.dryRun) {
+      logger.info('[app] DRY_RUN mode — running once and exiting.');
+      runPipeline().then(() => process.exit(0));
+    } else {
+      // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
+      startScheduler(runPipeline, config.runtime.cronSchedule);
+      startScheduler(runPipeline, config.runtime.cronScheduleB);
+      // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
+      startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
+      startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+
+      // 최초 기동 시 두 파이프라인 모두 순차 실행
       try {
         const youtubeResult = await runPipeline();
         await runBlogPipeline(youtubeResult);
       } catch (err) {
         logger.error('[app] Initial run failed', { message: err.message });
       }
-    })();
-  }
+    }
+  })();
 }
