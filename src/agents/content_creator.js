@@ -359,7 +359,50 @@ JSON 형식으로만 응답 (다른 텍스트 없이):
     }
   }
 
+  // 마무리 섹션에서 "다음 영상 예고" 키워드 추출
+  const conclusionScript = result.sections?.find((s) => s.name === '마무리')?.script ?? '';
+  result.promised_next_keyword = await extractPromisedNextKeyword(conclusionScript, item.keyword);
+  if (result.promised_next_keyword) {
+    logger.info(`[content_creator] 다음 영상 예고 키워드: "${result.promised_next_keyword}" (${item.keyword})`);
+  }
+
   return result;
+}
+
+// 마무리 스크립트에서 "다음 영상에서 다룰 주제" 키워드를 추출한다.
+async function extractPromisedNextKeyword(conclusionScript, currentKeyword) {
+  if (!config.openai.apiKey || !conclusionScript) return null;
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content:
+            `다음 유튜브 영상 마무리 스크립트에서 "다음 영상" 또는 "다음 시간"에 다룰 주제(키워드)를 추출해줘.\n\n` +
+            `현재 영상 키워드: ${currentKeyword}\n` +
+            `마무리 스크립트:\n${conclusionScript.slice(0, 600)}\n\n` +
+            `조건:\n` +
+            `- 다음 영상에서 다룰 구체적인 주제가 언급되어 있으면 추출\n` +
+            `- 현재 키워드와 동일하거나 너무 유사한 것은 null\n` +
+            `- 명확한 주제가 없으면 null\n` +
+            `JSON만 반환: {"next_keyword": "추출된 키워드 또는 null"}`,
+        }],
+        response_format: { type: 'json_object' },
+        temperature: 0,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      }
+    );
+    const parsed = JSON.parse(res.data.choices[0].message.content);
+    const kw = parsed.next_keyword;
+    return kw && kw !== 'null' && kw.trim().length > 1 ? kw.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createContents(trendData) {
