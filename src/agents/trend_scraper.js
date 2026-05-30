@@ -223,9 +223,9 @@ export async function fetchTrends() {
       }))
       .sort((a, b) => b.score - a.score);
 
-    // 경제·재테크 5개 + 건강 1개 = 총 6개
-    // health를 별도 슬롯으로 보장해야 YouTube 영상 제작까지 이어진다
-    const economyItems = sorted.filter((i) => i.category !== 'health').slice(0, 5);
+    // DAILY_VIDEOS 개수만큼 경제 아이템 선택 (기본값 1)
+    const dailyLimit   = config.runtime.dailyVideos ?? 1;
+    const economyItems = sorted.filter((i) => i.category !== 'health').slice(0, dailyLimit);
     const bestHealth   = sorted.find((i) => i.category === 'health');
     const selected     = bestHealth ? [...economyItems, bestHealth] : economyItems;
 

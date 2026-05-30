@@ -122,6 +122,7 @@ export const config = {
   runtime: {
     dryRun:           process.env.DRY_RUN === 'true',
     publishShorts:    process.env.PUBLISH_SHORTS !== 'false',  // false로 설정 시 쇼츠 업로드 건너뜀
+    dailyVideos:      parseInt(process.env.DAILY_VIDEOS || '1', 10), // 하루 최대 롱폼 영상 수 (기본 1)
     // A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
     cronSchedule:     process.env.CRON_SCHEDULE      || '0 12 * * 1,3,5,0',
     cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 14 * * 2,4,6',
