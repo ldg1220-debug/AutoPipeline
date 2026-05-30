@@ -709,6 +709,21 @@ async function mergeAudioFiles(audioPaths, outputPath) {
   return outputPath;
 }
 
+// ── ffmpeg stderr로 실제 오디오 길이(초) 측정 ───────────────────────────
+async function getAudioDurationSec(audioPath) {
+  try {
+    // ffmpeg -i 는 항상 Duration을 stderr에 출력하고 에러 코드 1을 반환 (출력 없으므로)
+    const { stderr = '' } = await execFileAsync(
+      ffmpegPath, ['-i', audioPath], { encoding: 'utf8' }
+    ).catch((e) => e);
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (m) {
+      return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+    }
+  } catch { /* 실패 시 null 반환 */ }
+  return null;
+}
+
 // ── ffmpeg 영상 렌더링 (Shotstack 대체) ──────────────────────────────────
 /**
  * frames 배열을 Sharp로 합성한 뒤 ffmpeg로 인코딩한다.
@@ -1605,13 +1620,37 @@ async function generateLongFormMedia(content) {
     return sectionAudioPaths.find(Boolean) ?? null;
   });
 
+  // ── 4.5. 실제 오디오 길이 측정 → 섹션 길이 비례 재조정 ─────────────────
+  // 파일 크기 기반 추정(24000 B/s = 192kbps)은 ClovaVoice 128kbps와 맞지 않아
+  // 영상이 오디오보다 짧아지는 문제가 있음. 실제 길이로 스케일 조정한다.
+  let adjustedDurations = sectionDurations;
+  if (mergedAudio) {
+    const actualSec = await getAudioDurationSec(mergedAudio);
+    if (actualSec && actualSec > 0) {
+      const estimatedTotal = sectionDurations.reduce((a, b) => a + b, 0);
+      if (estimatedTotal > 0) {
+        const scale = actualSec / estimatedTotal;
+        adjustedDurations = sectionDurations.map((d) => Math.max(2, Math.round(d * scale)));
+        // 반올림 오차 보정: 마지막 섹션에 차이를 더함
+        const adjTotal = adjustedDurations.reduce((a, b) => a + b, 0);
+        adjustedDurations[adjustedDurations.length - 1] = Math.max(
+          2,
+          adjustedDurations[adjustedDurations.length - 1] + Math.round(actualSec - adjTotal)
+        );
+        logger.info(
+          `[media_generator] Long-form 길이 보정: 추정 ${estimatedTotal}s → 실제 ${actualSec.toFixed(1)}s (scale ×${scale.toFixed(2)})`
+        );
+      }
+    }
+  }
+
   // ── 5. ffmpeg 영상 렌더링 ────────────────────────────────────────────────
   const videoTitle = content.long_video?.youtube_title ?? content.keyword;
   const frames = sections.map((s, i) => ({
     bgUrl:    sectionImageUrls[i] ?? null,
     label:    videoTitle,
     subtitle: `${s.name}  ${s.key_point ?? ''}`.slice(0, 60),
-    duration: sectionDurations[i],
+    duration: adjustedDurations[i],
   }));
 
   try {
@@ -1626,12 +1665,12 @@ async function generateLongFormMedia(content) {
   if (result.video) {
     try {
       const sourceIdx = (content.shorts?.source_section ?? content.shortform_script?.source_section ?? 5) - 1;
-      const clampedIdx = Math.max(0, Math.min(sourceIdx, sectionDurations.length - 1));
+      const clampedIdx = Math.max(0, Math.min(sourceIdx, adjustedDurations.length - 1));
 
-      // 섹션 누적 시작 시간 계산
+      // 섹션 누적 시작 시간 계산 (조정된 길이 기준)
       let sectionStart = 0;
-      for (let i = 0; i < clampedIdx; i++) sectionStart += sectionDurations[i];
-      const sectionDur = Math.min(sectionDurations[clampedIdx] ?? 60, 59); // 최대 59초
+      for (let i = 0; i < clampedIdx; i++) sectionStart += adjustedDurations[i];
+      const sectionDur = Math.min(adjustedDurations[clampedIdx] ?? 60, 59); // 최대 59초
 
       const shortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_shorts.mp4`);
       const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')
