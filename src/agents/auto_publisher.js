@@ -456,6 +456,15 @@ export async function publishContents(qaData, contentData) {
 
     const result = { keyword: content.keyword, dry_run: false };
 
+    // YOUTUBE_UPLOAD=false 시 업로드 전체 건너뜀 (영상 제작만 하고 나중에 올릴 때 사용)
+    if (!config.runtime.youtubeUpload) {
+      logger.info(`[auto_publisher] YouTube 업로드 건너뜀 (YOUTUBE_UPLOAD=false): ${content.keyword}`);
+      result.youtube        = { platform: 'youtube',        status: 'skipped' };
+      result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped' };
+      results.push(result);
+      continue;
+    }
+
     // YouTube 채널 인증 (롱폼 + 쇼츠 공통)
     let accessToken = null;
     try {
