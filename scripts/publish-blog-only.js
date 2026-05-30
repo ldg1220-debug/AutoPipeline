@@ -20,6 +20,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { monetizeAll } from '../src/agents/monetizer.js';
 import { publishBlogPosts } from '../src/agents/blog_publisher.js';
+import { enhanceAllBlogDrafts } from '../src/agents/blog_content_enhancer.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import { readJSON, writeJSON } from '../src/utils/fileIO.js';
@@ -64,7 +65,23 @@ async function main() {
     process.exit(1);
   }
 
-  // 2. YouTube URL 매핑 (업로드가 이미 됐으면 실제 영상 URL, 아니면 채널 메인 URL)
+  // 2. 블로그 본문(sections[].body)이 없으면 enhanceAllBlogDrafts 실행
+  const needsEnhance = contentData.contents.some(
+    (tc) => !tc.blog_draft?.sections?.some((s) => s.body?.trim())
+  );
+  if (needsEnhance) {
+    logger.info('[blog-only] blog_draft 본문 누락 감지 → enhanceAllBlogDrafts 실행');
+    try {
+      contentData = await enhanceAllBlogDrafts(contentData);
+      logger.info(`[blog-only] 블로그 본문 생성 완료: ${contentData.contents?.length ?? 0}개`);
+    } catch (err) {
+      logger.error(`[blog-only] enhanceAllBlogDrafts 실패: ${err.message}`);
+    }
+  } else {
+    logger.info('[blog-only] blog_draft 본문 있음 — 생성 건너뜀');
+  }
+
+  // 3. YouTube URL 매핑 (업로드가 이미 됐으면 실제 영상 URL, 아니면 채널 메인 URL)
   const ytUrlMap = await loadYoutubeUrls();
   const channelUrl = config.youtube.channelUrl ?? 'https://www.youtube.com/@매일읽어주는남자';
 
@@ -78,7 +95,7 @@ async function main() {
   const ytUsed = preparedContents.filter((c) => ytUrlMap[c.keyword]).length;
   logger.info(`[blog-only] YouTube URL — 실제 영상 URL: ${ytUsed}개 / 채널 메인 URL: ${preparedContents.length - ytUsed}개`);
 
-  // 3. 수익화 링크 삽입
+  // 4. 수익화 링크 삽입
   let monetizedData;
   try {
     monetizedData = await monetizeAll({
@@ -91,7 +108,7 @@ async function main() {
     monetizedData = { generated_at: new Date().toISOString(), contents: preparedContents };
   }
 
-  // 4. Tistory 발행
+  // 5. Tistory 발행
   logger.info('[blog-only] Tistory 발행 시작...');
   let publishedData;
   try {
@@ -103,7 +120,7 @@ async function main() {
 
   await writeJSON(path.resolve(outDir, `blog/published_${date}.json`), publishedData);
 
-  // 5. 결과 출력
+  // 6. 결과 출력
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   const published = publishedData.contents?.filter((c) => c.blog_publish?.status === 'published') ?? [];
   const failed    = publishedData.contents?.filter((c) => c.blog_publish?.status !== 'published') ?? [];
