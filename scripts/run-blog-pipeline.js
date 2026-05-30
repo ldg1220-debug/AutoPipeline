@@ -85,7 +85,7 @@ async function main() {
     logger.warn(`[blog:pipeline] Part 1.5 Topic Grouper 실패 (계속 진행): ${err.message}`);
   }
 
-  // Part 1.55: 이미 발행된 포스트와 중복 주제 제거
+  // Part 1.55: 이미 발행된 포스트와 중복 주제 제거 (4글자 공통 부분문자열 기준)
   try {
     const published = db
       .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published'`)
@@ -94,16 +94,29 @@ async function main() {
 
     const normalize = (kw) => (kw ?? '').replace(/[\s&]/g, '').toLowerCase();
 
+    // 4글자 이상 공통 부분문자열이 존재하면 유사 주제로 판단
+    const isSimilar = (kwNorm, pubNorm) => {
+      if (kwNorm.length < 2 || pubNorm.length < 2) return false;
+      const shorter = kwNorm.length <= pubNorm.length ? kwNorm : pubNorm;
+      const longer  = kwNorm.length <= pubNorm.length ? pubNorm : kwNorm;
+      if (shorter.length >= 4 && longer.includes(shorter)) return true;
+      for (let len = 4; len <= shorter.length; len++) {
+        for (let s = 0; s <= shorter.length - len; s++) {
+          if (longer.includes(shorter.slice(s, s + len))) return true;
+        }
+      }
+      return false;
+    };
+
     const before = contentData.contents.length;
     contentData.contents = contentData.contents.filter((c) => {
       const kwNorm = normalize(c.keyword);
-      // 이미 발행된 키워드 중 하나가 현재 키워드에 포함되거나 반대인 경우 중복으로 판단
-      return !published.some((pk) => {
-        if (pk.length < 2 || kwNorm.length < 2) return false;
-        const shorter = pk.length <= kwNorm.length ? pk : kwNorm;
-        const longer  = pk.length <= kwNorm.length ? kwNorm : pk;
-        return longer.includes(shorter);
-      });
+      const dupPub = published.find((pk) => isSimilar(kwNorm, pk));
+      if (dupPub) {
+        logger.info(`[blog:pipeline] Part 1.55: "${c.keyword}" 제외 → 발행된 유사 키워드: "${dupPub}"`);
+        return false;
+      }
+      return true;
     });
     const removed = before - contentData.contents.length;
     if (removed > 0) logger.info(`[blog:pipeline] Part 1.55: 중복 주제 ${removed}개 제외 (이미 발행됨)`);
