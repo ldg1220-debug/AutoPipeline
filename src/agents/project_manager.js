@@ -94,7 +94,7 @@ const PIPELINE_STAGES = [
   { name: '키워드', dir: 'keywords', prefix: 'keywords' },
   { name: '블로그 초안', dir: 'blog',    prefix: 'draft' },
   { name: 'QA',     dir: 'blog',    prefix: 'qa' },
-  { name: '에셋',   dir: 'assets',  prefix: 'assets' },
+  { name: '에셋',   dir: 'blog',    prefix: 'assets' },
   { name: '수익화', dir: 'blog',    prefix: 'monetized' },
   { name: '발행',   dir: 'blog',    prefix: 'published' },
   { name: '스크립트', dir: 'scripts', prefix: 'content' },
@@ -128,7 +128,14 @@ async function reviewOutputFiles(date) {
     if (stage.prefix === 'qa') {
       const rejected = contents.filter((c) => c.blog_qa?.status === 'REJECTED').length;
       if (rejected > 0) issues.push(`QA 탈락 ${rejected}개`);
-      const avgCoherence = contents.reduce((s, c) => s + (c.blog_qa?.coherence_score ?? 0), 0) / Math.max(count, 1);
+      // blog_qa는 seo_score/readability_score/structure_score (0~100) 을 사용
+      // coherence_score 필드는 없으므로 세 점수의 평균을 0~10 척도로 환산
+      const avgCoherence = contents.reduce((s, c) => {
+        const qa = c.blog_qa;
+        if (!qa) return s;
+        const raw = ((qa.seo_score ?? 0) + (qa.readability_score ?? 0) + (qa.structure_score ?? 0)) / 3;
+        return s + raw / 10;
+      }, 0) / Math.max(count, 1);
       if (avgCoherence < 6 && count > 0) issues.push(`평균 정합도 낮음 (${avgCoherence.toFixed(1)}/10)`);
     }
     if (stage.prefix === 'published') {
