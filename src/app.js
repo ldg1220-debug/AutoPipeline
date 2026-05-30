@@ -652,19 +652,42 @@ export async function runUnifiedPipeline() {
     logger.info(`[app] Unified Step 4 complete. Long-form: ${longFormResults.filter((r) => r.video).length}개 | Shorts extracted: ${longFormResults.filter((r) => r.shorts_video).length}개`);
   }
 
-  // ── Step 5: YouTube QA + 발행 ─────────────────────────────────────────────
-  // Director QA를 통과한 qaContents를 대상으로 텍스트 QA → Vision QA 실행
+  // ── Step 5: 블로그 발행 ───────────────────────────────────────────────────
+  // 미디어 제작 직후 발행 — Director QA 통과 항목 전체 대상
+  // 유튜브 특정 영상 URL 대신 채널 메인 URL 삽입 (업로드 전이므로)
+  const blogPublishContents = qaContents;
+  let publishedBlogData = null;
+  try {
+    const monetizedData = await monetizeAll({
+      generated_at: new Date().toISOString(),
+      contents: blogPublishContents.map((tc) => ({
+        ...tc,
+        blog_draft: tc.blog_draft ?? { title: tc.keyword, sections: [], affiliate_hooks: [] },
+        blog_qa: { status: 'APPROVED' },
+        youtube_url: config.youtube.channelUrl ?? null,  // 채널 메인 URL
+      })),
+    });
+
+    publishedBlogData = await publishBlogPosts(monetizedData);
+    await writeJSON(path.resolve(__dirname, `../output/blog/published_${date}.json`), publishedBlogData);
+    const blogCount = publishedBlogData.contents?.filter((c) => c.blog_publish?.status === 'published').length ?? 0;
+    logger.info(`[app] Unified Step 5 (Blog) complete. Published: ${blogCount}`);
+  } catch (err) {
+    logger.warn('[app] Unified Step 5 (blog publish) failed.', { message: err.message });
+  }
+
+  // ── Step 6: YouTube QA + 발행 ─────────────────────────────────────────────
+  // 블로그 발행 완료 후 → 각 콘텐츠에 blog_post_url 매핑 → YouTube 설명란에 삽입
   let unifiedQAData;
   try {
     const textQAData = await runTextQA({ generated_at: new Date().toISOString(), contents: qaContents });
     unifiedQAData    = await runVisionQA(textQAData);
     const approved   = unifiedQAData.reports.filter((r) => r.final_decision === 'APPROVED').length;
     const rejected   = unifiedQAData.reports.filter((r) => r.final_decision === 'REJECTED').length;
-    logger.info(`[app] Unified Step 5 QA: APPROVED ${approved} / REJECTED ${rejected}`);
+    logger.info(`[app] Unified Step 6 QA: APPROVED ${approved} / REJECTED ${rejected}`);
     await writeJSON(path.resolve(__dirname, `../output/qa_reports/unified_qa_${date}.json`), unifiedQAData);
   } catch (err) {
-    // QA 자체가 실패하면 전체 승인 폴백 (파이프라인 중단 방지)
-    logger.warn(`[app] Unified Step 5 QA 실패 (${err.message}). 전체 APPROVED 폴백.`);
+    logger.warn(`[app] Unified Step 6 QA 실패 (${err.message}). 전체 APPROVED 폴백.`);
     unifiedQAData = {
       evaluated_at: new Date().toISOString(),
       reports: qaContents.map((tc) => ({
@@ -681,54 +704,32 @@ export async function runUnifiedPipeline() {
     };
   }
 
-  // REJECTED 항목 제외 후 발행
   const approvedKeywordsSet = new Set(
     unifiedQAData.reports.filter((r) => r.final_decision === 'APPROVED').map((r) => r.keyword)
   );
-  const approvedContents = qaContents.filter((tc) => approvedKeywordsSet.has(tc.keyword));
+  const approvedContentsForYT = qaContents.filter((tc) => approvedKeywordsSet.has(tc.keyword));
+
+  // 블로그 포스팅 URL을 각 콘텐츠에 주입 → YouTube 설명란에 "블로그 자세히 보기" 링크
+  if (publishedBlogData?.contents) {
+    for (const tc of approvedContentsForYT) {
+      const blog = publishedBlogData.contents.find((c) => c.keyword === tc.keyword);
+      if (blog?.blog_publish?.url) tc.blog_post_url = blog.blog_publish.url;
+    }
+  }
 
   let youtubeResults = null;
-  if (approvedContents.length === 0) {
-    logger.warn('[app] Unified Step 5: QA 통과 항목 없음 — YouTube 발행 건너뜀');
+  if (approvedContentsForYT.length === 0) {
+    logger.warn('[app] Unified Step 6: QA 통과 항목 없음 — YouTube 발행 건너뜀');
   } else {
-    const unifiedContentData = { generated_at: new Date().toISOString(), contents: approvedContents };
+    const unifiedContentData = { generated_at: new Date().toISOString(), contents: approvedContentsForYT };
     try {
       youtubeResults = await publishContents(unifiedQAData, unifiedContentData);
       await writeJSON(path.resolve(__dirname, `../output/qa_reports/publish_${date}.json`), youtubeResults);
       const ytCount = youtubeResults.results?.filter((r) => r.youtube?.url).length ?? 0;
-      logger.info(`[app] Unified Step 5 (YouTube) complete. Uploaded: ${ytCount}`);
+      logger.info(`[app] Unified Step 6 (YouTube) complete. Uploaded: ${ytCount}`);
     } catch (err) {
-      logger.warn('[app] Unified Step 5 (YouTube publish) failed.', { message: err.message });
+      logger.warn('[app] Unified Step 6 (YouTube publish) failed.', { message: err.message });
     }
-  }
-
-  // ── Step 6: 블로그 발행 ───────────────────────────────────────────────────
-  // QA 통과 항목만 발행 (approvedContents 재사용, 없으면 qaContents 전체)
-  const blogPublishContents = approvedContents.length > 0 ? approvedContents : qaContents;
-  try {
-    const monetizedData = await monetizeAll({
-      generated_at: new Date().toISOString(),
-      contents: blogPublishContents.map((tc) => ({
-        ...tc,
-        blog_draft: tc.blog_draft ?? { title: tc.keyword, sections: [], affiliate_hooks: [] },
-        blog_qa: { status: 'APPROVED' },
-      })),
-    });
-
-    // YouTube URL을 블로그 본문에 삽입
-    if (youtubeResults?.results) {
-      for (const item of monetizedData.contents ?? []) {
-        const yt = youtubeResults.results.find((r) => r.keyword === item.keyword);
-        if (yt?.youtube?.url) item.youtube_url = yt.youtube.url;
-      }
-    }
-
-    const publishedData = await publishBlogPosts(monetizedData);
-    await writeJSON(path.resolve(__dirname, `../output/blog/published_${date}.json`), publishedData);
-    const blogCount = publishedData.contents?.filter((c) => c.blog_publish?.status === 'published').length ?? 0;
-    logger.info(`[app] Unified Step 6 (Blog) complete. Published: ${blogCount}`);
-  } catch (err) {
-    logger.warn('[app] Unified Step 6 (blog publish) failed.', { message: err.message });
   }
 
   // ── Step 7: Blog Analytics + 성과 부진 재작성 ────────────────────────────
