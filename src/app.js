@@ -20,6 +20,7 @@ import { monetizeAll } from './agents/monetizer.js';
 import { publishBlogPosts, editBlogPosts } from './agents/blog_publisher.js';
 import { runBlogAnalytics, identifyUnderperformers } from './agents/blog_analytics.js';
 import { groupSimilarTopics } from './agents/topic_grouper.js';
+import db from './db/db.js';
 import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
@@ -358,8 +359,34 @@ async function runBlogPipeline(youtubeResults = null) {
   }
 
   if (!keywordData.contents?.length) {
-    logger.warn('[app] Blog Part 1: no new keywords. Skipping blog pipeline.');
-    return;
+    // 신규 수집된 키워드가 없으면 DB pending 큐에서 꺼내 사용
+    logger.info('[app] Blog Part 1: 신규 키워드 없음 → DB pending 키워드 사용');
+    try {
+      const limit = config.runtime.blogPostsPerDay ?? 5;
+      const rows  = db.prepare(
+        `SELECT keyword, category, score, commercial, sources
+         FROM keywords WHERE status = 'pending'
+         ORDER BY score DESC LIMIT ?`
+      ).all(limit);
+
+      if (!rows.length) {
+        logger.warn('[app] Blog Part 1: DB pending 키워드도 없음. Blog Pipeline 종료.');
+        return;
+      }
+
+      keywordData.contents = rows.map((r) => ({
+        keyword:    r.keyword,
+        category:   r.category  ?? 'economy',
+        score:      r.score     ?? 0,
+        commercial: r.commercial ?? 0,
+        sources:    r.sources   ?? '',
+        from_db:    true,
+      }));
+      logger.info(`[app] Blog Part 1: DB pending ${rows.length}개 로드 (한도: ${limit}개)`);
+    } catch (err) {
+      logger.error('[app] Blog Part 1: DB pending 조회 실패. Blog Pipeline 종료.', { message: err.message });
+      return;
+    }
   }
 
   // YouTube 발행 결과 로드 — 직접 전달 우선, 없으면 오늘 저장 파일에서 읽기
