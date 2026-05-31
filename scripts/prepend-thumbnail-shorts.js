@@ -29,13 +29,20 @@ if (!inputVideo || !thumbPath || !outputVideo) {
 const absInput  = path.resolve(process.cwd(), inputVideo);
 const absThumb  = path.resolve(process.cwd(), thumbPath);
 const absOutput = path.resolve(process.cwd(), outputVideo);
-const tmpClip   = path.join(os.tmpdir(), `thumb_intro_${Date.now()}.mp4`);
-const tmpMerged = path.join(os.tmpdir(), `merged_${Date.now()}.mp4`);
+const ts        = Date.now();
+const tmpThumb  = path.join(os.tmpdir(), `thumb_src_${ts}${path.extname(absThumb)}`);
+const tmpInput  = path.join(os.tmpdir(), `shorts_src_${ts}.mp4`);
+const tmpClip   = path.join(os.tmpdir(), `thumb_intro_${ts}.mp4`);
+const tmpMerged = path.join(os.tmpdir(), `merged_${ts}.mp4`);
 
 try {
+  // 한글 경로 ffmpeg 오류 방지: ASCII 임시 경로로 복사
+  await fs.copyFile(absThumb, tmpThumb);
+  await fs.copyFile(absInput, tmpInput);
+
   console.log('1/3 썸네일 1초 클립 생성 중...');
   await execFileAsync(ffmpegPath, [
-    '-loop', '1', '-i', absThumb,
+    '-loop', '1', '-i', tmpThumb,
     '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
     '-t', '1',
     '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
@@ -46,13 +53,15 @@ try {
   console.log('2/3 영상 합치는 중...');
   await execFileAsync(ffmpegPath, [
     '-i', tmpClip,
-    '-i', absInput,
+    '-i', tmpInput,
     '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
     '-map', '[v]', '-map', '[a]',
     '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMerged,
   ]);
 
-  await fs.unlink(tmpClip);
+  for (const tmp of [tmpClip, tmpThumb, tmpInput]) {
+    await fs.unlink(tmp).catch(() => {});
+  }
 
   console.log('3/3 출력 저장 중...');
   await fs.rename(tmpMerged, absOutput);
@@ -62,7 +71,7 @@ try {
 
 } catch (err) {
   console.error(`❌ 실패: ${err.message}`);
-  for (const tmp of [tmpClip, tmpMerged]) {
+  for (const tmp of [tmpClip, tmpMerged, tmpThumb, tmpInput]) {
     await fs.unlink(tmp).catch(() => {});
   }
   process.exit(1);
