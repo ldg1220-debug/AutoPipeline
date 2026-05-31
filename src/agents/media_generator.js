@@ -1689,6 +1689,38 @@ async function generateLongFormMedia(content) {
       result.shorts_section_idx = clampedIdx;
       result.shorts_start_sec   = sectionStart;
       logger.info(`[media_generator] Shorts extracted from section ${clampedIdx + 1} (${sectionStart}s~${sectionStart + sectionDur}s): ${shortsPath}`);
+
+      // 썸네일 1초 인트로 삽입 → YouTube Shorts 커버 프레임 선택 가능
+      const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
+      try {
+        await fs.access(thumbShortsPath);
+        const tmpThumbClip  = shortsPath.replace(/\.mp4$/, '_thumbclip.mp4');
+        const tmpMergedPath = shortsPath.replace(/\.mp4$/, '_merged.mp4');
+
+        await execFileAsync(ffmpegPath, [
+          '-loop', '1', '-i', thumbShortsPath,
+          '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+          '-t', '1',
+          '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
+          '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
+          '-preset', 'fast', '-shortest', '-y', tmpThumbClip,
+        ]);
+
+        await execFileAsync(ffmpegPath, [
+          '-i', tmpThumbClip,
+          '-i', shortsPath,
+          '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
+          '-map', '[v]', '-map', '[a]',
+          '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMergedPath,
+        ]);
+
+        await fs.unlink(shortsPath);
+        await fs.rename(tmpMergedPath, shortsPath);
+        await fs.unlink(tmpThumbClip);
+        logger.info(`[media_generator] Shorts thumbnail intro prepended (1s cover frame)`);
+      } catch (thumbErr) {
+        logger.warn(`[media_generator] Shorts thumbnail prepend skipped: ${thumbErr.message}`);
+      }
     } catch (err) {
       logger.warn(`[media_generator] Shorts extraction failed: ${err.message}`);
     }
