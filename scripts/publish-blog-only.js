@@ -50,6 +50,51 @@ async function main() {
   const start = Date.now();
   logger.info(`[blog-only] ===== 블로그 발행 시작 [${date}] =====`);
 
+  // ── A. 블로그 키워드 파이프라인 미발행 항목 처리 ─────────────────────────────
+  // 메인 파이프라인이 실행됐지만 세션 만료로 발행 실패한 경우 재발행
+  let blogPipelineData = null;
+  try {
+    blogPipelineData = await readJSON(path.resolve(outDir, `blog/monetized_${date}.json`));
+    const alreadyPublished = new Set();
+    try {
+      const prev = await readJSON(path.resolve(outDir, `blog/published_${date}.json`));
+      for (const c of prev?.contents ?? []) {
+        if (c.blog_publish?.status === 'published') alreadyPublished.add(c.keyword);
+      }
+    } catch { /* published 파일 없으면 스킵 */ }
+
+    const pending = (blogPipelineData.contents ?? []).filter(
+      (c) => !alreadyPublished.has(c.keyword)
+    );
+    if (pending.length > 0) {
+      logger.info(`[blog-only] 블로그 파이프라인 미발행 항목 ${pending.length}개 재발행 시작`);
+      const pendingData = { ...blogPipelineData, contents: pending };
+      const publishedPending = await publishBlogPosts(pendingData);
+
+      // 결과를 published_{date}.json에 병합 저장
+      let existingPublished = { contents: [] };
+      try { existingPublished = await readJSON(path.resolve(outDir, `blog/published_${date}.json`)); } catch { /* 없으면 스킵 */ }
+      const merged = {
+        ...existingPublished,
+        contents: [...(existingPublished.contents ?? []), ...(publishedPending.contents ?? [])],
+      };
+      await writeJSON(path.resolve(outDir, `blog/published_${date}.json`), merged);
+
+      console.log('\n[블로그 파이프라인 재발행 결과]');
+      for (const c of publishedPending.contents ?? []) {
+        const icon = c.blog_publish?.status === 'published' ? '✅' : '❌';
+        console.log(`  ${icon} ${c.keyword}`);
+        console.log(`     ${c.blog_publish?.url ?? '-'}`);
+      }
+    } else {
+      logger.info('[blog-only] 블로그 파이프라인 미발행 항목 없음');
+      blogPipelineData = null;
+    }
+  } catch {
+    logger.info(`[blog-only] blog/monetized_${date}.json 없음 — 블로그 파이프라인 재발행 스킵`);
+  }
+
+  // ── B. YouTube 콘텐츠 파이프라인 블로그 발행 ──────────────────────────────────
   // 1. 콘텐츠 데이터 로드 — unified_content 우선, 없으면 pd_, content_ 순서
   let contentData;
   for (const name of [`unified_content_${date}`, `pd_${date}`, `content_${date}`]) {
