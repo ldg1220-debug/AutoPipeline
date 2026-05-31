@@ -133,7 +133,8 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
 
-  const shortsPublishAt = getOptimalPublishTime(); // 다음 날 7:23 AM KST
+  // Shorts는 즉시 공개로 업로드한다.
+  // private+publishAt(예약)으로 올리면 YouTube가 공개 전환 시 thumbnails.set을 무시/리셋한다.
   const metadata = {
     snippet: {
       title: shortsTitle,
@@ -143,8 +144,7 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
       defaultLanguage: 'ko',
     },
     status: {
-      privacyStatus: 'private',
-      publishAt: shortsPublishAt,
+      privacyStatus: 'public',
       selfDeclaredMadeForKids: false,
       containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기
     },
@@ -153,7 +153,7 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Shorts uploaded: https://youtube.com/shorts/${videoId}`);
 
-  // 쇼츠 썸네일: 세로(9:16) 우선, 없으면 가로 폴백 — 5초 대기 후 최대 3회 재시도
+  // 쇼츠 썸네일: 세로(9:16) 우선, 없으면 가로 폴백 — 즉시공개이므로 30초 대기 후 최대 3회 재시도
   const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
   const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb.jpg`);
   const shortsThumbExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
@@ -164,7 +164,8 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
   if (!thumbPathExists) {
     logger.warn(`[auto_publisher] 쇼츠 썸네일 파일 없음: ${thumbPath}`);
   } else {
-    await new Promise((r) => setTimeout(r, 5000));
+    logger.info('[auto_publisher] Shorts 처리 대기 30초...');
+    await new Promise((r) => setTimeout(r, 30000));
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
