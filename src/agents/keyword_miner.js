@@ -177,8 +177,18 @@ function scoreKeywords(allSuggestions, datalabScores = {}) {
 }
 
 function filterNewKeywords(scored) {
-  const stmt = db.prepare('SELECT keyword FROM keywords WHERE keyword = ?');
-  return scored.filter(({ keyword }) => !stmt.get(keyword));
+  // 90일 이상 지난 'used' 키워드는 재사용 허용 (콘텐츠 갱신 효과)
+  const REUSE_DAYS = 90;
+  const cutoff = new Date(Date.now() - REUSE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const stmt = db.prepare('SELECT status, used_at FROM keywords WHERE keyword = ?');
+
+  return scored.filter(({ keyword }) => {
+    const row = stmt.get(keyword);
+    if (!row) return true;                                           // 신규
+    if (row.status === 'pending') return false;                     // 이미 대기 중
+    if (row.status === 'used' && row.used_at && row.used_at < cutoff) return true; // 90일+ 재사용
+    return false;
+  });
 }
 
 function saveKeywords(keywords) {
@@ -186,10 +196,18 @@ function saveKeywords(keywords) {
     INSERT OR IGNORE INTO keywords (keyword, category, score, commercial, sources)
     VALUES (@keyword, @category, @score, @commercial, @sources)
   `);
-  const insertMany = db.transaction((kws) => {
-    for (const kw of kws) insert.run(kw);
+  // 90일 지나 재사용되는 키워드는 status를 pending으로 리셋
+  const resetReuse = db.prepare(`
+    UPDATE keywords SET status='pending', used_at=NULL, created_at=datetime('now','localtime')
+    WHERE keyword=@keyword AND status='used'
+  `);
+  const upsertMany = db.transaction((kws) => {
+    for (const kw of kws) {
+      const result = insert.run(kw);
+      if (result.changes === 0) resetReuse.run({ keyword: kw.keyword });
+    }
   });
-  insertMany(keywords);
+  upsertMany(keywords);
 }
 
 /**
