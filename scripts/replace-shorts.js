@@ -24,10 +24,16 @@ const mediaDir  = path.resolve(__dirname, '../output/media');
 const skipDelete = process.argv.includes('--skip-delete');
 
 // ── 교체할 Shorts: 기존 videoId → 새 MP4 파일명 ─────────────────────────────
+// fallbackKeyword: content JSON 매칭 실패 시 직접 사용할 키워드
 const TARGETS = [
   { oldVideoId: '8kA7Quc6isY', videoFile: '강남_부동산_shorts.mp4' },
   { oldVideoId: 'yewCb7MJxvU', videoFile: '한국_수출___꿈의_1조달러__넘본다_세계_5강_무역강국_눈앞_shorts.mp4' },
-  { oldVideoId: 'uJX51jycc8k', videoFile: '현대건설__2파전_끝__1_5조원__압구정5구역_재건축_수주_종합__shorts.mp4' },
+  {
+    oldVideoId:      'uJX51jycc8k',
+    videoFile:       '현대건설__2파전_끝__1_5조원__압구정5구역_재건축_수주_종합__shorts.mp4',
+    fallbackKeyword: '현대건설, 2파전 끝! 1.5조원! 압구정5구역 재건축 수주 종합!',
+    fallbackCategory: 'economy',
+  },
 ];
 
 // ── OAuth 토큰 갱신 ──────────────────────────────────────────────────────────
@@ -120,19 +126,28 @@ async function main() {
   logger.info('[replace-shorts] ===== Shorts 교체 업로드 시작 =====');
   logger.info(`[replace-shorts] --skip-delete: ${skipDelete}`);
 
-  // pd JSON 로드 (pd 우선, 없으면 content)
+  // 모든 pd_*.json / content_*.json 스캔해서 로드
   let allContents = [];
-  for (const name of ['pd_20260530', 'content_20260530']) {
-    try {
-      const data = await readJSON(path.resolve(outDir, `scripts/${name}.json`));
-      const items = data.contents ?? [];
-      allContents = [...allContents, ...items];
-      logger.info(`[replace-shorts] ${name}.json 로드 (${items.length}개)`);
-    } catch { /* 없으면 스킵 */ }
+  const scriptsDir = path.resolve(outDir, 'scripts');
+  try {
+    const files = await fs.readdir(scriptsDir);
+    const jsonFiles = files.filter(
+      (f) => (f.startsWith('pd_') || f.startsWith('content_')) && f.endsWith('.json')
+    );
+    for (const file of jsonFiles) {
+      try {
+        const data = await readJSON(path.resolve(scriptsDir, file));
+        const items = data.contents ?? [];
+        allContents = [...allContents, ...items];
+        logger.info(`[replace-shorts] ${file} 로드 (${items.length}개)`);
+      } catch { /* 파싱 실패 시 스킵 */ }
+    }
+  } catch (err) {
+    logger.warn(`[replace-shorts] scripts 디렉토리 스캔 실패: ${err.message}`);
   }
 
   if (!allContents.length) {
-    logger.error('[replace-shorts] 콘텐츠 JSON 없음. output/scripts/pd_20260530.json 필요');
+    logger.error('[replace-shorts] 콘텐츠 JSON 없음. output/scripts/ 에 pd_*.json 필요');
     process.exit(1);
   }
 
@@ -141,30 +156,43 @@ async function main() {
 
   for (const target of TARGETS) {
     const videoPath  = path.resolve(mediaDir, target.videoFile);
-    const filePrefix = target.videoFile.replace(/_shorts\.mp4$/, '');
+    const filePrefix = target.videoFile.replace(/_shorts\.mp4$/, '').replace(/_+$/, '');
 
-    // safeKeyword로 content 매칭
+    // safeKeyword로 content 매칭 (완전일치 → 접두사 → 핵심어 3개 이상 겹침 순)
     const content = allContents.find((c) => {
-      const sk = c.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-      return filePrefix === sk || filePrefix.startsWith(sk) || sk.startsWith(filePrefix);
+      const sk = c.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      const fp = filePrefix.replace(/_+/g, '_').replace(/^_|_$/g, '');
+      if (fp === sk) return true;
+      if (fp.startsWith(sk) || sk.startsWith(fp)) return true;
+      const skWords = sk.split('_').filter((w) => w.length > 1);
+      const fpWords = fp.split('_').filter((w) => w.length > 1);
+      const overlap = skWords.filter((w) => fpWords.includes(w));
+      return overlap.length >= Math.min(3, skWords.length);
     });
 
-    if (!content) {
+    // 매칭 실패 시 fallbackKeyword로 최소 content 구성
+    const resolvedContent = content ?? (target.fallbackKeyword ? {
+      keyword:  target.fallbackKeyword,
+      category: target.fallbackCategory ?? 'economy',
+    } : null);
+
+    if (!resolvedContent) {
       logger.warn(`[replace-shorts] 콘텐츠 매칭 실패: ${target.videoFile}`);
       results.push({ file: target.videoFile, status: 'FAILED_NO_CONTENT' });
       continue;
     }
+    if (!content) logger.info(`[replace-shorts] fallbackKeyword 사용: "${resolvedContent.keyword}"`);
 
     // 파일 존재 확인
     try {
       await fs.access(videoPath);
     } catch {
       logger.error(`[replace-shorts] 파일 없음: ${videoPath}`);
-      results.push({ keyword: content.keyword, status: 'FAILED_NO_FILE' });
+      results.push({ keyword: resolvedContent.keyword, status: 'FAILED_NO_FILE' });
       continue;
     }
 
-    logger.info(`[replace-shorts] ${content.keyword} 처리 시작`);
+    logger.info(`[replace-shorts] ${resolvedContent.keyword} 처리 시작`);
 
     // 1. 기존 영상 삭제
     if (!skipDelete) {
@@ -177,16 +205,16 @@ async function main() {
     // 2. 새 영상 업로드
     logger.info(`[replace-shorts]   업로드 중: ${target.videoFile}`);
     try {
-      const newId = await uploadShorts(videoPath, content, token);
+      const newId = await uploadShorts(videoPath, resolvedContent, token);
       logger.info(`[replace-shorts]   업로드 완료: https://youtube.com/shorts/${newId}`);
       results.push({
-        keyword:    content.keyword,
+        keyword:    resolvedContent.keyword,
         oldVideoId: target.oldVideoId,
         newVideoId: newId,
         newUrl:     `https://youtube.com/shorts/${newId}`,
         status:     'SUCCESS',
       });
-      console.log(`\n✅ ${content.keyword}`);
+      console.log(`\n✅ ${resolvedContent.keyword}`);
       console.log(`   삭제: https://youtu.be/${target.oldVideoId}`);
       console.log(`   신규: https://youtube.com/shorts/${newId}`);
       console.log(`   → YouTube Studio 앱에서 영상 수정 → 커버 선택 → 첫 번째 프레임`);
@@ -194,12 +222,12 @@ async function main() {
       const msg = err.response?.data?.error?.message ?? err.message;
       logger.error(`[replace-shorts]   업로드 실패: ${msg}`);
       results.push({
-        keyword:    content.keyword,
+        keyword:    resolvedContent.keyword,
         oldVideoId: target.oldVideoId,
         status:     'FAILED_UPLOAD',
         error:      msg,
       });
-      console.error(`\n❌ ${content.keyword}: ${msg}`);
+      console.error(`\n❌ ${resolvedContent.keyword}: ${msg}`);
     }
   }
 
