@@ -104,8 +104,11 @@ export const config = {
     credentials: process.env.GOOGLE_SC_CREDENTIALS,  // JSON 키 파일 경로
   },
   keywordMiner: {
-    seeds:  process.env.KEYWORD_SEEDS || '재테크,부동산,경기침체,금리,주식투자',
-    topN:   parseInt(process.env.KEYWORD_TOP_N || '30', 10),
+    seeds:  process.env.KEYWORD_SEEDS ||
+      '재테크,부동산,경기침체,금리,주식투자,코인투자,ETF,달러환율,인플레이션,가계부채,' +
+      '아파트청약,전세사기,재건축,역세권,부동산세금,임대차,분양권,갭투자,경매부동산,신도시,' +
+      '노후준비,연금저축,개인연금,실업급여,정부지원금,국민연금,건강보험,복지혜택,청년지원,소득공제',
+    topN:   parseInt(process.env.KEYWORD_TOP_N || '15', 10),
   },
   topicGrouper: {
     // 지원 모델:
