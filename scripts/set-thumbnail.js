@@ -57,7 +57,7 @@ try {
   const contentType = ext === '.png' ? 'image/png' : 'image/jpeg';
 
   // 업로드
-  await axios.post(
+  const uploadRes = await axios.post(
     `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`,
     imageData,
     {
@@ -74,9 +74,27 @@ try {
   console.log(`   영상: https://youtu.be/${videoId}`);
   console.log(`   파일: ${absThumbPath}`);
   console.log(`   채널: ${isHealth ? '건강채널' : '경제채널'}`);
+  console.log(`   API 응답 status: ${uploadRes.status}`);
+  console.log(`   API 응답 data:`, JSON.stringify(uploadRes.data, null, 2));
+
+  // 실제 적용 확인: 영상 썸네일 조회
+  const verifyRes = await axios.get(
+    `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}`,
+    { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+  );
+  const thumbs = verifyRes.data.items?.[0]?.snippet?.thumbnails;
+  console.log(`\n   현재 적용된 썸네일 URL:`);
+  if (thumbs) {
+    for (const [key, val] of Object.entries(thumbs)) {
+      console.log(`     ${key}: ${val.url}`);
+    }
+  } else {
+    console.log(`     (썸네일 정보 없음)`);
+  }
 
 } catch (err) {
   const msg = err.response?.data?.error?.message ?? err.message;
   console.error(`❌ 실패: ${msg}`);
+  console.error(`   상세:`, JSON.stringify(err.response?.data, null, 2));
   process.exit(1);
 }
