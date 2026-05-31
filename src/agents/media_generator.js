@@ -1676,15 +1676,12 @@ async function generateLongFormMedia(content) {
       const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')
         .replace(/'/g, "\\'").replace(/:/g, '\\:');
 
-      // 구간 잘라내기 + 9:16 크롭 + CTA 텍스트 오버레이
+      // 구간 잘라내기 + 9:16 크롭 (설명란 URL로 YouTube가 롱폼 자동 연결)
       await execFileAsync(ffmpegPath, [
         '-ss', String(sectionStart),
         '-t',  String(sectionDur),
         '-i',  result.video,
-        '-vf', [
-          'crop=ih*9/16:ih:(iw-ih*9/16)/2:0',
-          `drawtext=text='${ctaText}':fontsize=28:fontcolor=white:x=(w-tw)/2:y=h-80:box=1:boxcolor=black@0.6:boxborderw=8`,
-        ].join(','),
+        '-vf', 'crop=ih*9/16:ih:(iw-ih*9/16)/2:0',
         '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', shortsPath,
       ]);
 
