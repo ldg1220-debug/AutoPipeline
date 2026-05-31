@@ -14,9 +14,10 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { default as ffmpegStatic } from 'ffmpeg-static';
 
 const execFileAsync = promisify(execFile);
-const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+const ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic || 'ffmpeg';
 
 const [,, inputVideo, thumbPath, outputVideo] = process.argv;
 
