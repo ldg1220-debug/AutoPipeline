@@ -902,8 +902,8 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
   const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
 
-  // hook 문장을 22자씩 줄바꿈 (최대 2줄)
-  const hookLines = wrapTextKorean(hook.slice(0, 50), 22).slice(0, 2);
+  // hook 문장을 16자씩 줄바꿈 (폰트 크게 → 줄당 글자 수 줄임)
+  const hookLines = wrapTextKorean(hook.slice(0, 40), 16).slice(0, 2);
 
   const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
     ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
@@ -914,10 +914,10 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
     .png()
     .toBuffer();
 
-  const hookFontSize = 52;
+  const hookFontSize = 72;  // 하단 타이틀(76~88)과 같은 크기감으로 통일
   const hookLineH    = Math.ceil(hookFontSize * 1.45);
-  const hookBlockH   = hookLines.length * hookLineH + 36;
-  const hookBlockY   = Math.round(H * 0.60);
+  const hookBlockH   = hookLines.length * hookLineH + 48;
+  const hookBlockY   = Math.round(H * 0.55);
 
   const hookElems = hookLines.map((line, i) =>
     `<text x="${W / 2}" y="${hookBlockY + 36 + (i + 0.85) * hookLineH}"

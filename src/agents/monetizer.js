@@ -324,7 +324,7 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         : `${s.heading} (${seoKeywords[0] ?? ''})`.trim();
       const imageHtml = imgData?.image_url
         ? `<div class="blog-img-wrap">\n` +
-          `<img src="${imgData.image_url}" alt="${altText}" loading="lazy" style="max-width:480px;width:100%;height:auto;display:block;margin:10px auto;" />\n` +
+          `<img src="${imgData.image_url}" alt="${altText}" loading="lazy" style="width:100%;height:auto;display:block;" />\n` +
           `<p class="photo-credit">Photo by ${imgData.photographer ?? 'Pexels'} on Pexels</p>\n` +
           `</div>`
         : '';
