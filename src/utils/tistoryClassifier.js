@@ -143,13 +143,28 @@ async function fetchCategoriesFromPage(context, blogName) {
   }
 }
 
-// ── 카테고리 목록 로드 (캐시 → API → Playwright 스크래핑 폴백) ─────────────
+// ── 카테고리 목록 로드 (캐시 → 환경변수 → API → Playwright 스크래핑 폴백) ─────
 /**
  * @param {string} blogName
  * @param {string|null} accessToken
  * @param {import('playwright').BrowserContext|null} context  Playwright 컨텍스트 (토큰 없을 때 폴백)
  */
 export async function loadTistoryCategories(blogName, accessToken, context = null) {
+  // 0. 환경변수 직접 설정 — TISTORY_CATEGORY_MAP=카테고리명:ID,카테고리명:ID
+  //    예) TISTORY_CATEGORY_MAP=경제·금융:123456,부동산:234567,재테크:345678
+  const envMap = process.env.TISTORY_CATEGORY_MAP;
+  if (envMap) {
+    const categories = envMap.split(',').map((entry) => {
+      const [name, id] = entry.split(':').map((s) => s.trim());
+      return { id, name, parent: null };
+    }).filter((c) => c.id && c.name);
+    if (categories.length > 0) {
+      logger.info(`[tistoryClassifier] Categories from env: ${categories.map((c) => c.name).join(', ')}`);
+      saveCategoriesCache(blogName, categories);
+      return categories;
+    }
+  }
+
   // 1. 캐시 조회
   const cached = getCachedCategories(blogName);
   if (cached.length > 0) {
