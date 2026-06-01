@@ -297,20 +297,22 @@ async function searchCoupangProducts(keyword, limit = 3) {
 function buildAffiliateBlock(products, anchorText) {
   if (products.length === 0) return '';
 
-  const items = products
-    .slice(0, 2)
-    .map(
-      (p) =>
-        `<li><a href="${p.deep_link}" target="_blank" rel="nofollow sponsored">${p.name}</a>` +
-        (p.price ? ` — <strong>${Number(p.price).toLocaleString()}원</strong>` : '') +
-        `</li>`
-    )
-    .join('\n');
+  const items = products.slice(0, 2).map((p) => {
+    const priceText = p.price ? `<span style="font-size:13px;color:#f59e0b;font-weight:bold;">${Number(p.price).toLocaleString()}원</span>` : '';
+    return (
+      `<a href="${p.deep_link}" target="_blank" rel="nofollow sponsored" ` +
+      `style="display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;padding:10px 0;border-bottom:1px solid #e2e8f0;">` +
+      (p.image_url ? `<img src="${p.image_url}" alt="${p.name}" style="width:56px;height:56px;object-fit:contain;border-radius:8px;flex-shrink:0;">` : `<span style="font-size:24px;flex-shrink:0;">🛒</span>`) +
+      `<div><div style="font-size:14px;font-weight:600;line-height:1.4;">${p.name.slice(0, 40)}${p.name.length > 40 ? '…' : ''}</div>` +
+      `${priceText}<span style="font-size:12px;color:#64748b;"> 쿠팡 최저가 →</span></div></a>`
+    );
+  }).join('\n');
 
   return (
-    `<div class="affiliate-block">\n` +
-    `<p><strong>🛒 ${anchorText}</strong></p>\n` +
-    `<ul>\n${items}\n</ul>\n` +
+    `<div style="border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;">\n` +
+    `<p style="font-size:13px;font-weight:700;color:#92400e;margin:0 0 8px;">🛒 ${anchorText}</p>\n` +
+    items + '\n' +
+    `<p style="font-size:11px;color:#94a3b8;margin:10px 0 0;">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>\n` +
     `</div>`
   );
 }
