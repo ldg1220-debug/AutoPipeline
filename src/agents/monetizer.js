@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import axios from 'axios';
 import { config } from '../config/index.js';
@@ -196,40 +197,57 @@ function adsenseSlot(position) {
 // ── 쿠팡 파트너스 Open API ─────────────────────────────────────────────────
 
 /**
- * COUPANG_MANUAL_LINKS 환경변수에서 키워드→딥링크 맵을 읽는다.
- * 형식: COUPANG_MANUAL_LINKS=재테크:https://...,부동산:https://...,금리:https://...
- * API 없이도 키워드 매칭으로 링크를 삽입할 수 있다.
+ * data/coupang/links.json → COUPANG_MANUAL_LINKS 환경변수 순으로 링크를 로드한다.
  */
+const COUPANG_LINKS_FILE = path.resolve(__dirname, '../../data/coupang/links.json');
+
 function loadManualCoupangLinks() {
-  const raw = process.env.COUPANG_MANUAL_LINKS;
-  if (!raw) return {};
-  return Object.fromEntries(
-    raw.split(',').map((entry) => {
+  const result = [];
+
+  // 1순위: data/coupang/links.json
+  try {
+    const raw = JSON.parse(fs.readFileSync(COUPANG_LINKS_FILE, 'utf8'));
+    for (const entry of raw.entries ?? []) {
+      if (!entry.url || entry.url.includes('REPLACE_ME')) continue;
+      for (const kw of entry.keywords ?? []) {
+        result.push({ keyword: kw, ...entry });
+      }
+    }
+  } catch { /* 파일 없으면 무시 */ }
+
+  // 2순위: COUPANG_MANUAL_LINKS 환경변수 (레거시)
+  const envRaw = process.env.COUPANG_MANUAL_LINKS;
+  if (envRaw) {
+    for (const entry of envRaw.split(',')) {
       const idx = entry.indexOf(':');
-      if (idx < 0) return null;
-      const keyword = entry.slice(0, idx).trim();
-      const url     = entry.slice(idx + 1).trim();
-      return keyword && url ? [keyword, url] : null;
-    }).filter(Boolean)
-  );
+      if (idx < 0) continue;
+      const kw  = entry.slice(0, idx).trim();
+      const url = entry.slice(idx + 1).trim();
+      if (kw && url && !result.find((r) => r.keyword === kw)) {
+        result.push({ keyword: kw, name: kw, url, html: null, blog_html: null });
+      }
+    }
+  }
+
+  return result;
 }
 
-const MANUAL_COUPANG_LINKS = loadManualCoupangLinks();
+const MANUAL_COUPANG_ENTRIES = loadManualCoupangLinks();
 
 /**
  * 키워드와 가장 잘 매칭되는 수동 딥링크를 반환한다.
- * 부분 문자열 매칭으로 키워드 포함 여부를 확인한다.
+ * 완전 일치 → 부분 일치 순으로 검색.
  */
 export function getManualCoupangLink(keyword) {
-  if (Object.keys(MANUAL_COUPANG_LINKS).length === 0) return null;
+  if (MANUAL_COUPANG_ENTRIES.length === 0) return null;
   // 완전 일치 우선
-  if (MANUAL_COUPANG_LINKS[keyword]) return { url: MANUAL_COUPANG_LINKS[keyword], label: keyword };
+  const exact = MANUAL_COUPANG_ENTRIES.find((e) => e.keyword === keyword);
+  if (exact) return { url: exact.url, label: exact.name, html: exact.html ?? null, blog_html: exact.blog_html ?? null };
   // 부분 일치
-  for (const [k, url] of Object.entries(MANUAL_COUPANG_LINKS)) {
-    if (keyword.includes(k) || k.includes(keyword.slice(0, 3))) {
-      return { url, label: k };
-    }
-  }
+  const partial = MANUAL_COUPANG_ENTRIES.find(
+    (e) => keyword.includes(e.keyword) || e.keyword.includes(keyword.slice(0, 3))
+  );
+  if (partial) return { url: partial.url, label: partial.name, html: partial.html ?? null, blog_html: partial.blog_html ?? null };
   return null;
 }
 function buildCoupangSignature(method, url, secretKey) {
@@ -395,13 +413,15 @@ async function monetizeBlogDraft(content) {
       affiliateMap[hook.position] = buildAffiliateBlock(products, hook.anchor_text);
       hasAffiliate = true;
     } else {
-      // API 없을 때: 수동 딥링크 폴백
+      // API 없을 때: 수동 딥링크 폴백 (blog_html 있으면 우선 사용)
       const manual = getManualCoupangLink(hook.product_category ?? keyword);
       if (manual) {
-        affiliateMap[hook.position] = buildAffiliateBlock(
-          [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
-          hook.anchor_text
-        );
+        affiliateMap[hook.position] = manual.blog_html
+          ? manual.blog_html
+          : buildAffiliateBlock(
+              [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
+              hook.anchor_text
+            );
         hasAffiliate = true;
       }
     }
@@ -411,10 +431,12 @@ async function monetizeBlogDraft(content) {
   if (!hasAffiliate) {
     const manual = getManualCoupangLink(keyword);
     if (manual) {
-      affiliateMap['conclusion_top'] = buildAffiliateBlock(
-        [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
-        '관련 상품'
-      );
+      affiliateMap['conclusion_top'] = manual.blog_html
+        ? manual.blog_html
+        : buildAffiliateBlock(
+            [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
+            '관련 상품'
+          );
       hasAffiliate = true;
     }
   }

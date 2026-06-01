@@ -1,0 +1,15 @@
+{
+  "_how_to_add": "entries 배열에 아래 형식으로 추가. keywords에 매칭할 단어 여러 개 넣을 수 있음.",
+  "entries": [
+    {
+      "id": "example",
+      "name": "예시 상품명 (실제 상품으로 교체)",
+      "keywords": ["예시키워드", "관련키워드"],
+      "url": "https://link.coupang.com/a/REPLACE_ME",
+      "html": "<a href=\"https://link.coupang.com/a/REPLACE_ME\" target=\"_blank\" rel=\"nofollow sponsored\">예시 상품명 최저가 보러가기 →</a>",
+      "blog_html": "<div style=\"border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/REPLACE_ME\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🛒</span><div><strong style=\"font-size:15px;\">예시 상품명</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a></div>",
+      "note": "예시용 — 실제 링크 추가 후 이 항목 삭제",
+      "created_at": "2026-06-01"
+    }
+  ]
+}
