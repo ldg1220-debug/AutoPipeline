@@ -1,5 +1,5 @@
 {
-  "_how_to_add": "entries 배열에 아래 형식으로 추가. keywords에 매칭할 단어 여러 개 넣을 수 있음.",
+  "_how_to_add": "entries 배열에 아래 형식으로 추가. keywords에 매칭할 단어 여러 개 넣을 수 있음. 같은 키워드를 여러 상품이 공유하면 랜덤 로테이션으로 삽입됨.",
   "entries": [
     {
       "id": "example",
@@ -11,15 +11,232 @@
       "note": "예시용 — 실제 링크 추가 후 이 항목 삭제",
       "created_at": "2026-06-01"
     },
+
     {
       "id": "sickdot_cool_toxi",
       "name": "시크도트 냉감소재 자외선차단 손등커버 골프 쿨토시",
       "keywords": ["골프", "쿨토시", "냉감", "자외선차단", "손등커버", "여름", "운동", "스포츠", "아웃도어", "건강"],
       "url": "https://link.coupang.com/a/eecTIbJj9E",
-      "html": "<a href=\"https://link.coupang.com/a/eecTIbJj9E\" target=\"_blank\" rel=\"nofollow sponsored\">시크도트 냉감 손등커버 쿨토시 최저가 보러가기 →</a>",
-      "blog_html": "<div style=\"border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0f9ff;\"><a href=\"https://link.coupang.com/a/eecTIbJj9E\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🛒</span><div><strong style=\"font-size:15px;\">시크도트 냉감소재 자외선차단 손등커버 쿨토시</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "html": "<a href=\"https://link.coupang.com/a/eecTIbJj9E\" target=\"_blank\" rel=\"nofollow sponsored\">시크도트 냉감 손등커버 쿨토시 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bfdbfe;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0f9ff;\"><a href=\"https://link.coupang.com/a/eecTIbJj9E\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">❄️</span><div><strong style=\"font-size:15px;\">시크도트 냉감 손등커버 쿨토시</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
       "banner_iframe": "<iframe src=\"https://coupa.ng/cnb2XJ\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
-      "note": "냉감/골프/스포츠 카테고리 글에 자동 매칭",
+      "note": "냉감/골프/스포츠",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "livingood_cool_spray",
+      "name": "리빙굿 쿨 스프레이 4개",
+      "keywords": ["여름", "더위", "냉감", "쿨스프레이", "무더위", "열사병", "열대야", "냉각"],
+      "url": "https://link.coupang.com/a/eecXnzQvtY",
+      "html": "<a href=\"https://link.coupang.com/a/eecXnzQvtY\" target=\"_blank\" rel=\"nofollow sponsored\">리빙굿 쿨 스프레이 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bfdbfe;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0f9ff;\"><a href=\"https://link.coupang.com/a/eecXnzQvtY\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">❄️</span><div><strong style=\"font-size:15px;\">리빙굿 쿨 스프레이 4개세트</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_iframe": "<iframe src=\"https://coupa.ng/cnb20i\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
+      "note": "여름/더위/냉감",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "seagram_sparkling_water",
+      "name": "씨그램 플레인 무라벨 350ml 24개",
+      "keywords": ["탄산수", "생수", "무라벨", "음료", "수분", "물", "건강음료", "다이어트음료"],
+      "url": "https://link.coupang.com/a/eed7bOztKK",
+      "html": "<a href=\"https://link.coupang.com/a/eed7bOztKK\" target=\"_blank\" rel=\"nofollow sponsored\">씨그램 플레인 탄산수 무라벨 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0fdf4;\"><a href=\"https://link.coupang.com/a/eed7bOztKK\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">💧</span><div><strong style=\"font-size:15px;\">씨그램 플레인 탄산수 무라벨 24개</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_iframe": "<iframe src=\"https://coupa.ng/cnb3Qn\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
+      "note": "건강/다이어트/음료",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "ahc_suncream",
+      "name": "AHC 마스터즈 아쿠아 리치 선크림 SPF50+ PA++++",
+      "keywords": ["선크림", "썬크림", "자외선차단", "선케어", "여름피부", "피부관리", "자외선", "UV차단"],
+      "url": "https://link.coupang.com/a/eeedljf2IK",
+      "html": "<a href=\"https://link.coupang.com/a/eeedljf2IK\" target=\"_blank\" rel=\"nofollow sponsored\">AHC 선크림 SPF50+ 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/eeedljf2IK\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">☀️</span><div><strong style=\"font-size:15px;\">AHC 아쿠아 리치 선크림 SPF50+ PA++++</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_iframe": "<iframe src=\"https://coupa.ng/cnb3UY\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
+      "note": "피부/자외선차단",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "sanrio_neck_cooler",
+      "name": "산리오 시나모롤 파스텔 넥쿨러",
+      "keywords": ["넥쿨러", "목쿨러", "냉감", "여름", "시나모롤", "캐릭터", "아이돌", "트렌드"],
+      "url": "https://link.coupang.com/a/eeegPiz2aq",
+      "html": "<a href=\"https://link.coupang.com/a/eeegPiz2aq\" target=\"_blank\" rel=\"nofollow sponsored\">시나모롤 넥쿨러 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fbcfe8;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fdf2f8;\"><a href=\"https://link.coupang.com/a/eeegPiz2aq\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🎀</span><div><strong style=\"font-size:15px;\">산리오 시나모롤 파스텔 넥쿨러</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_iframe": "<iframe src=\"https://coupa.ng/cnb3XE\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
+      "note": "연예/트렌드/여름",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "ice_cool_scarf",
+      "name": "냉동 쿨 스카프 아이스 3개세트 여름용",
+      "keywords": ["쿨스카프", "아이스스카프", "등산", "낚시", "스포츠", "여름", "냉감", "야외", "운동", "마라톤"],
+      "url": "https://link.coupang.com/a/eeeI5vQMai",
+      "html": "<a href=\"https://link.coupang.com/a/eeeI5vQMai\" target=\"_blank\" rel=\"nofollow sponsored\">냉동 쿨 스카프 아이스 3개세트 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bfdbfe;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0f9ff;\"><a href=\"https://link.coupang.com/a/eeeI5vQMai\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">❄️</span><div><strong style=\"font-size:15px;\">냉동 쿨 스카프 아이스 3개세트</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_iframe": "<iframe src=\"https://coupa.ng/cnb4hm\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
+      "note": "여름/스포츠/아웃도어",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "runmax_trail_vest",
+      "name": "런맥스 초경량 트레일 러닝 조끼 마라톤 등산 백팩 베스트",
+      "keywords": ["러닝", "마라톤", "등산", "트레일", "조끼", "런닝", "배낭", "아웃도어", "운동"],
+      "url": "https://link.coupang.com/a/eeeSXTIjzU",
+      "html": "<a href=\"https://link.coupang.com/a/eeeSXTIjzU\" target=\"_blank\" rel=\"nofollow sponsored\">런맥스 러닝 베스트 조끼 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0fdf4;\"><a href=\"https://link.coupang.com/a/eeeSXTIjzU\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🏃</span><div><strong style=\"font-size:15px;\">런맥스 초경량 트레일 러닝 조끼</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eeeSXTIjzU\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://static.coupangcdn.com/image/affiliate/banner/86a72ce4a2c7ea385300e4e12d8e5209@2x.jpg\" alt=\"런맥스 초경량 남녀공용 트레일 러닝 조끼 마라톤 등산 백팩 베스트\" width=\"120\" height=\"240\"></a>",
+      "note": "운동/스포츠/아웃도어",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "ice_cool_towel",
+      "name": "흔들면 다시 시원한 아이스 쿨타올 냉감 스포츠 타월 4개",
+      "keywords": ["쿨타올", "냉감타올", "스포츠타월", "냉감", "운동", "여름", "타월", "헬스", "피트니스"],
+      "url": "https://link.coupang.com/a/eeeUi2Tpfw",
+      "html": "<a href=\"https://link.coupang.com/a/eeeUi2Tpfw\" target=\"_blank\" rel=\"nofollow sponsored\">아이스 쿨타올 4개 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bfdbfe;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0f9ff;\"><a href=\"https://link.coupang.com/a/eeeUi2Tpfw\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">❄️</span><div><strong style=\"font-size:15px;\">아이스 쿨타올 냉감 스포츠 타월 4개</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eeeUi2Tpfw\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img1c.coupangcdn.com/image/affiliate/banner/72b0490999bf84e5f906df8ca0f0cbd9@2x.jpg\" alt=\"흔들면 다시 시원한 아이스 쿨타올 냉감 스포츠 타월\" width=\"120\" height=\"240\"></a>",
+      "note": "냉감/운동/여름",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "k2_uv_mask",
+      "name": "K2 세이프티 쿨핏 자외선차단 마스크",
+      "keywords": ["자외선마스크", "쿨핏", "K2", "선케어", "자외선차단", "얼굴마스크", "여름마스크", "UV"],
+      "url": "https://link.coupang.com/a/eeeVZyGsyi",
+      "html": "<a href=\"https://link.coupang.com/a/eeeVZyGsyi\" target=\"_blank\" rel=\"nofollow sponsored\">K2 쿨핏 자외선차단 마스크 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/eeeVZyGsyi\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">☀️</span><div><strong style=\"font-size:15px;\">K2 세이프티 쿨핏 자외선차단 마스크</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eeeVZyGsyi\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://image7.coupangcdn.com/image/affiliate/banner/3726b6f8cc03397431c1e6d90ae56343@2x.jpg\" alt=\"K2 세이프티 쿨핏 자외선차단 마스크\" width=\"120\" height=\"240\"></a>",
+      "note": "자외선차단/여름/아웃도어",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "realestate_contract_book",
+      "name": "부동산 계약 이렇게 쉬웠어? (지혜로, 송희창)",
+      "keywords": ["부동산", "계약", "매매계약", "전세계약", "임대차계약", "부동산계약", "집계약", "아파트계약"],
+      "url": "https://link.coupang.com/a/eeeXCCFE1Q",
+      "html": "<a href=\"https://link.coupang.com/a/eeeXCCFE1Q\" target=\"_blank\" rel=\"nofollow sponsored\">부동산 계약 이렇게 쉬웠어? 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0fdf4;\"><a href=\"https://link.coupang.com/a/eeeXCCFE1Q\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🏠</span><div><strong style=\"font-size:15px;\">부동산 계약 이렇게 쉬웠어?</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eeeXCCFE1Q\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img3a.coupangcdn.com/image/affiliate/banner/dc6aa84342e83275c50478978b6c1ca6@2x.jpg\" alt=\"부동산 계약 이렇게 쉬웠어?\" width=\"120\" height=\"240\"></a>",
+      "note": "부동산/계약",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "realestate_tax_book",
+      "name": "이은하의 부동산 절세 오늘부터 1일 2026년 최신개정",
+      "keywords": ["부동산세금", "절세", "양도세", "취득세", "보유세", "부동산세", "세금", "재산세"],
+      "url": "https://link.coupang.com/a/eeeYUQthm0",
+      "html": "<a href=\"https://link.coupang.com/a/eeeYUQthm0\" target=\"_blank\" rel=\"nofollow sponsored\">이은하의 부동산 절세 책 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0fdf4;\"><a href=\"https://link.coupang.com/a/eeeYUQthm0\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🏠</span><div><strong style=\"font-size:15px;\">이은하의 부동산 절세 오늘부터 1일 (2026 개정판)</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eeeYUQthm0\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img2a.coupangcdn.com/image/affiliate/banner/3a283a99b5dcf131b09b8c263246eab3@2x.jpg\" alt=\"이은하의 부동산 절세 오늘부터 1일\" width=\"120\" height=\"240\"></a>",
+      "note": "부동산/세금/절세",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "realestate_knowledge_book",
+      "name": "물어보기 부끄러워 묻지 못한 부동산 상식",
+      "keywords": ["부동산상식", "청약", "아파트", "갭투자", "전세", "월세", "분양", "임대"],
+      "url": "https://link.coupang.com/a/eeeZ3e8Xim",
+      "html": "<a href=\"https://link.coupang.com/a/eeeZ3e8Xim\" target=\"_blank\" rel=\"nofollow sponsored\">부동산 상식 책 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0fdf4;\"><a href=\"https://link.coupang.com/a/eeeZ3e8Xim\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🏠</span><div><strong style=\"font-size:15px;\">물어보기 부끄러워 묻지 못한 부동산 상식</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eeeZ3e8Xim\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://image3.coupangcdn.com/image/affiliate/banner/b055141bdbc2cad492c01fe1ef3f7da0@2x.jpg\" alt=\"물어보기 부끄러워 묻지 못한 부동산 상식\" width=\"120\" height=\"240\"></a>",
+      "note": "부동산/청약/전세",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "stock_short_term_book",
+      "name": "처음부터 시작하는 주식투자 단타전략 (홍인기)",
+      "keywords": ["주식", "단타", "주식투자", "투자", "증권", "주식매매", "트레이딩", "재테크"],
+      "url": "https://link.coupang.com/a/eee1wJSlgq",
+      "html": "<a href=\"https://link.coupang.com/a/eee1wJSlgq\" target=\"_blank\" rel=\"nofollow sponsored\">주식투자 단타전략 책 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/eee1wJSlgq\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">📈</span><div><strong style=\"font-size:15px;\">처음부터 시작하는 주식투자 단타전략</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eee1wJSlgq\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://image3.coupangcdn.com/image/affiliate/banner/90c64acf021e3736da14be3592ce7d8e@2x.jpg\" alt=\"처음부터 시작하는 주식투자 단타전략\" width=\"120\" height=\"240\"></a>",
+      "note": "주식/투자/재테크",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "etf_book",
+      "name": "ETF 불패의 법칙 — 월급만으로 10억 불리고 월배당 500만원",
+      "keywords": ["ETF", "배당", "월배당", "파이어족", "ETF투자", "인덱스펀드", "적립식투자", "장기투자"],
+      "url": "https://link.coupang.com/a/eee2DsZgwS",
+      "html": "<a href=\"https://link.coupang.com/a/eee2DsZgwS\" target=\"_blank\" rel=\"nofollow sponsored\">ETF 불패의 법칙 책 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/eee2DsZgwS\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">📈</span><div><strong style=\"font-size:15px;\">ETF 불패의 법칙 — 월배당 500만원 파이어족 전략</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eee2DsZgwS\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img3c.coupangcdn.com/image/affiliate/banner/e76b587a5c724f6e2e3390c43da72bf9@2x.jpg\" alt=\"ETF 불패의 법칙\" width=\"120\" height=\"240\"></a>",
+      "note": "ETF/배당/장기투자",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "chatgpt_stock_book",
+      "name": "챗GPT 주식투자 사용설명서 — 금융 프롬프트 67",
+      "keywords": ["챗GPT", "AI투자", "주식투자", "주식", "AI", "인공지능", "투자전략", "금융AI"],
+      "url": "https://link.coupang.com/a/eee3v73Cou",
+      "html": "<a href=\"https://link.coupang.com/a/eee3v73Cou\" target=\"_blank\" rel=\"nofollow sponsored\">챗GPT 주식투자 사용설명서 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/eee3v73Cou\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">📈</span><div><strong style=\"font-size:15px;\">챗GPT 주식투자 사용설명서 (금융 프롬프트 67)</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eee3v73Cou\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img1c.coupangcdn.com/image/affiliate/banner/8e11fc33b833a2e47aac20ae57812d6f@2x.jpg\" alt=\"챗GPT 주식투자 사용설명서\" width=\"120\" height=\"240\"></a>",
+      "note": "주식/AI/투자",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "stock_chart_book",
+      "name": "처음 배우는 주식 차트 (친절한 재승씨)",
+      "keywords": ["주식차트", "차트분석", "기술적분석", "캔들", "이동평균", "주식", "투자분석"],
+      "url": "https://link.coupang.com/a/eee4Wqh23o",
+      "html": "<a href=\"https://link.coupang.com/a/eee4Wqh23o\" target=\"_blank\" rel=\"nofollow sponsored\">처음 배우는 주식 차트 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #fde68a;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/eee4Wqh23o\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">📈</span><div><strong style=\"font-size:15px;\">처음 배우는 주식 차트 — 친절한 재승씨</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eee4Wqh23o\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img4c.coupangcdn.com/image/affiliate/banner/429f562ce015b982669700c0780e576b@2x.jpg\" alt=\"처음 배우는 주식 차트\" width=\"120\" height=\"240\"></a>",
+      "note": "주식/차트분석",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "duitree_mask",
+      "name": "듀이트리 AC 딥 진정 마스크 10개",
+      "keywords": ["마스크팩", "진정마스크", "여드름", "트러블", "피부진정", "피부", "스킨케어", "뷰티"],
+      "url": "https://link.coupang.com/a/eee8O4ESSy",
+      "html": "<a href=\"https://link.coupang.com/a/eee8O4ESSy\" target=\"_blank\" rel=\"nofollow sponsored\">듀이트리 AC 딥 진정 마스크팩 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #e9d5ff;border-radius:12px;padding:16px 20px;margin:20px 0;background:#faf5ff;\"><a href=\"https://link.coupang.com/a/eee8O4ESSy\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">💆</span><div><strong style=\"font-size:15px;\">듀이트리 AC 딥 진정 마스크 10개입</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eee8O4ESSy\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://image13.coupangcdn.com/image/affiliate/banner/56b573fbddf509da7b2da026b667cd76@2x.jpg\" alt=\"듀이트리 AC 딥 진정 마스크\" width=\"120\" height=\"240\"></a>",
+      "note": "피부/뷰티/스킨케어",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "cosnori_mask",
+      "name": "코스노리 시카 앤 비타 데일리 퓨어 마스크 30개입",
+      "keywords": ["마스크팩", "시카", "비타민", "피부", "데일리마스크", "스킨케어", "건강피부", "뷰티"],
+      "url": "https://link.coupang.com/a/eee9ODMxGe",
+      "html": "<a href=\"https://link.coupang.com/a/eee9ODMxGe\" target=\"_blank\" rel=\"nofollow sponsored\">코스노리 시카 마스크팩 30개 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #e9d5ff;border-radius:12px;padding:16px 20px;margin:20px 0;background:#faf5ff;\"><a href=\"https://link.coupang.com/a/eee9ODMxGe\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">💆</span><div><strong style=\"font-size:15px;\">코스노리 시카 앤 비타 데일리 마스크 30개입</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eee9ODMxGe\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://image4.coupangcdn.com/image/affiliate/banner/dd999011c172b5d05e54657da62ee5df@2x.jpg\" alt=\"코스노리 시카 앤 비타 데일리 퓨어 마스크\" width=\"120\" height=\"240\"></a>",
+      "note": "피부/뷰티/스킨케어",
+      "created_at": "2026-06-01"
+    },
+
+    {
+      "id": "mediheal_mask",
+      "name": "메디힐 데일리 솔루션 마스크팩 3종 세트 30개입",
+      "keywords": ["마스크팩", "메디힐", "수분마스크", "피부수분", "피부", "건강", "스킨케어", "뷰티케어"],
+      "url": "https://link.coupang.com/a/eefa1Duj00",
+      "html": "<a href=\"https://link.coupang.com/a/eefa1Duj00\" target=\"_blank\" rel=\"nofollow sponsored\">메디힐 마스크팩 3종 세트 최저가 →</a>",
+      "blog_html": "<div style=\"border:1px solid #e9d5ff;border-radius:12px;padding:16px 20px;margin:20px 0;background:#faf5ff;\"><a href=\"https://link.coupang.com/a/eefa1Duj00\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">💆</span><div><strong style=\"font-size:15px;\">메디힐 데일리 솔루션 마스크팩 3종 세트 30개입</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_html": "<a href=\"https://link.coupang.com/a/eefa1Duj00\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://image15.coupangcdn.com/image/affiliate/banner/be4795bc955bb24b1d38356d3f9ed613@2x.jpg\" alt=\"메디힐 데일리 솔루션 마스크팩 3종 세트\" width=\"120\" height=\"240\"></a>",
+      "note": "피부/뷰티/건강",
       "created_at": "2026-06-01"
     }
   ]

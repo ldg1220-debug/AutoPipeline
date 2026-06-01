@@ -240,15 +240,17 @@ const MANUAL_COUPANG_ENTRIES = loadManualCoupangLinks();
  */
 export function getManualCoupangLink(keyword) {
   if (MANUAL_COUPANG_ENTRIES.length === 0) return null;
-  // 완전 일치 우선
-  const exact = MANUAL_COUPANG_ENTRIES.find((e) => e.keyword === keyword);
-  if (exact) return { url: exact.url, label: exact.name, html: exact.html ?? null, blog_html: exact.blog_html ?? null };
-  // 부분 일치
-  const partial = MANUAL_COUPANG_ENTRIES.find(
-    (e) => keyword.includes(e.keyword) || e.keyword.includes(keyword.slice(0, 3))
+
+  // 모든 매칭 수집 (완전 일치 + 부분 일치)
+  const matches = MANUAL_COUPANG_ENTRIES.filter(
+    (e) => e.keyword === keyword || keyword.includes(e.keyword) || e.keyword.includes(keyword.slice(0, 3))
   );
-  if (partial) return { url: partial.url, label: partial.name, html: partial.html ?? null, blog_html: partial.blog_html ?? null };
-  return null;
+  if (matches.length === 0) return null;
+
+  // 같은 product id끼리 중복 제거 후 랜덤 선택 (로테이션)
+  const unique = [...new Map(matches.map((e) => [e.id, e])).values()];
+  const picked = unique[Math.floor(Math.random() * unique.length)];
+  return { url: picked.url, label: picked.name, html: picked.html ?? null, blog_html: picked.blog_html ?? null };
 }
 function buildCoupangSignature(method, url, secretKey) {
   const datetime = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
