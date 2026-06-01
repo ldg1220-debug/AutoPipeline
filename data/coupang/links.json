@@ -10,6 +10,17 @@
       "blog_html": "<div style=\"border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#fffbeb;\"><a href=\"https://link.coupang.com/a/REPLACE_ME\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🛒</span><div><strong style=\"font-size:15px;\">예시 상품명</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a></div>",
       "note": "예시용 — 실제 링크 추가 후 이 항목 삭제",
       "created_at": "2026-06-01"
+    },
+    {
+      "id": "sickdot_cool_toxi",
+      "name": "시크도트 냉감소재 자외선차단 손등커버 골프 쿨토시",
+      "keywords": ["골프", "쿨토시", "냉감", "자외선차단", "손등커버", "여름", "운동", "스포츠", "아웃도어", "건강"],
+      "url": "https://link.coupang.com/a/eecTIbJj9E",
+      "html": "<a href=\"https://link.coupang.com/a/eecTIbJj9E\" target=\"_blank\" rel=\"nofollow sponsored\">시크도트 냉감 손등커버 쿨토시 최저가 보러가기 →</a>",
+      "blog_html": "<div style=\"border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin:20px 0;background:#f0f9ff;\"><a href=\"https://link.coupang.com/a/eecTIbJj9E\" target=\"_blank\" rel=\"nofollow sponsored\" style=\"display:flex;align-items:center;gap:12px;text-decoration:none;color:#1e293b;\"><span style=\"font-size:28px;\">🛒</span><div><strong style=\"font-size:15px;\">시크도트 냉감소재 자외선차단 손등커버 쿨토시</strong><br><span style=\"font-size:13px;color:#64748b;\">쿠팡에서 최저가 확인 →</span></div></a><p style=\"font-size:11px;color:#94a3b8;margin:8px 0 0;\">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p></div>",
+      "banner_iframe": "<iframe src=\"https://coupa.ng/cnb2XJ\" width=\"120\" height=\"240\" frameborder=\"0\" scrolling=\"no\" referrerpolicy=\"unsafe-url\" browsingtopics></iframe>",
+      "note": "냉감/골프/스포츠 카테고리 글에 자동 매칭",
+      "created_at": "2026-06-01"
     }
   ]
 }
