@@ -152,7 +152,7 @@ async function fetchCategoriesFromPage(context, blogName) {
 export async function loadTistoryCategories(blogName, accessToken, context = null) {
   // 0. 환경변수 직접 설정 — TISTORY_CATEGORY_MAP=카테고리명:ID,카테고리명:ID
   //    예) TISTORY_CATEGORY_MAP=경제·금융:123456,부동산:234567,재테크:345678
-  const envMap = process.env.TISTORY_CATEGORY_MAP;
+  const envMap = config.tistoryCategories;
   if (envMap) {
     const categories = envMap.split(',').map((entry) => {
       const [name, id] = entry.split(':').map((s) => s.trim());
