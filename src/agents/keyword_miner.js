@@ -142,7 +142,7 @@ function scoreKeywords(allSuggestions, datalabScores = {}) {
   const map = new Map();
 
   for (const { keyword, rank, source } of allSuggestions) {
-    const kw = keyword.trim();
+    const kw = keyword.trim().replace(/\s+/g, ' ');  // 공백 정규화
     if (!kw || kw.length < 3) continue;
 
     if (!map.has(kw)) map.set(kw, { sources: new Set(), rankSum: 0, count: 0 });
