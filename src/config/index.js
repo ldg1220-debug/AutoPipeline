@@ -97,6 +97,8 @@ export const config = {
   tistoryBlog: {
     sessionCookie: process.env.TISTORY_SESSION_COOKIE,
   },
+  tistoryCategories: process.env.TISTORY_CATEGORY_MAP ||
+    '경제·금융:1386597,부동산:1386598,건강:1386599,연예·사회:1386600',
   grok: {
     apiKey: process.env.GROK_API_KEY,
   },
