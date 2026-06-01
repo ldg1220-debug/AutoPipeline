@@ -7,6 +7,7 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import db from '../db/db.js';
 import { generateYouTubeDescription, generateYouTubeTags, generateYouTubeTitle } from '../utils/youtubeSEO.js';
+import { getManualCoupangLink } from './monetizer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -126,9 +127,14 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
   const shortsTitle = baseTitle.includes('#Shorts') ? baseTitle : `${baseTitle} #Shorts`;
   // 롱폼 URL이 있으면 설명에 추가
   const longFormLine = longFormUrl ? `\n\n▶ 풀버전 영상: ${longFormUrl}` : '';
+  // 쿠팡 딥링크 (설명란 앞쪽 — 접히기 전 노출)
+  const shortsCoupang = getManualCoupangLink(content.keyword);
+  const shortsCoupangLine = shortsCoupang
+    ? `🛒 ${shortsCoupang.url}\n`
+    : '';
   const shortsDesc  = description.includes('#Shorts')
-    ? `${description}${longFormLine}`
-    : `${description}${longFormLine}\n\n#Shorts`;
+    ? `${shortsCoupangLine}${description}${longFormLine}`
+    : `${shortsCoupangLine}${description}${longFormLine}\n\n#Shorts`;
   const shortsTags  = tags.includes('Shorts') ? tags : [...tags, 'Shorts', '쇼츠'];
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
@@ -233,10 +239,17 @@ async function publishToYouTube(content, accessToken) {
 
   logger.info(`[auto_publisher] SEO — title: "${optimizedTitle}" | tags: ${tags.length}개 | desc: ${description.length}자`);
 
+  // 쿠팡 파트너스 딥링크 설명란 삽입 (설정된 경우만)
+  const coupangLink = getManualCoupangLink(content.keyword);
+  const coupangLine = coupangLink
+    ? `\n\n🛒 관련 추천: ${coupangLink.url}\n(이 링크는 쿠팡 파트너스 링크로, 구매 시 일정 수수료를 받을 수 있습니다)`
+    : '';
+  const finalDescription = description + coupangLine;
+
   const metadata = {
     snippet: {
       title: optimizedTitle,
-      description,
+      description: finalDescription,
       tags,
       categoryId: '22',
       defaultLanguage: 'ko',
