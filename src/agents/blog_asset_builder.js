@@ -172,7 +172,7 @@ async function fetchSectionImages(sections, keyword, category, destDir) {
       await throttle(300);
       // per_page를 10으로 늘려서 중복 회피 여지 확보
       const res = await axios.get('https://api.pexels.com/v1/search', {
-        params: { query, per_page: 10, orientation: 'landscape', page: 1 },
+        params: { query, per_page: 10, orientation: 'landscape', page: Math.floor(Math.random() * 5) + 1 },
         headers: { Authorization: apiKey },
         timeout: 10000,
       });
