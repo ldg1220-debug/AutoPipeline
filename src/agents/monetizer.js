@@ -196,9 +196,42 @@ function adsenseSlot(position) {
 // ── 쿠팡 파트너스 Open API ─────────────────────────────────────────────────
 
 /**
- * HMAC-SHA256 서명 생성 (쿠팡 파트너스 API 인증)
- * https://developers.coupangpartners.com
+ * COUPANG_MANUAL_LINKS 환경변수에서 키워드→딥링크 맵을 읽는다.
+ * 형식: COUPANG_MANUAL_LINKS=재테크:https://...,부동산:https://...,금리:https://...
+ * API 없이도 키워드 매칭으로 링크를 삽입할 수 있다.
  */
+function loadManualCoupangLinks() {
+  const raw = process.env.COUPANG_MANUAL_LINKS;
+  if (!raw) return {};
+  return Object.fromEntries(
+    raw.split(',').map((entry) => {
+      const idx = entry.indexOf(':');
+      if (idx < 0) return null;
+      const keyword = entry.slice(0, idx).trim();
+      const url     = entry.slice(idx + 1).trim();
+      return keyword && url ? [keyword, url] : null;
+    }).filter(Boolean)
+  );
+}
+
+const MANUAL_COUPANG_LINKS = loadManualCoupangLinks();
+
+/**
+ * 키워드와 가장 잘 매칭되는 수동 딥링크를 반환한다.
+ * 부분 문자열 매칭으로 키워드 포함 여부를 확인한다.
+ */
+export function getManualCoupangLink(keyword) {
+  if (Object.keys(MANUAL_COUPANG_LINKS).length === 0) return null;
+  // 완전 일치 우선
+  if (MANUAL_COUPANG_LINKS[keyword]) return { url: MANUAL_COUPANG_LINKS[keyword], label: keyword };
+  // 부분 일치
+  for (const [k, url] of Object.entries(MANUAL_COUPANG_LINKS)) {
+    if (keyword.includes(k) || k.includes(keyword.slice(0, 3))) {
+      return { url, label: k };
+    }
+  }
+  return null;
+}
 function buildCoupangSignature(method, url, secretKey) {
   const datetime = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   const path_ = new URL(url).pathname + new URL(url).search;
@@ -360,6 +393,28 @@ async function monetizeBlogDraft(content) {
     const products = await searchCoupangProducts(hook.product_category ?? keyword);
     if (products.length > 0) {
       affiliateMap[hook.position] = buildAffiliateBlock(products, hook.anchor_text);
+      hasAffiliate = true;
+    } else {
+      // API 없을 때: 수동 딥링크 폴백
+      const manual = getManualCoupangLink(hook.product_category ?? keyword);
+      if (manual) {
+        affiliateMap[hook.position] = buildAffiliateBlock(
+          [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
+          hook.anchor_text
+        );
+        hasAffiliate = true;
+      }
+    }
+  }
+
+  // affiliate_hooks가 없어도 수동 딥링크가 있으면 conclusion_top에 자동 삽입
+  if (!hasAffiliate) {
+    const manual = getManualCoupangLink(keyword);
+    if (manual) {
+      affiliateMap['conclusion_top'] = buildAffiliateBlock(
+        [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
+        '관련 상품'
+      );
       hasAffiliate = true;
     }
   }
