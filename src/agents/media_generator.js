@@ -1670,7 +1670,7 @@ async function generateLongFormMedia(content) {
       // 섹션 누적 시작 시간 계산 (조정된 길이 기준)
       let sectionStart = 0;
       for (let i = 0; i < clampedIdx; i++) sectionStart += adjustedDurations[i];
-      const sectionDur = Math.min(adjustedDurations[clampedIdx] ?? 60, 59); // 최대 59초
+      const sectionDur = Math.min(adjustedDurations[clampedIdx] ?? 60, 58); // 1초 인트로 붙인 후 총 59초 이내 유지
 
       const shortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_shorts.mp4`);
       const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')

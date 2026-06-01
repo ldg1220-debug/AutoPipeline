@@ -159,39 +159,17 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Shorts uploaded: https://youtube.com/shorts/${videoId}`);
 
-  // 쇼츠 썸네일: 세로(9:16) 우선, 없으면 가로 폴백 — 즉시공개이므로 30초 대기 후 최대 3회 재시도
-  const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
-  const thumbFallback   = path.resolve(mediaDir, `${safeKeyword}_thumb.jpg`);
-  const shortsThumbExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
-  const thumbPath = shortsThumbExists ? thumbShortsPath : thumbFallback;
-  const thumbPathExists   = await fs.access(thumbPath).then(() => true).catch(() => false);
-
-  let thumbnailUploaded = false;
-  if (!thumbPathExists) {
-    logger.warn(`[auto_publisher] 쇼츠 썸네일 파일 없음: ${thumbPath}`);
-  } else {
-    logger.info('[auto_publisher] Shorts 처리 대기 30초...');
-    await new Promise((r) => setTimeout(r, 30000));
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbPath, accessToken);
-        if (thumbnailUploaded) {
-          logger.info(`[auto_publisher] 쇼츠 썸네일 업로드 성공 (시도 ${attempt}): ${thumbPath}`);
-          break;
-        }
-      } catch (err) {
-        logger.warn(`[auto_publisher] 쇼츠 썸네일 실패 (시도 ${attempt}/3): ${err.message}`);
-        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
-      }
-    }
-    if (!thumbnailUploaded) logger.error(`[auto_publisher] 쇼츠 썸네일 3회 모두 실패: ${videoId}`);
-  }
+  // YouTube Shorts는 thumbnails.set API가 동작하지 않음 (채널 인증 정책 / Shorts 제한).
+  // 대신 media_generator에서 영상 앞에 1초 썸네일 인트로를 삽입했으므로
+  // YouTube Studio > 영상 수정 > 커버 선택 > 첫 번째 프레임 으로 수동 지정해야 한다.
+  logger.info(`[auto_publisher] ⚠️  Shorts 커버 수동 설정 필요: YouTube Studio > 영상 수정 > 커버 선택 > 첫 번째 프레임 | videoId=${videoId}`);
 
   return {
     platform:           'youtube_shorts',
     video_id:           videoId,
     url:                `https://youtube.com/shorts/${videoId}`,
-    thumbnail_uploaded: thumbnailUploaded,
+    thumbnail_uploaded: false,
+    cover_action:       'manual_studio_first_frame',
   };
 }
 
