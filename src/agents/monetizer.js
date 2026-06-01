@@ -245,10 +245,12 @@ export function getManualCoupangLink(keyword) {
   const matches = MANUAL_COUPANG_ENTRIES.filter(
     (e) => e.keyword === keyword || keyword.includes(e.keyword) || e.keyword.includes(keyword.slice(0, 3))
   );
-  if (matches.length === 0) return null;
+
+  // 매칭 없으면 전체 중 랜덤 폴백
+  const pool = matches.length > 0 ? matches : MANUAL_COUPANG_ENTRIES;
 
   // 같은 product id끼리 중복 제거 후 랜덤 선택 (로테이션)
-  const unique = [...new Map(matches.map((e) => [e.id, e])).values()];
+  const unique = [...new Map(pool.map((e) => [e.id, e])).values()];
   const picked = unique[Math.floor(Math.random() * unique.length)];
   return { url: picked.url, label: picked.name, html: picked.html ?? null, blog_html: picked.blog_html ?? null };
 }

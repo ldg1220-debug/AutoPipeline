@@ -110,7 +110,7 @@ export const config = {
       '재테크,부동산,경기침체,금리,주식투자,코인투자,ETF,달러환율,인플레이션,가계부채,' +
       '아파트청약,전세사기,재건축,역세권,부동산세금,임대차,분양권,갭투자,경매부동산,신도시,' +
       '노후준비,연금저축,개인연금,실업급여,정부지원금,국민연금,건강보험,복지혜택,청년지원,소득공제',
-    topN:   parseInt(process.env.KEYWORD_TOP_N || '15', 10),
+    topN:   parseInt(process.env.KEYWORD_TOP_N || '20', 10),
   },
   // 쇼핑 파이프라인 — links.json 제품 기반 (TikTok/Instagram/네이버클립용)
   shopping: {
@@ -145,6 +145,6 @@ export const config = {
     blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 3 * * 2,4,6',    // KST 12:00 점심 피크
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
-    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '5', 10),
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '15', 10),
   },
 };
