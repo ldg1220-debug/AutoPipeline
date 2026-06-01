@@ -112,6 +112,15 @@ export const config = {
       '노후준비,연금저축,개인연금,실업급여,정부지원금,국민연금,건강보험,복지혜택,청년지원,소득공제',
     topN:   parseInt(process.env.KEYWORD_TOP_N || '15', 10),
   },
+  // 쇼핑 파이프라인 — links.json 제품 기반 (TikTok/Instagram/네이버클립용)
+  shopping: {
+    // 쇼핑 파이프라인 활성화 여부
+    enabled: process.env.SHOPPING_PIPELINE !== 'false',
+    // 하루 최대 쇼핑 쇼츠 생성 수 (links.json 제품 수를 초과하지 않음)
+    dailyLimit: parseInt(process.env.SHOPPING_DAILY_LIMIT || '3', 10),
+    // 같은 제품 재사용 최소 간격 (일)
+    reuseAfterDays: parseInt(process.env.SHOPPING_REUSE_DAYS || '14', 10),
+  },
   topicGrouper: {
     // 지원 모델:
     //   OpenAI   — gpt-4o-mini (기본, 저렴), gpt-4o (정확도 우선)
