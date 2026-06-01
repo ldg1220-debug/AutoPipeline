@@ -67,6 +67,8 @@ async function uploadImageToEditor(page, imagePath) {
 async function setRepresentativeImage(page, imagePath) {
   // 1. 파일 input이 직접 노출된 경우 (가장 안정적)
   const fileInputSels = [
+    '.box_thumb input[type="file"]',           // Tistory 실제 셀렉터
+    '.box_thumb input.inp_g',
     '.layer_publish input[type="file"]',
     'input[type="file"][accept*="image"]',
   ];
