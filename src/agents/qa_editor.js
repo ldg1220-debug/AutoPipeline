@@ -339,9 +339,9 @@ export async function runVisionQA(textQaData) {
       const visionReasons = [];
       if (visionResult.layout === 'FAIL') visionReasons.push(`레이아웃 오류: ${visionResult.reason}`);
       if (visionResult.sync === 'FAIL') visionReasons.push(`싱크 오류: ${visionResult.reason}`);
-      report.final_decision = 'REJECTED';
-      report.revision_reason = visionReasons.join(' / ');
-      logger.warn(`[qa_editor] Vision QA REJECTED: ${report.keyword}`);
+      // Vision QA는 advisory-only — 경고만 기록하고 업로드는 계속 진행
+      report.vision_qa_warning = visionReasons.join(' / ');
+      logger.warn(`[qa_editor] Vision QA WARNING (업로드 계속 진행): ${report.keyword} | ${report.vision_qa_warning}`);
     } else {
       logger.info(`[qa_editor] Vision QA PASSED: ${report.keyword}`);
     }

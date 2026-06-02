@@ -5,6 +5,7 @@ import { parseStringPromise } from 'xml2js';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -229,12 +230,58 @@ export async function fetchTrends() {
     const bestHealth   = sorted.find((i) => i.category === 'health');
     const selected     = bestHealth ? [...economyItems, bestHealth] : economyItems;
 
+    // ── DB promised 키워드 최우선 처리 ────────────────────────────────────
+    // 지난 영상 스크립트에서 "다음 에피소드" 예고한 키워드를 맨 앞에 삽입
+    let promisedInserts = [];
+    try {
+      const promisedRows = db.prepare(
+        `SELECT keyword, category, score FROM keywords
+         WHERE status = 'promised'
+         ORDER BY score DESC LIMIT ?`
+      ).all(dailyLimit);
+
+      if (promisedRows.length > 0) {
+        promisedInserts = promisedRows.map((r) => ({
+          keyword:         r.keyword,
+          category:        r.category ?? 'economy',
+          virality:        35,
+          commercial_value: 30,
+          freshness_hours: 15,
+          niche_premium:   15,
+          score:           r.score ?? 80,
+          score_reason:    { virality: 35, commercial_value: 30, freshness_hours: 15, niche_premium: 15 },
+          series:          SERIES_MAP[r.category ?? 'economy'] ?? '오늘의 이슈',
+          collected_at:    new Date().toISOString(),
+          from_promise:    true,
+        }));
+        // 처리 완료 → 다음 실행에서 중복 방지
+        for (const r of promisedRows) {
+          db.prepare(
+            `UPDATE keywords SET status='used', used_at=datetime('now')
+             WHERE keyword=? AND status='promised'`
+          ).run(r.keyword);
+        }
+        logger.info(
+          `[trend_scraper] Promised 키워드 ${promisedInserts.length}개 우선 삽입: ` +
+          promisedInserts.map((i) => i.keyword).join(', ')
+        );
+      }
+    } catch (dbErr) {
+      logger.warn(`[trend_scraper] Promised 키워드 조회 실패: ${dbErr.message}`);
+    }
+
+    // promised 키워드를 앞에, 기존 선택을 뒤에 붙여 중복 제거
+    const dedupedSelected = [
+      ...promisedInserts,
+      ...selected.filter((i) => !promisedInserts.some((p) => p.keyword === i.keyword)),
+    ];
+
     logger.info(
-      `[trend_scraper] Selected ${selected.length} items: ` +
-      selected.map((i) => `${i.keyword}(${i.category})`).join(', ')
+      `[trend_scraper] Selected ${dedupedSelected.length} items: ` +
+      dedupedSelected.map((i) => `${i.keyword}(${i.category}${i.from_promise ? ',promised' : ''})`).join(', ')
     );
 
-    return { selected_items: selected };
+    return { selected_items: dedupedSelected };
   } catch (err) {
     logger.error('[trend_scraper] Unexpected error. Falling back to mock data.', { message: err.message });
     return readJSON(MOCK_PATH);

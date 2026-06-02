@@ -232,18 +232,64 @@ async function runPipeline() {
   const approvedKeywords = new Set(
     textQaData.reports.filter((r) => r.final_decision === 'APPROVED').map((r) => r.keyword)
   );
-  const approvedContentData = {
+  let approvedContentData = {
     ...contentData,
     contents: contentData.contents.filter((c) => approvedKeywords.has(c.keyword)),
   };
+
+  // ── 최상위 키워드 롱폼 생성 (score 1위 또는 --force-keyword) ─────────────
+  // 나머지 키워드는 standalone 쇼츠(최대 59초, 완전한 한 편)로 유지
+  const _bestKeyword = trendData.selected_items[0]?.keyword;
+  if (_bestKeyword && approvedKeywords.has(_bestKeyword)) {
+    try {
+      const _bestContent = approvedContentData.contents.find((c) => c.keyword === _bestKeyword);
+      if (_bestContent) {
+        logger.info(`[app] 최상위 키워드 롱폼 생성 시작: "${_bestKeyword}"`);
+        const _lfResult = await createLongFormAndShorts(
+          trendData.selected_items[0],
+          _bestContent.blog_draft ?? null
+        );
+        if (_lfResult.long_video?.sections?.length) {
+          const _lfIdx = approvedContentData.contents.findIndex((c) => c.keyword === _bestKeyword);
+          if (_lfIdx !== -1) {
+            approvedContentData.contents[_lfIdx] = {
+              ...approvedContentData.contents[_lfIdx],
+              long_video: _lfResult.long_video,
+            };
+          }
+          logger.info(`[app] 롱폼 생성 완료: "${_bestKeyword}" (${_lfResult.long_video.sections.length}섹션)`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`[app] 롱폼 생성 실패 ("${_bestKeyword}"): ${err.message}. 쇼츠만 진행.`);
+    }
+  }
 
   try {
     if (approvedContentData.contents.length === 0) {
       logger.warn('[app] Agent 2.5 skipped — no text-approved items to produce.');
     } else {
-      const mediaResult = await generateAllMedia(approvedContentData);
-      await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
-      logger.info(`[app] Agent 2.5 complete. Media produced: ${mediaResult.results?.length ?? 0}`);
+      // 롱폼 항목(최상위 키워드)과 쇼츠 전용 항목 분리
+      const _longformItems   = approvedContentData.contents.filter((c) => c.long_video?.sections?.length);
+      const _shortsOnlyItems = approvedContentData.contents.filter((c) => !c.long_video?.sections?.length);
+
+      for (const tc of _longformItems) {
+        try {
+          logger.info(`[app] 롱폼+쇼츠 미디어 생성: "${tc.keyword}"`);
+          await generateLongFormMedia(tc);
+          logger.info(`[app] 롱폼 미디어 완료: "${tc.keyword}"`);
+        } catch (lfErr) {
+          logger.warn(`[app] 롱폼 미디어 실패 ("${tc.keyword}"): ${lfErr.message}`);
+        }
+      }
+
+      if (_shortsOnlyItems.length > 0) {
+        const mediaResult = await generateAllMedia({ ...approvedContentData, contents: _shortsOnlyItems });
+        await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
+        logger.info(`[app] 쇼츠 미디어 생성 완료: ${mediaResult.results?.length ?? 0}개`);
+      }
+
+      logger.info(`[app] Agent 2.5 complete. 롱폼: ${_longformItems.length}, 쇼츠: ${_shortsOnlyItems.length}`);
     }
   } catch (err) {
     logger.warn('[app] Agent 2.5 (media_generator) failed. Continuing without media.', {
