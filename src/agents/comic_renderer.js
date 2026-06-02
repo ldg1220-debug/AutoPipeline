@@ -203,12 +203,12 @@ async function generateComicImage(prompt, outputPath) {
     }
   }
 
-  // 2순위: gpt-image-1
+  // 2순위: dall-e-3
   if (config.openai?.apiKey) {
     try {
       const res = await axios.post(
         'https://api.openai.com/v1/images/generations',
-        { model: 'gpt-image-1', prompt, n: 1, size: '1024x1536', quality: 'standard' },
+        { model: 'dall-e-3', prompt: prompt.slice(0, 4000), n: 1, size: '1024x1792', quality: 'standard', response_format: 'b64_json' },
         {
           headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           timeout: 120000,
@@ -225,7 +225,7 @@ async function generateComicImage(prompt, outputPath) {
         return outputPath;
       }
     } catch (e) {
-      logger.warn(`[comic] gpt-image-1 failed: ${e.message}`);
+      logger.warn(`[comic] dall-e-3 failed: ${e.response?.data?.error?.message ?? e.message}`);
     }
   }
 
