@@ -174,7 +174,13 @@ async function loadImageBuf(src) {
 
 // ── Grok Aurora 이미지 생성 ──────────────────────────────────────────────────
 
-async function generateComicImage(prompt, outputPath) {
+const PANEL_PEXELS_QUERY = {
+  problem:  (kw) => `${kw} problem struggle discomfort`,
+  hero:     (kw) => `${kw} product solution cool`,
+  solution: (kw) => `happy satisfied person outdoor summer`,
+};
+
+async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
   // 1순위: Grok Aurora
@@ -226,6 +232,29 @@ async function generateComicImage(prompt, outputPath) {
       }
     } catch (e) {
       logger.warn(`[comic] dall-e-3 failed: ${e.response?.data?.error?.message ?? e.message}`);
+    }
+  }
+
+  // 3순위: Pexels 스톡 사진
+  const pexelsKey = process.env.PEXELS_API_KEY;
+  if (pexelsKey && pexelsQuery) {
+    try {
+      const searchRes = await axios.get('https://api.pexels.com/v1/search', {
+        headers: { Authorization: pexelsKey },
+        params: { query: pexelsQuery, per_page: 10, orientation: 'portrait' },
+        timeout: 15000,
+      });
+      const photos = searchRes.data?.photos ?? [];
+      if (photos.length > 0) {
+        const photo   = photos[Math.floor(Math.random() * Math.min(5, photos.length))];
+        const imgUrl  = photo.src?.large2x ?? photo.src?.large ?? photo.src?.original;
+        const imgRes  = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
+        await fs.writeFile(outputPath, Buffer.from(imgRes.data));
+        logger.info(`[comic] Pexels fallback used: "${pexelsQuery}"`);
+        return outputPath;
+      }
+    } catch (e) {
+      logger.warn(`[comic] Pexels failed: ${e.message}`);
     }
   }
 
@@ -507,11 +536,12 @@ export async function generateComicMedia(content, outputDir) {
       `Absolutely NO text, NO letters, NO words anywhere in the image. ` +
       `9:16 vertical portrait format.`;
 
+    const pexelsQuery = PANEL_PEXELS_QUERY[type]?.(content.keyword) ?? content.keyword;
     logger.info(`[comic] 배경 이미지 생성 (${type}): ${content.keyword}`);
-    const generated = await generateComicImage(comicPrompt, imgPath);
+    const generated = await generateComicImage(comicPrompt, imgPath, pexelsQuery);
     if (!generated) {
-      // 폴백: 단색 배경
-      const fallbackColors = { problem: '#1a0000', hero: '#0a1a00', solution: '#001a0a' };
+      // 최후 폴백: 단색 배경
+      const fallbackColors = { problem: '#2a0a0a', hero: '#0a1a2a', solution: '#0a2a0a' };
       await sharp({ create: { width: W, height: H, channels: 3, background: fallbackColors[type] ?? '#111' } })
         .jpeg().toFile(imgPath);
     }
