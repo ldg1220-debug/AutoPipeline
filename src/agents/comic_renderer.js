@@ -224,7 +224,7 @@ async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
     try {
       const res = await axios.post(
         'https://api.openai.com/v1/images/generations',
-        { model: 'dall-e-3', prompt: prompt.slice(0, 4000), n: 1, size: '1024x1792', quality: 'standard', response_format: 'b64_json' },
+        { model: 'dall-e-3', prompt: prompt.slice(0, 4000), n: 1, size: '1024x1792', quality: 'standard' },
         {
           headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           timeout: 120000,
@@ -250,7 +250,7 @@ async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
   if (geminiKey) {
     try {
       const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`,
         { instances: [{ prompt: prompt.slice(0, 4000) }], parameters: { sampleCount: 1, aspectRatio: '9:16' } },
         { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
       );

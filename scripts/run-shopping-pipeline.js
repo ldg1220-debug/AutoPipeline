@@ -127,7 +127,7 @@ async function runComicPipeline(filterIds, date) {
   await writeJSON(mediaPath, { generated_at: new Date().toISOString(), results: mediaResults.filter(Boolean) });
 
   // 3. YouTube Shorts 업로드
-  if (config.runtime.youtubeUpload && !config.runtime.dryRun) {
+  if (process.env.YOUTUBE_UPLOAD !== 'false' && !config.runtime.dryRun) {
     logger.info('[shopping-comic] Step 3: YouTube Shorts 업로드 중...');
     const accessToken = await getAccessToken();
     const uploadResults = [];
@@ -183,7 +183,7 @@ async function runNormalPipeline(filterIds, date) {
   await writeJSON(mediaPath, mediaData);
 
   // 3. YouTube Shorts 업로드
-  if (config.runtime.youtubeUpload && !config.runtime.dryRun) {
+  if (process.env.YOUTUBE_UPLOAD !== 'false' && !config.runtime.dryRun) {
     logger.info('[shopping] Step 3: YouTube Shorts 업로드 중...');
     const accessToken = await getAccessToken();
 
