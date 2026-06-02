@@ -205,14 +205,31 @@ async function generateComicScriptGemini(product) {
     `아래 JSON 형식으로만 응답하세요 (코드블록 없이 JSON만):\n` +
     `{"youtube_title":"35자 이내 제목","shortform_script":{"hook":"5초 강렬한 질문(20자이내)","context":"10초 문제공감(30~50자)","insight":"15초 핵심장점(60~100자)","summary":"5초 핵심정리(20~30자)","cta":"아래 링크에서 쿠팡 최저가로 확인해 보세요!"},"panel_story":{"problem":{"scene_prompt":"English: dramatic scene showing ONLY the PROBLEM situation — a person suffering without the product. Marvel comic style, bold outlines, ben-day dots, vivid pop art colors. NO character mascot here. No text.","caption":"한국어캡션15자이내"},"hero":{"scene_prompt":"English: ${MAEILNAMJA_DESC} dramatically bursts in holding the product, heroic spotlight pose, golden rays, triumphant expression. Marvel comic style, bold outlines, ben-day dots, vivid yellow/red pop art. No text.","caption":"한국어캡션15자이내"},"solution":{"scene_prompt":"English: ${MAEILNAMJA_DESC} gives big thumbs up next to a happy satisfied person, problem fully solved, celebration, confetti, bright cheerful mood. Marvel comic style, bold outlines, ben-day dots. No text.","caption":"한국어캡션15자이내"}}}`;
 
-  const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85 } },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
-  );
-  const text  = res.data.candidates[0].content.parts[0].text;
-  const match = text.match(/\{[\s\S]*\}/);
-  return JSON.parse(match[0]);
+  // 최신 → 구형 순으로 시도 (모델 deprecation 대응)
+  const GEMINI_MODELS = [
+    'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+    'gemini-1.5-flash', 'gemini-1.5-flash-latest',
+  ];
+  let lastErr;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85 } },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 60000 },
+      );
+      const text  = res.data.candidates[0].content.parts[0].text;
+      const match = text.match(/\{[\s\S]*\}/);
+      logger.info(`[shopping-comic] Gemini (${model}) 스크립트 생성 성공`);
+      return JSON.parse(match[0]);
+    } catch (e) {
+      const status = e.response?.status ?? 'ERR';
+      logger.warn(`[shopping-comic] Gemini (${model}) 실패 (${status}): ${e.response?.data?.error?.message ?? e.message}`);
+      lastErr = e;
+      if (status !== 404 && status !== 400) break; // 모델 없음 외 에러는 재시도 무의미
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -248,12 +265,13 @@ export async function createShoppingComicContent(filterIds = null) {
         try {
           script = await generateComicScriptOpenAI(product, openai);
         } catch (oaiErr) {
-          if (oaiErr.status === 429 || oaiErr.message?.includes('quota')) {
-            logger.warn(`[shopping-comic] OpenAI 쿼터 초과 → Gemini/Anthropic 폴백`);
-            script = hasGemini
-              ? await generateComicScriptGemini(product)
-              : await generateComicScriptAnthropic(product, anthropic);
-          } else throw oaiErr;
+          // 429(쿼터), 403(IP 차단), 401(키 오류) 등 모든 실패 → Gemini/Anthropic 폴백
+          logger.warn(`[shopping-comic] OpenAI 실패 (${oaiErr.status ?? oaiErr.message}) → Gemini/Anthropic 폴백`);
+          script = hasGemini
+            ? await generateComicScriptGemini(product)
+            : anthropic
+              ? await generateComicScriptAnthropic(product, anthropic)
+              : (() => { throw oaiErr; })();
         }
       } else if (anthropic) {
         script = await generateComicScriptAnthropic(product, anthropic);

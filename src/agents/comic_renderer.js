@@ -151,6 +151,94 @@ function borderSvg(bw = 16) {
   );
 }
 
+// ── 패널 전용 SVG 배경 생성 ──────────────────────────────────────────────────
+// 외부 이미지 API 없이 코믹북 스타일 배경을 순수 SVG로 생성
+
+/** Panel 1: 빨간 사선 해칭 배경 (위기/문제) */
+function problemBgSvg(w, h) {
+  const stripes = [];
+  for (let i = -h; i < w + h; i += 36)
+    stripes.push(
+      `<line x1="${i}" y1="0" x2="${i + h}" y2="${h}" stroke="#000" stroke-width="12" opacity="0.20"/>`,
+    );
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+      <defs>
+        <radialGradient id="rg" cx="40%" cy="65%" r="70%">
+          <stop offset="0%"   stop-color="#8B0000" stop-opacity="0.70"/>
+          <stop offset="100%" stop-color="#CC1111" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="${w}" height="${h}" fill="#CC1111"/>
+      <rect width="${w}" height="${h}" fill="url(#rg)"/>
+      <g>${stripes.join('')}</g>
+    </svg>`,
+  );
+}
+
+/** Panel 2: 검정 바탕 + 황금 방사선 (영웅 등장) */
+function heroBgSvg(w, h) {
+  const cx = w * 0.5, cy = h * 0.40;
+  const lines = [];
+  for (let i = 0; i < 72; i++) {
+    const a = (i / 72) * Math.PI * 2;
+    const r1 = 160, r2 = Math.hypot(w, h) * 0.92;
+    const thick = i % 5 === 0 ? 7 : i % 2 === 0 ? 3.5 : 1.8;
+    const op    = i % 5 === 0 ? 0.95 : i % 2 === 0 ? 0.65 : 0.40;
+    lines.push(
+      `<line x1="${(cx + Math.cos(a) * r1).toFixed(1)}" y1="${(cy + Math.sin(a) * r1).toFixed(1)}"
+             x2="${(cx + Math.cos(a) * r2).toFixed(1)}" y2="${(cy + Math.sin(a) * r2).toFixed(1)}"
+             stroke="#FFD700" stroke-width="${thick}" opacity="${op}"/>`,
+    );
+  }
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+      <defs>
+        <radialGradient id="hg" cx="50%" cy="40%" r="55%">
+          <stop offset="0%"   stop-color="#FFE040" stop-opacity="0.50"/>
+          <stop offset="60%"  stop-color="#FF7700" stop-opacity="0.12"/>
+          <stop offset="100%" stop-color="#09071A" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="${w}" height="${h}" fill="#09071A"/>
+      <rect width="${w}" height="${h}" fill="url(#hg)"/>
+      <g>${lines.join('')}</g>
+    </svg>`,
+  );
+}
+
+/** Panel 3: 초록 배경 + 별 스파클 (해결/성공) */
+function solutionBgSvg(w, h) {
+  const positions = [
+    [0.12,0.10],[0.80,0.07],[0.52,0.17],[0.22,0.52],[0.68,0.44],
+    [0.08,0.76],[0.86,0.68],[0.42,0.80],[0.64,0.92],[0.28,0.32],
+    [0.92,0.28],[0.50,0.48],[0.06,0.43],[0.76,0.83],[0.38,0.13],
+    [0.90,0.55],[0.18,0.88],[0.60,0.60],[0.32,0.70],[0.75,0.22],
+  ];
+  const sparkles = positions.map(([rx, ry], idx) => {
+    const x  = rx * w, y = ry * h;
+    const s  = 12 + (idx % 5) * 6;
+    const op = (0.35 + (idx % 4) * 0.15).toFixed(2);
+    return `<polygon points="${starburstPath(x, y, s * 0.38, s, 4)}"
+      fill="white" opacity="${op}" transform="rotate(45,${x},${y})"/>`;
+  });
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+      <defs>
+        <radialGradient id="sg" cx="50%" cy="38%" r="62%">
+          <stop offset="0%"   stop-color="#50FF99" stop-opacity="0.60"/>
+          <stop offset="100%" stop-color="#009940" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="${w}" height="${h}" fill="#00A843"/>
+      <rect width="${w}" height="${h}" fill="url(#sg)"/>
+      <g>${sparkles.join('')}</g>
+    </svg>`,
+  );
+}
+
+const PANEL_BG_FN = { problem: problemBgSvg, hero: heroBgSvg, solution: solutionBgSvg };
+
 // ── 패널 설정 ────────────────────────────────────────────────────────────────
 
 const PANEL_CFG = {
@@ -190,36 +278,49 @@ const PANEL_PEXELS_QUERY = {
   solution: (kw) => `happy satisfied person outdoor summer`,
 };
 
-async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
+/**
+ * AI 이미지 생성: Grok → DALL-E 3 → Gemini Imagen → null
+ * @returns {{ path: string, isAI: boolean } | null}
+ */
+async function generateComicImage(prompt, outputPath) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-  // 1순위: Grok Aurora
-  if (config.grok?.apiKey) {
-    try {
-      const res = await axios.post(
-        'https://api.x.ai/v1/images/generations',
-        { model: 'grok-2-image-1212', prompt, n: 1 },
-        {
-          headers: { Authorization: `Bearer ${config.grok.apiKey}`, 'Content-Type': 'application/json' },
-          timeout: 120000,
+  // 1순위: Grok Aurora (여러 모델명 시도)
+  const grokKey = config.grok?.apiKey;
+  if (grokKey) {
+    for (const model of ['grok-2-image-1212', 'aurora', 'grok-2-aurora']) {
+      try {
+        const res = await axios.post(
+          'https://api.x.ai/v1/images/generations',
+          { model, prompt, n: 1 },
+          {
+            headers: { Authorization: `Bearer ${grokKey}`, 'Content-Type': 'application/json' },
+            timeout: 120000,
+          },
+        );
+        const item = res.data.data?.[0];
+        if (!item) continue;
+        if (item.b64_json) {
+          await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
+          logger.info(`[comic] Grok (${model}) 이미지 생성 성공`);
+          return { path: outputPath, isAI: true };
         }
-      );
-      const item = res.data.data[0];
-      if (item.b64_json) {
-        await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
-        return outputPath;
+        if (item.url) {
+          const img = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+          await fs.writeFile(outputPath, Buffer.from(img.data));
+          logger.info(`[comic] Grok (${model}) 이미지 생성 성공 (URL)`);
+          return { path: outputPath, isAI: true };
+        }
+      } catch (e) {
+        const status  = e.response?.status ?? 'ERR';
+        const detail  = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message;
+        logger.warn(`[comic] Grok (${model}) 실패 (${status}): ${detail}`);
+        if (status !== 404 && status !== 422) break; // 모델 없음 외 에러는 재시도 무의미
       }
-      if (item.url) {
-        const img = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
-        await fs.writeFile(outputPath, Buffer.from(img.data));
-        return outputPath;
-      }
-    } catch (e) {
-      logger.warn(`[comic] Grok failed (${e.response?.status ?? e.message}), trying gpt-image-1`);
     }
   }
 
-  // 2순위: dall-e-3
+  // 2순위: DALL-E 3
   if (config.openai?.apiKey) {
     try {
       const res = await axios.post(
@@ -228,67 +329,47 @@ async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
         {
           headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           timeout: 120000,
-        }
+        },
       );
-      const item = res.data.data[0];
-      if (item.b64_json) {
+      const item = res.data.data?.[0];
+      if (item?.b64_json) {
         await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
-        return outputPath;
+        return { path: outputPath, isAI: true };
       }
-      if (item.url) {
+      if (item?.url) {
         const img = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
         await fs.writeFile(outputPath, Buffer.from(img.data));
-        return outputPath;
+        logger.info('[comic] DALL-E 3 이미지 생성 성공');
+        return { path: outputPath, isAI: true };
       }
     } catch (e) {
-      logger.warn(`[comic] dall-e-3 failed: ${e.response?.data?.error?.message ?? e.message}`);
+      logger.warn(`[comic] DALL-E 3 실패: ${e.response?.data?.error?.message ?? e.message}`);
     }
   }
 
   // 3순위: Gemini Imagen 3
   const geminiKey = config.gemini?.apiKey ?? process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    try {
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`,
-        { instances: [{ prompt: prompt.slice(0, 4000) }], parameters: { sampleCount: 1, aspectRatio: '9:16' } },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
-      );
-      const b64 = res.data.predictions?.[0]?.bytesBase64Encoded;
-      if (b64) {
-        await fs.writeFile(outputPath, Buffer.from(b64, 'base64'));
-        logger.info('[comic] Gemini Imagen 3 이미지 생성 성공');
-        return outputPath;
+    for (const model of ['imagen-3.0-generate-002', 'imagen-3.0-generate-001']) {
+      try {
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${geminiKey}`,
+          { instances: [{ prompt: prompt.slice(0, 4000) }], parameters: { sampleCount: 1, aspectRatio: '9:16' } },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 120000 },
+        );
+        const b64 = res.data.predictions?.[0]?.bytesBase64Encoded;
+        if (b64) {
+          await fs.writeFile(outputPath, Buffer.from(b64, 'base64'));
+          logger.info(`[comic] Gemini Imagen (${model}) 이미지 생성 성공`);
+          return { path: outputPath, isAI: true };
+        }
+      } catch (e) {
+        logger.warn(`[comic] Gemini Imagen (${model}) 실패: ${e.response?.data?.error?.message ?? e.message}`);
       }
-    } catch (e) {
-      logger.warn(`[comic] Gemini Imagen 실패: ${e.response?.data?.error?.message ?? e.message}`);
     }
   }
 
-  // 4순위: Pexels 스톡 사진
-  const pexelsKey = process.env.PEXELS_API_KEY;
-  if (pexelsKey && pexelsQuery) {
-    try {
-      const searchRes = await axios.get('https://api.pexels.com/v1/search', {
-        headers: { Authorization: pexelsKey },
-        params: { query: pexelsQuery, per_page: 10, orientation: 'portrait' },
-        timeout: 15000,
-      });
-      const photos = searchRes.data?.photos ?? [];
-      if (photos.length > 0) {
-        const photo   = photos[Math.floor(Math.random() * Math.min(5, photos.length))];
-        const imgUrl  = photo.src?.large2x ?? photo.src?.large ?? photo.src?.original;
-        const imgRes  = await axios.get(imgUrl, { responseType: 'arraybuffer', timeout: 30000 });
-        await fs.writeFile(outputPath, Buffer.from(imgRes.data));
-        logger.info(`[comic] Pexels fallback used: "${pexelsQuery}"`);
-        return outputPath;
-      }
-    } catch (e) {
-      logger.warn(`[comic] Pexels failed: ${e.message}`);
-    }
-  }
-
-  return null;
+  return null; // 모든 AI 소스 실패 → SVG 배경 사용
 }
 
 // ── TTS ───────────────────────────────────────────────────────────────────────
@@ -369,16 +450,32 @@ async function generateComicAudio(text, outputPath) {
   }
 
   // 4순위: OpenAI TTS
-  const voice = process.env.OPENAI_TTS_VOICE || 'onyx';
-  const res = await axios.post(
-    'https://api.openai.com/v1/audio/speech',
-    { model: 'tts-1', input: text.slice(0, 4096), voice },
-    {
-      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-      responseType: 'arraybuffer', timeout: 60000,
+  if (config.openai?.apiKey) {
+    try {
+      const voice = process.env.OPENAI_TTS_VOICE || 'onyx';
+      const res = await axios.post(
+        'https://api.openai.com/v1/audio/speech',
+        { model: 'tts-1', input: text.slice(0, 4096), voice },
+        {
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+          responseType: 'arraybuffer', timeout: 60000,
+        },
+      );
+      await fs.writeFile(outputPath, Buffer.from(res.data));
+      logger.info('[comic] TTS: OpenAI 성공');
+      return outputPath;
+    } catch (e) {
+      logger.warn(`[comic] OpenAI TTS 실패: ${e.response?.status ?? e.message}`);
     }
-  );
-  await fs.writeFile(outputPath, Buffer.from(res.data));
+  }
+
+  // 5순위: ffmpeg 30초 무음 (모든 TTS 실패 시 — 영상 구조 완성 목적)
+  logger.warn('[comic] TTS 모든 서비스 실패 → ffmpeg 무음 오디오 생성');
+  await execFileAsync(ffmpegPath, [
+    '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '30',
+    '-c:a', 'libmp3lame', '-b:a', '128k', '-y', outputPath,
+  ]);
+  logger.warn('[comic] 무음 오디오 생성됨 — TTS API 키를 확인하세요');
   return outputPath;
 }
 
@@ -419,100 +516,120 @@ async function loadOrGenerateCharacter() {
   return null;
 }
 
-// 캐릭터 이미지를 타원형으로 마스킹해서 배경에 자연스럽게 합성
-async function buildCharacterComposite(charSrc, targetH, panelType) {
-  const buf     = await loadImageBuf(charSrc);
-  const resized = await sharp(buf).resize(null, targetH, { fit: 'inside' }).png().toBuffer();
-  const meta    = await sharp(resized).metadata();
-  const cw = meta.width, ch = meta.height;
-
-  // 타원 마스크 (가장자리 자연스럽게 블렌딩)
-  const maskSvg = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${cw}" height="${ch}">
-      <ellipse cx="${cw / 2}" cy="${ch / 2}" rx="${cw / 2 - 4}" ry="${ch / 2 - 4}" fill="white"/>
-    </svg>`
-  );
-  // 마스크 적용 (흰 배경 제거 근사 — 완전 투명 아님, 코믹 느낌 유지)
-  const masked = await sharp(resized)
-    .composite([{ input: maskSvg, blend: 'dest-in' }])
-    .png()
-    .toBuffer();
-
-  // 위치 계산
-  let left, top;
-  if (panelType === 'hero') {
-    left = Math.round((W - cw) / 2);
-    top  = Math.round(H * 0.18);
-  } else { // solution
-    left = Math.round(W * 0.04);
-    top  = Math.round(H * 0.35);
-  }
-
-  return { input: masked, left: Math.max(0, left), top: Math.max(0, top) };
-}
 
 // ── 단일 패널 렌더링 ──────────────────────────────────────────────────────────
-
-async function renderPanel({ bgImageSrc, productImageSrc, characterImageSrc, panelType, captionText, outputPath }) {
+/**
+ * @param {object} opts
+ * @param {string|null}  opts.aiBgSrc         - AI 생성 배경 이미지 (있을 때만 텍스처로 사용)
+ * @param {string|null}  opts.productImageSrc  - 제품 이미지 (히어로 패널용)
+ * @param {string|null}  opts.characterImageSrc - 매읽남 캐릭터 PNG 경로
+ * @param {'problem'|'hero'|'solution'} opts.panelType
+ * @param {string}       opts.captionText      - 하단 캡션
+ * @param {string}       opts.outputPath
+ */
+async function renderPanel({ aiBgSrc, productImageSrc, characterImageSrc, panelType, captionText, outputPath }) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-  const cfg   = PANEL_CFG[panelType] ?? PANEL_CFG.hero;
-  const bgBuf = await sharp(await loadImageBuf(bgImageSrc))
-    .resize(W, H, { fit: 'cover', position: 'centre' })
-    .png()
-    .toBuffer();
+  const cfg = PANEL_CFG[panelType] ?? PANEL_CFG.hero;
+
+  // ① SVG 배경을 기본 캔버스로 생성
+  const bgFn  = PANEL_BG_FN[panelType] ?? heroBgSvg;
+  const baseBuf = await sharp(bgFn(W, H)).resize(W, H).png().toBuffer();
 
   const composites = [];
 
-  // Ben-Day dots
-  composites.push({ input: benDaySvg(W, H), top: 0, left: 0 });
-
-  // 스피드 라인 (히어로 패널)
-  if (cfg.speedLines) {
-    composites.push({ input: speedLinesSvg(W * 0.5, H * 0.38), top: 0, left: 0 });
+  // ② AI 생성 이미지가 있으면 저채도 텍스처로 블렌딩 (주인공은 SVG + 캐릭터)
+  if (aiBgSrc) {
+    try {
+      const imgBuf = await loadImageBuf(aiBgSrc);
+      if (imgBuf && imgBuf.length > 10_000) {
+        // 채도 제거 + 어둡게 → SVG 배경 위에 분위기 텍스처로만 활용
+        const tinted = await sharp(imgBuf)
+          .resize(W, H, { fit: 'cover', position: 'centre' })
+          .modulate({ saturation: 0.15, brightness: 0.45 })
+          .png()
+          .toBuffer();
+        // PNG에 alpha 채널이 없으면 multiply 대신 overlay 블렌드
+        composites.push({ input: tinted, top: 0, left: 0, blend: 'multiply' });
+      }
+    } catch { /* 텍스처 실패는 무시 */ }
   }
 
-  // 매읽남 캐릭터 오버레이 (hero / solution 패널)
-  if (characterImageSrc && panelType !== 'problem') {
+  // ③ Ben-Day dots
+  composites.push({ input: benDaySvg(W, H), top: 0, left: 0 });
+
+  // ④ 히어로 패널 스피드 라인
+  if (cfg.speedLines) {
+    composites.push({ input: speedLinesSvg(W * 0.5, H * 0.40), top: 0, left: 0 });
+  }
+
+  // ⑤ 매읽남 캐릭터 — 패널별 크기/위치 (모든 패널에 표시)
+  if (characterImageSrc) {
     try {
-      const charH      = panelType === 'hero' ? Math.round(H * 0.60) : Math.round(H * 0.42);
-      const charComp   = await buildCharacterComposite(characterImageSrc, charH, panelType);
-      composites.push(charComp);
+      const charBuf = await loadImageBuf(characterImageSrc);
+      let charSharp = sharp(charBuf);
+
+      let charH, left, top;
+
+      if (panelType === 'problem') {
+        // 소형 + 좌우반전 → 우하단 (OH NO! 상황을 겪는 캐릭터)
+        charH = Math.round(H * 0.44);
+        charSharp = charSharp.flop();
+        const resized = await charSharp.resize(null, charH, { fit: 'inside' }).png().toBuffer();
+        const meta    = await sharp(resized).metadata();
+        left = W - meta.width - 30;
+        top  = Math.round(H * 0.44);
+        composites.push({ input: resized, left: Math.max(0, left), top: Math.max(0, top) });
+      } else if (panelType === 'hero') {
+        // 대형 + 중앙 → 히어로 주인공
+        charH = Math.round(H * 0.72);
+        const resized = await charSharp.resize(null, charH, { fit: 'inside' }).png().toBuffer();
+        const meta    = await sharp(resized).metadata();
+        left = Math.round((W - meta.width) / 2);
+        top  = Math.round(H * 0.07);
+        composites.push({ input: resized, left: Math.max(0, left), top: Math.max(0, top) });
+      } else { // solution
+        // 중형 + 좌측 → 해결 완료 포즈
+        charH = Math.round(H * 0.58);
+        const resized = await charSharp.resize(null, charH, { fit: 'inside' }).png().toBuffer();
+        const meta    = await sharp(resized).metadata();
+        left = Math.round(W * 0.04);
+        top  = Math.round(H * 0.28);
+        composites.push({ input: resized, left: Math.max(0, left), top: Math.max(0, top) });
+      }
     } catch (e) {
       logger.warn(`[comic] 캐릭터 오버레이 실패: ${e.message}`);
     }
   }
 
-  // 제품 이미지 원형 합성 (히어로 패널 + product_image + 캐릭터 없을 때)
-  if (productImageSrc && panelType === 'hero' && !characterImageSrc) {
+  // ⑥ 제품 이미지 원형 배지 (히어로 패널 우측 하단)
+  if (productImageSrc && panelType === 'hero') {
     try {
-      const prodBuf  = await loadImageBuf(productImageSrc);
-      const DIAM     = 660, PROD_SZ = 560;
+      const prodBuf   = await loadImageBuf(productImageSrc);
+      const DIAM = 380, PROD_SZ = 320;
       const circleSvg = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAM}" height="${DIAM}">
-          <circle cx="${DIAM/2}" cy="${DIAM/2}" r="${DIAM/2 - 10}"
-            fill="white" stroke="black" stroke-width="16"/>
-        </svg>`
+          <circle cx="${DIAM / 2}" cy="${DIAM / 2}" r="${DIAM / 2 - 10}"
+            fill="white" stroke="#FFD700" stroke-width="16"/>
+        </svg>`,
       );
       const prodResized = await sharp(prodBuf)
         .resize(PROD_SZ, PROD_SZ, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
-        .png()
-        .toBuffer();
-      const circleWithProd = await sharp(circleSvg)
+        .png().toBuffer();
+      const badge = await sharp(circleSvg)
         .composite([{ input: prodResized, left: (DIAM - PROD_SZ) >> 1, top: (DIAM - PROD_SZ) >> 1 }])
-        .png()
-        .toBuffer();
-      composites.push({ input: circleWithProd, left: (W - DIAM) >> 1, top: Math.round(H * 0.30) });
+        .png().toBuffer();
+      composites.push({ input: badge, left: W - DIAM - 24, top: Math.round(H * 0.60) });
     } catch (e) {
-      logger.warn(`[comic] Product image overlay skipped: ${e.message}`);
+      logger.warn(`[comic] Product badge skipped: ${e.message}`);
     }
   }
 
-  // 캡션 바
-  const { barH, barY, svg: captionSvg } = captionBarSvg(captionText);
+  // ⑦ 캡션 바
+  const { barY, svg: captionSvg } = captionBarSvg(captionText);
   composites.push({ input: captionSvg, left: 0, top: barY });
 
-  // 사운드 이펙트
+  // ⑧ 사운드 이펙트 (OH NO! / BOOM! / PERFECT!)
   composites.push({
     input: soundFxSvg({
       text:      cfg.sfxText,
@@ -523,10 +640,10 @@ async function renderPanel({ bgImageSrc, productImageSrc, characterImageSrc, pan
     top: 0, left: 0,
   });
 
-  // 테두리
+  // ⑨ 테두리
   composites.push({ input: borderSvg(), top: 0, left: 0 });
 
-  await sharp(bgBuf).composite(composites).jpeg({ quality: 92 }).toFile(outputPath);
+  await sharp(baseBuf).composite(composites).jpeg({ quality: 92 }).toFile(outputPath);
   logger.info(`[comic] Panel "${panelType}" rendered: ${path.basename(outputPath)}`);
   return outputPath;
 }
@@ -654,54 +771,37 @@ export async function generateComicMedia(content, outputDir) {
     logger.warn('[comic] 매읽남 캐릭터 이미지를 가져올 수 없습니다 — 캐릭터 없이 진행');
   }
 
-  // ③ 3패널 배경 이미지
+  // ③ 3패널 — AI 배경 생성 시도 (실패해도 SVG 배경으로 대체)
   const panelTypes = ['problem', 'hero', 'solution'];
-  const bgPaths    = [];
+  const aiBgResults = [];   // { path, isAI } | null
 
   for (const type of panelTypes) {
     const imgPath = path.join(outputDir, `${safe}_comic_bg_${type}.jpg`);
     const panel   = story[type];
-
-    // hero/solution 패널은 매읽남 캐릭터 묘사를 프롬프트에 포함
-    const charDesc = type !== 'problem'
-      ? `Featuring the mascot character: ${MAEILNAMJA_COMIC_BASE} `
-      : '';
     const comicPrompt =
-      `Marvel comic book style, ben-day dots halftone pattern, bold thick black outlines, ` +
-      `pop art vivid colors, dramatic composition. ` +
-      charDesc +
-      `Scene: ${panel.scene_prompt}. ` +
-      `Absolutely NO text, NO letters, NO words anywhere in the image. ` +
-      `9:16 vertical portrait format.`;
+      `Marvel comic book panel, bold thick black outlines, ben-day dots halftone, vivid pop art colors, ` +
+      `dramatic cinematic composition. ` +
+      `${type === 'problem' ? 'Dramatic problem scene: ' : type === 'hero' ? 'Heroic action scene featuring ' + MAEILNAMJA_COMIC_BASE + ': ' : 'Happy successful resolution scene featuring ' + MAEILNAMJA_COMIC_BASE + ': '}` +
+      `${panel.scene_prompt}. ` +
+      `NO text, NO letters, NO words. 9:16 portrait.`;
 
-    const pexelsQuery = PANEL_PEXELS_QUERY[type]?.(content.keyword) ?? content.keyword;
-    logger.info(`[comic] 배경 이미지 생성 (${type}): ${content.keyword}`);
-    const generated = await generateComicImage(comicPrompt, imgPath, pexelsQuery);
-    if (!generated) {
-      const fallbackColors = { problem: '#2a0a0a', hero: '#0a1a2a', solution: '#0a2a0a' };
-      await sharp({ create: { width: W, height: H, channels: 3, background: fallbackColors[type] ?? '#111' } })
-        .jpeg().toFile(imgPath);
-    }
-    bgPaths.push(imgPath);
+    logger.info(`[comic] AI 배경 이미지 시도 (${type}): ${content.keyword}`);
+    const result = await generateComicImage(comicPrompt, imgPath);
+    aiBgResults.push(result); // null if all AI failed
   }
 
-  // ④ 3패널 Sharp 합성
+  // ④ 3패널 Sharp 합성 (SVG 배경 + 캐릭터 주인공)
   const panelPaths = [];
   for (let i = 0; i < panelTypes.length; i++) {
     const type      = panelTypes[i];
     const panel     = story[type];
     const panelPath = path.join(outputDir, `${safe}_comic_panel_${type}.jpg`);
-
-    // AI가 장면 전체를 생성했으면 캐릭터 오버레이 불필요
-    // Pexels 폴백 배경이면 캐릭터 오버레이 추가
-    const bgWasGenerated = bgPaths[i] && !(await fs.readFile(bgPaths[i]).catch(() => null)
-      .then(buf => buf && buf.length < 5000)); // 단색 fallback은 작음
-    const useCharOverlay = characterPath && type !== 'problem';
+    const aiResult  = aiBgResults[i];
 
     await renderPanel({
-      bgImageSrc:       bgPaths[i],
-      productImageSrc:  null, // 캐릭터 있으므로 제품 원형 미사용
-      characterImageSrc: useCharOverlay ? characterPath : null,
+      aiBgSrc:          aiResult?.path ?? null,          // AI 성공 시 텍스처로 활용
+      productImageSrc:  null,
+      characterImageSrc: characterPath,                  // 모든 패널에 캐릭터 표시
       panelType:        type,
       captionText:      panel.caption,
       outputPath:       panelPath,

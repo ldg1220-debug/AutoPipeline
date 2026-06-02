@@ -57,12 +57,15 @@
     "shopping:comic:dry": "cross-env DRY_RUN=true node scripts/run-shopping-pipeline.js --comic"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "axios": "^1.7.2",
     "better-sqlite3": "^12.10.0",
     "cross-env": "^10.1.0",
     "dotenv": "^16.4.5",
     "ffmpeg-static": "^5.3.0",
+    "googleapis": "^173.0.0",
     "node-cron": "^3.0.3",
+    "openai": "^6.41.0",
     "playwright": "^1.60.0",
     "sharp": "^0.34.5",
     "winston": "^3.13.0",
