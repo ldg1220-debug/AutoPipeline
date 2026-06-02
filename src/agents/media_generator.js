@@ -1022,7 +1022,7 @@ async function generateThumbnail(content, charImageUrl, outputPath) {
     ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
     : await fs.readFile(charImageUrl);
   const charBuf = await sharp(charRaw)
-    .resize(RIGHT, H, { fit: 'cover', position: 'top' })
+    .resize(RIGHT, H, { fit: 'cover', position: 'centre' })
     .png()
     .toBuffer();
 

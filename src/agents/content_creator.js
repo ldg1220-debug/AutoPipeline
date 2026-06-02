@@ -123,9 +123,11 @@ async function generateContent(item, competitorCtx = '') {
     item.figures    ? `핵심 수치/팩트: ${item.figures}` : '',
   ].filter(Boolean).join('\n');
 
+  const today = new Date().toISOString().slice(0, 10);
   const contentPrompt = `당신은 유튜브 채널 "매일읽어주는남자"의 전속 작가입니다.
 채널의 나레이터 캐릭터 "매읽남"의 목소리로 55초짜리 숏폼 대본을 써야 합니다.
 
+오늘 날짜: ${today} (이 날짜 기준으로 작성할 것 — 과거 연도 언급 금지)
 키워드: ${item.keyword}
 카테고리: ${item.category}
 시리즈: ${seriesName}

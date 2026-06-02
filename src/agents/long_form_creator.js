@@ -28,8 +28,10 @@ export async function createLongFormAndShorts(item, blogDraft) {
     competitorCtx  = formatInsightsForPrompt(insights);
   } catch { /* 인사이트 없으면 스킵 */ }
 
+  const today = new Date().toISOString().slice(0, 10);
   const prompt =
     `당신은 한국 경제 유튜브 채널 "매일읽어주는남자" 수석 PD입니다.\n\n` +
+    `[오늘 날짜] ${today} (이 날짜 기준으로 작성 — 과거 연도 언급 금지)\n` +
     `[키워드] ${item.keyword}\n` +
     `[카테고리] ${item.category ?? '경제'}\n\n` +
     (competitorCtx ? `${competitorCtx}\n\n` : '') +
