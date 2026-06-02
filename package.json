@@ -50,7 +50,11 @@
     "rerun:media:fresh": "node scripts/rerun-media-upload.js --delete-old",
     "retry:upload": "node scripts/retry-failed-uploads.js",
     "blog:to-youtube": "node scripts/run-blog-to-youtube.js",
-    "blog:to-youtube:dry": "node scripts/run-blog-to-youtube.js --dry"
+    "blog:to-youtube:dry": "node scripts/run-blog-to-youtube.js --dry",
+    "shopping": "node scripts/run-shopping-pipeline.js",
+    "shopping:dry": "cross-env DRY_RUN=true node scripts/run-shopping-pipeline.js",
+    "shopping:comic": "node scripts/run-shopping-pipeline.js --comic",
+    "shopping:comic:dry": "cross-env DRY_RUN=true node scripts/run-shopping-pipeline.js --comic"
   },
   "dependencies": {
     "axios": "^1.7.2",

@@ -110,6 +110,142 @@ async function generateScriptAnthropic(product, client) {
   return JSON.parse(match[0]);
 }
 
+// ── 코믹스 전용 스크립트 생성 ────────────────────────────────────────────────
+
+async function generateComicScriptOpenAI(product, openai) {
+  const kws = (product.keywords ?? []).slice(0, 5).join(', ');
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0.85,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          '당신은 Marvel 코믹스 스타일 쇼핑 광고 영상 기획자입니다. ' +
+          '제품 하나를 3컷 코믹스 스토리(문제→히어로→해결)로 구성하고, ' +
+          '각 패널의 Grok Aurora 이미지 생성용 영어 프롬프트(scene_prompt)와 한국어 캡션을 작성합니다. ' +
+          '영상은 인스타그램/틱톡/네이버클립용 55초 쇼츠입니다.',
+      },
+      {
+        role: 'user',
+        content:
+          `제품명: ${product.name}\n` +
+          `관련 키워드: ${kws}\n` +
+          `메모: ${product.note ?? ''}\n\n` +
+          `아래 JSON 형식으로 작성:\n` +
+          `{\n` +
+          `  "youtube_title": "35자 이내 후킹 제목 (실생활 문제 해결 강조)",\n` +
+          `  "shortform_script": {\n` +
+          `    "hook":    "5초. 강렬한 질문 또는 놀라운 사실 (최대 20자)",\n` +
+          `    "context": "10초. 문제 공감 상황 (30~50자)",\n` +
+          `    "insight": "15초. 제품 핵심 장점 2~3가지 (60~100자)",\n` +
+          `    "summary": "5초. 한 줄 핵심 정리 (20~30자)",\n` +
+          `    "cta":     "아래 링크에서 쿠팡 최저가로 확인해 보세요!"\n` +
+          `  },\n` +
+          `  "panel_story": {\n` +
+          `    "problem": {\n` +
+          `      "scene_prompt": "English prompt for Grok: show the PROBLEM situation dramatically without the product. Vivid human character suffering/struggling. No product shown yet.",\n` +
+          `      "caption": "한국어 캡션 (15자 이내, 문제 상황 묘사)"\n` +
+          `    },\n` +
+          `    "hero": {\n` +
+          `      "scene_prompt": "English prompt for Grok: the product appears as a HERO/savior, dramatic entrance, spotlight, glowing aura. Product clearly featured center.",\n` +
+          `      "caption": "한국어 캡션 (15자 이내, 제품명+등장)"\n` +
+          `    },\n` +
+          `    "solution": {\n` +
+          `      "scene_prompt": "English prompt for Grok: AFTER using the product — person is happy, problem solved, triumphant expression, positive transformation.",\n` +
+          `      "caption": "한국어 캡션 (15자 이내, 해결+만족 표현)"\n` +
+          `    }\n` +
+          `  }\n` +
+          `}\n\n` +
+          `scene_prompt는 반드시 영어로, Marvel/DC 코믹북 아트 스타일 키워드 포함 (bold outlines, ben-day dots, vivid pop art colors). ` +
+          `캡션은 반드시 한국어 15자 이내.`,
+      },
+    ],
+  });
+  return JSON.parse(res.choices[0].message.content);
+}
+
+async function generateComicScriptAnthropic(product, client) {
+  const kws = (product.keywords ?? []).slice(0, 5).join(', ');
+  const res = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1200,
+    messages: [
+      {
+        role: 'user',
+        content:
+          `Marvel 코믹스 3컷 쇼핑 영상 JSON 작성.\n` +
+          `제품: ${product.name}\n키워드: ${kws}\n메모: ${product.note ?? ''}\n\n` +
+          `반드시 아래 형식의 JSON만 출력:\n` +
+          `{"youtube_title":"...","shortform_script":{"hook":"...","context":"...","insight":"...","summary":"...","cta":"아래 링크에서 쿠팡 최저가로 확인해 보세요!"},"panel_story":{"problem":{"scene_prompt":"English Marvel comic style scene showing the problem...","caption":"한국어 캡션"},"hero":{"scene_prompt":"English Marvel comic style scene showing product as hero...","caption":"한국어 캡션"},"solution":{"scene_prompt":"English Marvel comic style scene showing happy resolution...","caption":"한국어 캡션"}}}`,
+      },
+    ],
+  });
+  const text  = res.content[0].text;
+  const match = text.match(/\{[\s\S]*\}/);
+  return JSON.parse(match[0]);
+}
+
+/**
+ * links.json 제품 → 코믹스 파이프라인 호환 콘텐츠 객체 배열 반환
+ * @param {string[]|null} filterIds - 특정 product id만 처리 (null이면 전체)
+ */
+export async function createShoppingComicContent(filterIds = null) {
+  let products = loadProducts();
+  if (filterIds?.length) {
+    products = products.filter((p) => filterIds.includes(p.id));
+  }
+
+  if (products.length === 0) {
+    logger.warn('[shopping-comic] links.json에 유효한 제품이 없습니다.');
+    return { contents: [] };
+  }
+
+  const openai    = config.openai.apiKey    ? new OpenAI({ apiKey: config.openai.apiKey }) : null;
+  const anthropic = config.anthropic.apiKey ? new Anthropic({ apiKey: config.anthropic.apiKey }) : null;
+
+  if (!openai && !anthropic) {
+    throw new Error('[shopping-comic] OPENAI_API_KEY 또는 ANTHROPIC_API_KEY가 필요합니다.');
+  }
+
+  const contents = [];
+
+  for (const product of products) {
+    logger.info(`[shopping-comic] 코믹 스크립트 생성 중: ${product.name}`);
+    try {
+      const script = openai
+        ? await generateComicScriptOpenAI(product, openai)
+        : await generateComicScriptAnthropic(product, anthropic);
+
+      contents.push({
+        keyword:      product.name,
+        category:     'shopping',
+        product_id:   product.id,
+        coupang_url:  product.url,
+        product_image: product.product_image ?? null,
+
+        youtube_title:    script.youtube_title,
+        shortform_script: script.shortform_script,
+        panel_story:      script.panel_story,
+
+        _shorts_description:
+          `🛒 ${product.url}\n\n` +
+          (script.shortform_script.insight ?? '') + '\n\n' +
+          (product.keywords ?? []).map((t) => '#' + t).join(' ') + ' #Shorts #쿠팡추천',
+      });
+
+      logger.info(`[shopping-comic] ✓ ${product.name}`);
+    } catch (err) {
+      logger.error(`[shopping-comic] 스크립트 실패 — ${product.name}: ${err.message}`);
+    }
+  }
+
+  return { created_at: new Date().toISOString(), contents };
+}
+
+// ── 일반 쇼핑 콘텐츠 ─────────────────────────────────────────────────────────
+
 /**
  * links.json의 제품들을 미디어 파이프라인 호환 콘텐츠 객체로 변환
  * @param {string[]|null} filterIds - 특정 product id만 처리 (null이면 전체)
