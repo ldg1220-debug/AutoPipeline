@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config/index.js';
@@ -187,6 +188,25 @@ async function generateComicScriptAnthropic(product, client) {
   return JSON.parse(match[0]);
 }
 
+async function generateComicScriptGemini(product) {
+  const kws = (product.keywords ?? []).slice(0, 5).join(', ');
+  const apiKey = config.gemini?.apiKey ?? process.env.GEMINI_API_KEY;
+  const prompt =
+    `Marvel 코믹스 스타일 쇼핑 광고 영상 기획자입니다.\n` +
+    `제품명: ${product.name}\n관련 키워드: ${kws}\n메모: ${product.note ?? ''}\n\n` +
+    `아래 JSON 형식으로만 응답하세요 (코드블록 없이 JSON만):\n` +
+    `{"youtube_title":"35자 이내 제목","shortform_script":{"hook":"5초 강렬한 질문(20자이내)","context":"10초 문제공감(30~50자)","insight":"15초 핵심장점(60~100자)","summary":"5초 핵심정리(20~30자)","cta":"아래 링크에서 쿠팡 최저가로 확인해 보세요!"},"panel_story":{"problem":{"scene_prompt":"English Marvel comic style: dramatic scene showing the PROBLEM without product. Bold outlines, ben-day dots, vivid pop art colors. No text in image.","caption":"한국어캡션15자이내"},"hero":{"scene_prompt":"English Marvel comic style: product appears as HERO with spotlight, glowing aura, dramatic entrance. Bold outlines, ben-day dots. No text in image.","caption":"한국어캡션15자이내"},"solution":{"scene_prompt":"English Marvel comic style: person is happy and triumphant AFTER using product, problem solved. Bold outlines, ben-day dots. No text in image.","caption":"한국어캡션15자이내"}}}`;
+
+  const res = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85 } },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+  );
+  const text  = res.data.candidates[0].content.parts[0].text;
+  const match = text.match(/\{[\s\S]*\}/);
+  return JSON.parse(match[0]);
+}
+
 /**
  * links.json 제품 → 코믹스 파이프라인 호환 콘텐츠 객체 배열 반환
  * @param {string[]|null} filterIds - 특정 product id만 처리 (null이면 전체)
@@ -204,9 +224,10 @@ export async function createShoppingComicContent(filterIds = null) {
 
   const openai    = config.openai.apiKey    ? new OpenAI({ apiKey: config.openai.apiKey }) : null;
   const anthropic = config.anthropic.apiKey ? new Anthropic({ apiKey: config.anthropic.apiKey }) : null;
+  const hasGemini = !!(config.gemini?.apiKey ?? process.env.GEMINI_API_KEY);
 
-  if (!openai && !anthropic) {
-    throw new Error('[shopping-comic] OPENAI_API_KEY 또는 ANTHROPIC_API_KEY가 필요합니다.');
+  if (!openai && !anthropic && !hasGemini) {
+    throw new Error('[shopping-comic] OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY 중 하나가 필요합니다.');
   }
 
   const contents = [];
@@ -214,9 +235,23 @@ export async function createShoppingComicContent(filterIds = null) {
   for (const product of products) {
     logger.info(`[shopping-comic] 코믹 스크립트 생성 중: ${product.name}`);
     try {
-      const script = openai
-        ? await generateComicScriptOpenAI(product, openai)
-        : await generateComicScriptAnthropic(product, anthropic);
+      let script;
+      if (openai) {
+        try {
+          script = await generateComicScriptOpenAI(product, openai);
+        } catch (oaiErr) {
+          if (oaiErr.status === 429 || oaiErr.message?.includes('quota')) {
+            logger.warn(`[shopping-comic] OpenAI 쿼터 초과 → Gemini/Anthropic 폴백`);
+            script = hasGemini
+              ? await generateComicScriptGemini(product)
+              : await generateComicScriptAnthropic(product, anthropic);
+          } else throw oaiErr;
+        }
+      } else if (anthropic) {
+        script = await generateComicScriptAnthropic(product, anthropic);
+      } else {
+        script = await generateComicScriptGemini(product);
+      }
 
       contents.push({
         keyword:      product.name,
