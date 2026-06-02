@@ -38,9 +38,9 @@ export const config = {
     voiceId: process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM',
   },
   clovaVoice: {
-    // Naver Cloud Platform → AI·Application Services → Clova Voice
-    clientId:     process.env.NAVER_CLOVA_CLIENT_ID,
-    clientSecret: process.env.NAVER_CLOVA_CLIENT_SECRET,
+    // NAVER_CLOVA_CLIENT_ID 우선, 없으면 NAVER_CLIENT_ID로 폴백
+    clientId:     process.env.NAVER_CLOVA_CLIENT_ID ?? process.env.NAVER_CLIENT_ID,
+    clientSecret: process.env.NAVER_CLOVA_CLIENT_SECRET ?? process.env.NAVER_CLIENT_SECRET,
     // 매읽남 캐릭터: kyunghun(남성) + pitch +4 + speed +1 = 귀엽고 활기찬 남자 목소리
     speaker:      process.env.CLOVA_VOICE_SPEAKER || 'kyunghun',
     speed:        parseInt(process.env.CLOVA_VOICE_SPEED  || '1', 10),   // -5~5, +1=약간 빠른 템포
