@@ -328,7 +328,7 @@ async function publishPost(page, content, blogName, context) {
     try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
     data.visibility = 20;
     data.content = html;
-    if (bestCategory?.id) data.categoryId = bestCategory.id;
+    if (bestCategory?.id) data.categoryId = Number(bestCategory.id) || bestCategory.id;
     if (thumbnailCdnUrl) data.thumbnail = thumbnailCdnUrl;  // 대표 이미지 API 직접 주입
     try {
       const resp = await route.fetch({ postData: JSON.stringify(data) });
@@ -389,8 +389,8 @@ async function publishPost(page, content, blogName, context) {
   }).catch(() => page.waitForTimeout(2000));
 
   // 사이드바 열린 후: 카테고리 드롭다운을 열어 옵션을 읽고 설정
-  if (!bestCategory) {
-    try {
+  // 항상 실행 — env의 categoryId가 실제 Tistory ID와 다를 수 있으므로 sidebar에서 재확인
+  try {
       // 1단계: 사이드바 카테고리 영역 HTML 덤프 (진단 + 셀렉터 탐색)
       const sidebarHtml = await page.evaluate(() => {
         const el = document.querySelector('.layer_publish') ?? document.querySelector('[class*="publish"]');
@@ -457,6 +457,18 @@ async function publishPost(page, content, blogName, context) {
         logger.info(`[blog_publisher] Categories from sidebar: ${sidebarCategories.map((c) => `${c.name}(${c.id})`).join(', ')}`);
         bestCategory = await matchBestCategory(sidebarCategories, keyword, content.category ?? 'economy');
 
+        // 네이티브 select로 직접 설정 (드롭다운 클릭보다 안정적)
+        if (bestCategory?.id) {
+          for (const nsSel of ['.layer_publish select', 'select[name="categoryId"]']) {
+            try {
+              await page.selectOption(nsSel, { value: String(bestCategory.id) }, { timeout: 1500 });
+              logger.info(`[blog_publisher] Category set via native selectOption: "${bestCategory.name}" (${bestCategory.id})`);
+              bestCategory._alreadySet = true;
+              break;
+            } catch { /* 드롭다운 방식으로 폴백 */ }
+          }
+        }
+
         // 드롭다운이 열려있는 동안 바로 옵션 클릭 (setCategoryInEditor의 이중-클릭 문제 방지)
         if (dropdownOpened && bestCategory) {
           const idStr = bestCategory.id ? String(bestCategory.id) : '';
@@ -493,15 +505,14 @@ async function publishPost(page, content, blogName, context) {
             } catch { /* 실패 */ }
           }
         }
-      } else {
-        // 진단용 스크린샷
+      } else if (!bestCategory) {
+        // 진단용 스크린샷 (env에서도 카테고리를 못 찾은 경우에만)
         const dbgPath = path.resolve(__dirname, `../../output/blog/debug_category_${Date.now()}.png`);
         await page.screenshot({ path: dbgPath, fullPage: false }).catch(() => {});
         logger.warn(`[blog_publisher] 카테고리 못 찾음. 스크린샷: ${dbgPath}`);
       }
-    } catch (err) {
-      logger.warn(`[blog_publisher] Sidebar category read failed: ${err.message}`);
-    }
+  } catch (err) {
+    logger.warn(`[blog_publisher] Sidebar category read failed: ${err.message}`);
   }
 
   // 사이드바 열린 후: 카테고리 + 태그 + 대표 이미지 설정

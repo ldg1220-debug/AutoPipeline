@@ -325,7 +325,10 @@ export async function generateBlogTags(keyword, seoKeywords = [], internalCatego
     const parsed = JSON.parse(res.data.choices[0].message.content);
     let tags = Array.isArray(parsed) ? parsed : (parsed.tags ?? Object.values(parsed)[0] ?? []);
     if (!Array.isArray(tags)) tags = [];
-    const result = tags.filter((t) => typeof t === 'string' && t.trim()).slice(0, 10);
+    const allTags = tags.filter((t) => typeof t === 'string' && t.trim());
+    // 한국어 글자가 포함된 태그만 허용 (영어 전용 태그 제거)
+    const koreanOnly = allTags.filter((t) => /[가-힣]/.test(t));
+    const result = (koreanOnly.length >= 5 ? koreanOnly : allTags).slice(0, 10);
     logger.info(`[tistoryClassifier] Generated ${result.length} tags: ${result.join(', ')}`);
     return result;
   } catch (err) {
