@@ -245,7 +245,27 @@ async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
     }
   }
 
-  // 3순위: Pexels 스톡 사진
+  // 3순위: Gemini Imagen 3
+  const geminiKey = config.gemini?.apiKey ?? process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${geminiKey}`,
+        { instances: [{ prompt: prompt.slice(0, 4000) }], parameters: { sampleCount: 1, aspectRatio: '9:16' } },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 120000 }
+      );
+      const b64 = res.data.predictions?.[0]?.bytesBase64Encoded;
+      if (b64) {
+        await fs.writeFile(outputPath, Buffer.from(b64, 'base64'));
+        logger.info('[comic] Gemini Imagen 3 이미지 생성 성공');
+        return outputPath;
+      }
+    } catch (e) {
+      logger.warn(`[comic] Gemini Imagen 실패: ${e.response?.data?.error?.message ?? e.message}`);
+    }
+  }
+
+  // 4순위: Pexels 스톡 사진
   const pexelsKey = process.env.PEXELS_API_KEY;
   if (pexelsKey && pexelsQuery) {
     try {
@@ -276,14 +296,38 @@ async function generateComicImage(prompt, outputPath, pexelsQuery = '') {
 async function generateComicAudio(text, outputPath) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-  // ClovaVoice
   const { clientId, clientSecret, speaker, speed, pitch, volume } = config.clovaVoice;
   if (clientId && clientSecret) {
+    const params = new URLSearchParams({
+      speaker, volume: String(volume), speed: String(speed), pitch: String(pitch),
+      format: 'mp3', text: text.slice(0, 2000),
+    });
+
+    // 1순위: 네이버 developers.naver.com Clova Voice (X-Naver-Client-Id)
     try {
-      const params = new URLSearchParams({
-        speaker, volume: String(volume), speed: String(speed), pitch: String(pitch),
-        format: 'mp3', text: text.slice(0, 2000),
-      });
+      const res = await axios.post(
+        'https://openapi.naver.com/v1/voice/tts.bin',
+        params.toString(),
+        {
+          headers: {
+            'X-Naver-Client-Id': clientId,
+            'X-Naver-Client-Secret': clientSecret,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          responseType: 'arraybuffer', timeout: 60000,
+        }
+      );
+      if (res.data.byteLength > 500) {
+        await fs.writeFile(outputPath, Buffer.from(res.data));
+        logger.info('[comic] TTS: Clova Voice (naver) 성공');
+        return outputPath;
+      }
+    } catch (e) {
+      logger.warn(`[comic] ClovaVoice (naver) 실패: ${e.response?.status ?? e.message}`);
+    }
+
+    // 2순위: NCP Clova Voice Premium (X-NCP-APIGW-API-KEY-ID)
+    try {
       const res = await axios.post(
         'https://naveropenapi.apigw.ntruss.com/tts-premium/v1/tts',
         params.toString(),
@@ -295,14 +339,17 @@ async function generateComicAudio(text, outputPath) {
           responseType: 'arraybuffer', timeout: 60000,
         }
       );
-      await fs.writeFile(outputPath, Buffer.from(res.data));
-      return outputPath;
+      if (res.data.byteLength > 500) {
+        await fs.writeFile(outputPath, Buffer.from(res.data));
+        logger.info('[comic] TTS: Clova Voice (NCP) 성공');
+        return outputPath;
+      }
     } catch (e) {
-      logger.warn(`[comic] ClovaVoice failed: ${e.message}`);
+      logger.warn(`[comic] ClovaVoice (NCP) 실패: ${e.response?.status ?? e.message}`);
     }
   }
 
-  // ElevenLabs
+  // 3순위: ElevenLabs
   if (config.elevenlabs?.apiKey) {
     try {
       const res = await axios.post(
@@ -317,11 +364,11 @@ async function generateComicAudio(text, outputPath) {
       await fs.writeFile(outputPath, Buffer.from(res.data));
       return outputPath;
     } catch (e) {
-      logger.warn(`[comic] ElevenLabs failed: ${e.message}`);
+      logger.warn(`[comic] ElevenLabs 실패: ${e.message}`);
     }
   }
 
-  // OpenAI TTS
+  // 4순위: OpenAI TTS
   const voice = process.env.OPENAI_TTS_VOICE || 'onyx';
   const res = await axios.post(
     'https://api.openai.com/v1/audio/speech',
