@@ -124,7 +124,9 @@ async function generateComicScriptOpenAI(product, openai) {
         role: 'system',
         content:
           '당신은 Marvel 코믹스 스타일 쇼핑 광고 영상 기획자입니다. ' +
-          '제품 하나를 3컷 코믹스 스토리(문제→히어로→해결)로 구성하고, ' +
+          `브랜드 마스코트 캐릭터: ${MAEILNAMJA_DESC}. ` +
+          '제품 하나를 3컷 코믹스 스토리(문제→히어로 등장→해결)로 구성합니다. ' +
+          'Hero/Solution 패널에는 반드시 매읽남 캐릭터를 주인공으로 포함하세요. ' +
           '각 패널의 Grok Aurora 이미지 생성용 영어 프롬프트(scene_prompt)와 한국어 캡션을 작성합니다. ' +
           '영상은 인스타그램/틱톡/네이버클립용 55초 쇼츠입니다.',
       },
@@ -146,16 +148,16 @@ async function generateComicScriptOpenAI(product, openai) {
           `  },\n` +
           `  "panel_story": {\n` +
           `    "problem": {\n` +
-          `      "scene_prompt": "English prompt for Grok: show the PROBLEM situation dramatically without the product. Vivid human character suffering/struggling. No product shown yet.",\n` +
-          `      "caption": "한국어 캡션 (15자 이내, 문제 상황 묘사)"\n` +
+          `      "scene_prompt": "English: ONLY the problem — a person visibly suffering/struggling without product. Marvel comic style, bold outlines, ben-day dots, vivid pop art colors. NO mascot character here.",\n` +
+          `      "caption": "한국어 캡션 (15자 이내, 문제 상황)"\n` +
           `    },\n` +
           `    "hero": {\n` +
-          `      "scene_prompt": "English prompt for Grok: the product appears as a HERO/savior, dramatic entrance, spotlight, glowing aura. Product clearly featured center.",\n` +
-          `      "caption": "한국어 캡션 (15자 이내, 제품명+등장)"\n` +
+          `      "scene_prompt": "English: ${MAEILNAMJA_DESC} dramatically bursts into the scene holding the product, heroic spotlight, golden rays, triumphant expression. Marvel comic style, bold outlines, ben-day dots, vivid yellow/red pop art. No text.",\n` +
+          `      "caption": "한국어 캡션 (15자 이내, 캐릭터+등장)"\n` +
           `    },\n` +
           `    "solution": {\n` +
-          `      "scene_prompt": "English prompt for Grok: AFTER using the product — person is happy, problem solved, triumphant expression, positive transformation.",\n` +
-          `      "caption": "한국어 캡션 (15자 이내, 해결+만족 표현)"\n` +
+          `      "scene_prompt": "English: ${MAEILNAMJA_DESC} gives big thumbs up next to a happy satisfied person, problem solved, celebration mood, confetti, bright colors. Marvel comic style, bold outlines, ben-day dots. No text.",\n` +
+          `      "caption": "한국어 캡션 (15자 이내, 해결+만족)"\n` +
           `    }\n` +
           `  }\n` +
           `}\n\n` +
@@ -188,14 +190,20 @@ async function generateComicScriptAnthropic(product, client) {
   return JSON.parse(match[0]);
 }
 
+// 매읽남 캐릭터 묘사 (프롬프트 삽입용)
+const MAEILNAMJA_DESC =
+  'chibi kawaii white Persian cat professor character (bright white fluffy fur, large round expressive eyes, ' +
+  'beige blazer with dark navy necktie) — the brand mascot "매읽남 (Maeilnamja)"';
+
 async function generateComicScriptGemini(product) {
   const kws = (product.keywords ?? []).slice(0, 5).join(', ');
   const apiKey = config.gemini?.apiKey ?? process.env.GEMINI_API_KEY;
   const prompt =
     `Marvel 코믹스 스타일 쇼핑 광고 영상 기획자입니다.\n` +
+    `브랜드 마스코트 캐릭터: ${MAEILNAMJA_DESC}\n` +
     `제품명: ${product.name}\n관련 키워드: ${kws}\n메모: ${product.note ?? ''}\n\n` +
     `아래 JSON 형식으로만 응답하세요 (코드블록 없이 JSON만):\n` +
-    `{"youtube_title":"35자 이내 제목","shortform_script":{"hook":"5초 강렬한 질문(20자이내)","context":"10초 문제공감(30~50자)","insight":"15초 핵심장점(60~100자)","summary":"5초 핵심정리(20~30자)","cta":"아래 링크에서 쿠팡 최저가로 확인해 보세요!"},"panel_story":{"problem":{"scene_prompt":"English Marvel comic style: dramatic scene showing the PROBLEM without product. Bold outlines, ben-day dots, vivid pop art colors. No text in image.","caption":"한국어캡션15자이내"},"hero":{"scene_prompt":"English Marvel comic style: product appears as HERO with spotlight, glowing aura, dramatic entrance. Bold outlines, ben-day dots. No text in image.","caption":"한국어캡션15자이내"},"solution":{"scene_prompt":"English Marvel comic style: person is happy and triumphant AFTER using product, problem solved. Bold outlines, ben-day dots. No text in image.","caption":"한국어캡션15자이내"}}}`;
+    `{"youtube_title":"35자 이내 제목","shortform_script":{"hook":"5초 강렬한 질문(20자이내)","context":"10초 문제공감(30~50자)","insight":"15초 핵심장점(60~100자)","summary":"5초 핵심정리(20~30자)","cta":"아래 링크에서 쿠팡 최저가로 확인해 보세요!"},"panel_story":{"problem":{"scene_prompt":"English: dramatic scene showing ONLY the PROBLEM situation — a person suffering without the product. Marvel comic style, bold outlines, ben-day dots, vivid pop art colors. NO character mascot here. No text.","caption":"한국어캡션15자이내"},"hero":{"scene_prompt":"English: ${MAEILNAMJA_DESC} dramatically bursts in holding the product, heroic spotlight pose, golden rays, triumphant expression. Marvel comic style, bold outlines, ben-day dots, vivid yellow/red pop art. No text.","caption":"한국어캡션15자이내"},"solution":{"scene_prompt":"English: ${MAEILNAMJA_DESC} gives big thumbs up next to a happy satisfied person, problem fully solved, celebration, confetti, bright cheerful mood. Marvel comic style, bold outlines, ben-day dots. No text.","caption":"한국어캡션15자이내"}}}`;
 
   const res = await axios.post(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,

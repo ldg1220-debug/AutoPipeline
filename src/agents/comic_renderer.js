@@ -31,6 +31,16 @@ const __dirname  = path.dirname(__filename);
 const W = 1080, H = 1920;
 const FONT = "'Malgun Gothic',AppleGothic,'Nanum Gothic',sans-serif";
 
+// 매읽남 캐릭터 에셋 경로 (한 번 생성 후 재사용)
+const CHARACTER_ASSET = path.resolve(__dirname, '../../src/assets/maeilnamja_comic.png');
+
+// AI 이미지 프롬프트에 삽입할 매읽남 캐릭터 묘사 (영문)
+const MAEILNAMJA_COMIC_BASE =
+  'chibi kawaii anime-style white Persian cat professor character, ' +
+  'bright white fluffy fur, large round expressive eyes, round cute face, ' +
+  'wearing beige/tan blazer with dark navy necktie. ' +
+  'Marvel comic book style: bold thick black outlines, ben-day dots halftone, vivid pop art colors.';
+
 // ── SVG helpers ─────────────────────────────────────────────────────────────
 
 const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -336,13 +346,71 @@ async function getAudioDuration(audioPath) {
   return 30;
 }
 
+// ── 매읽남 캐릭터 에셋 로드/생성 ──────────────────────────────────────────────
+
+async function loadOrGenerateCharacter() {
+  try {
+    await fs.access(CHARACTER_ASSET);
+    logger.info('[comic] 매읽남 캐릭터 에셋 로드 (캐시)');
+    return CHARACTER_ASSET;
+  } catch {}
+
+  // 에셋 없으면 생성 시도
+  await fs.mkdir(path.dirname(CHARACTER_ASSET), { recursive: true });
+  logger.info('[comic] 매읽남 캐릭터 생성 중...');
+  const heroPrompt =
+    MAEILNAMJA_COMIC_BASE +
+    ' Full body, triumphant hero pose: one fist raised high, confident big smile. ' +
+    'Pure white background. Tall portrait 9:16. No text, no speech bubbles.';
+  const tmpPath = CHARACTER_ASSET + '.tmp';
+  const result  = await generateComicImage(heroPrompt, tmpPath, 'white cat mascot character');
+  if (result) {
+    try { await fs.rename(tmpPath, CHARACTER_ASSET); } catch { await fs.copyFile(tmpPath, CHARACTER_ASSET); }
+    logger.info('[comic] 매읽남 캐릭터 에셋 저장 완료');
+    return CHARACTER_ASSET;
+  }
+  return null;
+}
+
+// 캐릭터 이미지를 타원형으로 마스킹해서 배경에 자연스럽게 합성
+async function buildCharacterComposite(charSrc, targetH, panelType) {
+  const buf     = await loadImageBuf(charSrc);
+  const resized = await sharp(buf).resize(null, targetH, { fit: 'inside' }).png().toBuffer();
+  const meta    = await sharp(resized).metadata();
+  const cw = meta.width, ch = meta.height;
+
+  // 타원 마스크 (가장자리 자연스럽게 블렌딩)
+  const maskSvg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${cw}" height="${ch}">
+      <ellipse cx="${cw / 2}" cy="${ch / 2}" rx="${cw / 2 - 4}" ry="${ch / 2 - 4}" fill="white"/>
+    </svg>`
+  );
+  // 마스크 적용 (흰 배경 제거 근사 — 완전 투명 아님, 코믹 느낌 유지)
+  const masked = await sharp(resized)
+    .composite([{ input: maskSvg, blend: 'dest-in' }])
+    .png()
+    .toBuffer();
+
+  // 위치 계산
+  let left, top;
+  if (panelType === 'hero') {
+    left = Math.round((W - cw) / 2);
+    top  = Math.round(H * 0.18);
+  } else { // solution
+    left = Math.round(W * 0.04);
+    top  = Math.round(H * 0.35);
+  }
+
+  return { input: masked, left: Math.max(0, left), top: Math.max(0, top) };
+}
+
 // ── 단일 패널 렌더링 ──────────────────────────────────────────────────────────
 
-async function renderPanel({ bgImageSrc, productImageSrc, panelType, captionText, outputPath }) {
+async function renderPanel({ bgImageSrc, productImageSrc, characterImageSrc, panelType, captionText, outputPath }) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-  const cfg      = PANEL_CFG[panelType] ?? PANEL_CFG.hero;
-  const bgBuf    = await sharp(await loadImageBuf(bgImageSrc))
+  const cfg   = PANEL_CFG[panelType] ?? PANEL_CFG.hero;
+  const bgBuf = await sharp(await loadImageBuf(bgImageSrc))
     .resize(W, H, { fit: 'cover', position: 'centre' })
     .png()
     .toBuffer();
@@ -357,8 +425,19 @@ async function renderPanel({ bgImageSrc, productImageSrc, panelType, captionText
     composites.push({ input: speedLinesSvg(W * 0.5, H * 0.38), top: 0, left: 0 });
   }
 
-  // 제품 이미지 원형 합성 (히어로 패널 + product_image 있을 때)
-  if (productImageSrc && panelType === 'hero') {
+  // 매읽남 캐릭터 오버레이 (hero / solution 패널)
+  if (characterImageSrc && panelType !== 'problem') {
+    try {
+      const charH      = panelType === 'hero' ? Math.round(H * 0.60) : Math.round(H * 0.42);
+      const charComp   = await buildCharacterComposite(characterImageSrc, charH, panelType);
+      composites.push(charComp);
+    } catch (e) {
+      logger.warn(`[comic] 캐릭터 오버레이 실패: ${e.message}`);
+    }
+  }
+
+  // 제품 이미지 원형 합성 (히어로 패널 + product_image + 캐릭터 없을 때)
+  if (productImageSrc && panelType === 'hero' && !characterImageSrc) {
     try {
       const prodBuf  = await loadImageBuf(productImageSrc);
       const DIAM     = 660, PROD_SZ = 560;
@@ -520,7 +599,15 @@ export async function generateComicMedia(content, outputDir) {
   logger.info(`[comic] TTS 생성 중: ${content.keyword}`);
   await generateComicAudio(ttsText, audioPath);
 
-  // ② 3패널 배경 이미지 (Grok 코믹스 스타일)
+  // ② 매읽남 캐릭터 에셋 로드 (없으면 생성)
+  const characterPath = await loadOrGenerateCharacter();
+  if (characterPath) {
+    logger.info(`[comic] 매읽남 캐릭터 준비 완료: ${path.basename(characterPath)}`);
+  } else {
+    logger.warn('[comic] 매읽남 캐릭터 이미지를 가져올 수 없습니다 — 캐릭터 없이 진행');
+  }
+
+  // ③ 3패널 배경 이미지
   const panelTypes = ['problem', 'hero', 'solution'];
   const bgPaths    = [];
 
@@ -528,10 +615,14 @@ export async function generateComicMedia(content, outputDir) {
     const imgPath = path.join(outputDir, `${safe}_comic_bg_${type}.jpg`);
     const panel   = story[type];
 
-    // 프롬프트: 코믹스 스타일 강제 + 텍스트 금지
+    // hero/solution 패널은 매읽남 캐릭터 묘사를 프롬프트에 포함
+    const charDesc = type !== 'problem'
+      ? `Featuring the mascot character: ${MAEILNAMJA_COMIC_BASE} `
+      : '';
     const comicPrompt =
       `Marvel comic book style, ben-day dots halftone pattern, bold thick black outlines, ` +
       `pop art vivid colors, dramatic composition. ` +
+      charDesc +
       `Scene: ${panel.scene_prompt}. ` +
       `Absolutely NO text, NO letters, NO words anywhere in the image. ` +
       `9:16 vertical portrait format.`;
@@ -540,7 +631,6 @@ export async function generateComicMedia(content, outputDir) {
     logger.info(`[comic] 배경 이미지 생성 (${type}): ${content.keyword}`);
     const generated = await generateComicImage(comicPrompt, imgPath, pexelsQuery);
     if (!generated) {
-      // 최후 폴백: 단색 배경
       const fallbackColors = { problem: '#2a0a0a', hero: '#0a1a2a', solution: '#0a2a0a' };
       await sharp({ create: { width: W, height: H, channels: 3, background: fallbackColors[type] ?? '#111' } })
         .jpeg().toFile(imgPath);
@@ -548,18 +638,26 @@ export async function generateComicMedia(content, outputDir) {
     bgPaths.push(imgPath);
   }
 
-  // ③ 3패널 Sharp 합성
+  // ④ 3패널 Sharp 합성
   const panelPaths = [];
   for (let i = 0; i < panelTypes.length; i++) {
     const type      = panelTypes[i];
     const panel     = story[type];
     const panelPath = path.join(outputDir, `${safe}_comic_panel_${type}.jpg`);
+
+    // AI가 장면 전체를 생성했으면 캐릭터 오버레이 불필요
+    // Pexels 폴백 배경이면 캐릭터 오버레이 추가
+    const bgWasGenerated = bgPaths[i] && !(await fs.readFile(bgPaths[i]).catch(() => null)
+      .then(buf => buf && buf.length < 5000)); // 단색 fallback은 작음
+    const useCharOverlay = characterPath && type !== 'problem';
+
     await renderPanel({
-      bgImageSrc:      bgPaths[i],
-      productImageSrc: (type === 'hero' && content.product_image) ? content.product_image : null,
-      panelType:       type,
-      captionText:     panel.caption,
-      outputPath:      panelPath,
+      bgImageSrc:       bgPaths[i],
+      productImageSrc:  null, // 캐릭터 있으므로 제품 원형 미사용
+      characterImageSrc: useCharOverlay ? characterPath : null,
+      panelType:        type,
+      captionText:      panel.caption,
+      outputPath:       panelPath,
     });
     panelPaths.push(panelPath);
   }
