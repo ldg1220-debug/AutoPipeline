@@ -24,6 +24,30 @@ const PEXELS_QUERY = {
   social:        'society people community korea',
 };
 
+// ── 전역 Pexels ID 추적 (포스트 간 이미지 중복 방지) ─────────────────────────
+const GLOBAL_USED_IDS_PATH = path.resolve(__dirname, '../../output/blog/pexels_used_ids.json');
+
+async function loadGlobalUsedIds() {
+  try {
+    const data = await fs.readFile(GLOBAL_USED_IDS_PATH, 'utf-8');
+    const arr = JSON.parse(data);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveGlobalUsedIds(ids) {
+  try {
+    await fs.mkdir(path.dirname(GLOBAL_USED_IDS_PATH), { recursive: true });
+    // 최근 500개만 유지 (파일 비대화 방지)
+    const arr = [...ids].slice(-500);
+    await fs.writeFile(GLOBAL_USED_IDS_PATH, JSON.stringify(arr));
+  } catch (err) {
+    logger.warn(`[blog_asset_builder] Failed to save global used IDs: ${err.message}`);
+  }
+}
+
 // DALL-E 3 썸네일 프롬프트 — 블로그 대표 이미지 스타일
 function buildThumbnailPrompt(content) {
   const base = content.image_prompt || `${content.keyword} concept`;
@@ -157,13 +181,14 @@ function buildSectionQuery(keyword, sectionHeading, category) {
  * 섹션마다 다른 쿼리를 사용해 내용과 관련된 이미지를 가져온다.
  * 같은 포스트 내에서 동일한 Pexels 사진이 재사용되지 않도록 ID를 추적한다.
  */
-async function fetchSectionImages(sections, keyword, category, destDir) {
+async function fetchSectionImages(sections, keyword, category, destDir, sharedGlobalIds = null) {
   const apiKey = config.pexels.apiKey;
   if (!apiKey || !sections?.length) return [];
 
   const paths = [];
   const count = Math.min(sections.length, 3);
-  const usedIds = new Set();  // 포스트 내 중복 방지
+  // sharedGlobalIds가 있으면 포스트 간 공유 Set 사용 (없으면 로컬 Set)
+  const usedIds = sharedGlobalIds ?? new Set();
 
   for (let i = 0; i < count; i++) {
     const section = sections[i];
@@ -313,7 +338,7 @@ body{width:730px;height:200px;background:linear-gradient(135deg,#0f172a,#1e293b)
 }
 
 // ── 단일 콘텐츠 자산 빌드 ─────────────────────────────────────────────────
-async function buildAssets(content) {
+async function buildAssets(content, sharedGlobalIds = null) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const assetDir = path.resolve(__dirname, `../../output/blog/assets/${safeKeyword}`);
   await fs.mkdir(assetDir, { recursive: true });
@@ -346,7 +371,7 @@ async function buildAssets(content) {
       await throttle(500);
       const sections = content.blog_draft?.sections ?? [];
       if (sections.length > 0) {
-        result.body_images = await fetchSectionImages(sections, content.keyword, content.category, assetDir);
+        result.body_images = await fetchSectionImages(sections, content.keyword, content.category, assetDir, sharedGlobalIds);
         logger.info(`[blog_asset_builder] Section images ×${result.body_images.length}: ${content.keyword}`);
       } else {
         // 섹션 없으면 카테고리 기반 폴백
@@ -361,7 +386,9 @@ async function buildAssets(content) {
   // 3. 썸네일 폴백 — DALL-E 실패 시 섹션 이미지와 겹치지 않는 별도 Pexels 이미지 사용
   if (!result.thumbnail && config.pexels.apiKey) {
     try {
-      const usedBodyIds = new Set(result.body_images.map((b) => b.pexels_id).filter(Boolean));
+      // 전역 Set(포스트 간 중복 방지) + 현재 포스트 body_images ID 합산
+      const excludedIds = sharedGlobalIds ?? new Set();
+      for (const b of result.body_images) { if (b.pexels_id) excludedIds.add(b.pexels_id); }
       const thumbQuery = PEXELS_QUERY[content.category] ?? `${content.keyword} korea`;
       await throttle(300);
       const thumbRes = await axios.get('https://api.pexels.com/v1/search', {
@@ -369,13 +396,14 @@ async function buildAssets(content) {
         headers: { Authorization: config.pexels.apiKey },
         timeout: 10000,
       });
-      const thumbPhoto = (thumbRes.data.photos ?? []).find((p) => !usedBodyIds.has(p.id));
+      const thumbPhoto = (thumbRes.data.photos ?? []).find((p) => !excludedIds.has(p.id));
       if (thumbPhoto) {
         const rawPath = path.join(assetDir, 'thumbnail_raw.jpg');
         const thumbPath = path.join(assetDir, 'thumbnail.jpg');
         await downloadImage(thumbPhoto.src.large, rawPath);
         await sharp(rawPath).resize(800, 450, { fit: 'cover' }).jpeg({ quality: 90 }).toFile(thumbPath);
         await fs.unlink(rawPath).catch(() => {});
+        sharedGlobalIds?.add(thumbPhoto.id);
         result.thumbnail = thumbPath;
         logger.info(`[blog_asset_builder] Thumbnail (Pexels fallback, id:${thumbPhoto.id}): ${content.keyword}`);
       }
@@ -416,17 +444,24 @@ export async function buildAllAssets(contentData) {
     return contentData;
   }
 
+  // 이전 실행에서 사용된 Pexels ID 로드 — 포스트 간 이미지 중복 방지
+  const sharedGlobalIds = await loadGlobalUsedIds();
+  logger.info(`[blog_asset_builder] Loaded ${sharedGlobalIds.size} previously-used Pexels IDs`);
+
   const updated = [];
   for (const content of contents) {
     logger.info(`[blog_asset_builder] Building assets: ${content.keyword}`);
     try {
-      const assets = await buildAssets(content);
+      const assets = await buildAssets(content, sharedGlobalIds);
       updated.push({ ...content, blog_assets: assets });
     } catch (err) {
       logger.error(`[blog_asset_builder] Failed: ${content.keyword}`, { message: err.message });
       updated.push({ ...content, blog_assets: null });
     }
   }
+
+  // 사용된 ID 저장 — 다음 실행에서도 중복 방지
+  await saveGlobalUsedIds(sharedGlobalIds);
 
   return { ...contentData, assets_built_at: new Date().toISOString(), contents: updated };
 }

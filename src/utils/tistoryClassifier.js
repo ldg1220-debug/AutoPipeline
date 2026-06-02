@@ -510,10 +510,16 @@ export async function setTagsInEditor(page, tags) {
       // 쉼표로 확정 시도, 실패(자동완성 드롭다운이 없는 경우)하면 Enter
       await currentInput.press(',');
       await page.waitForTimeout(300);
-      // 입력값이 남아있으면 쉼표가 무효 → Enter 재시도
-      const remaining = await currentInput.inputValue().catch(() => '');
+      // 쉼표 후 React 리렌더링 → 잔여값은 page.evaluate로, Enter는 keyboard API로 (stale handle 방지)
+      const remaining = await page.evaluate((sels) => {
+        for (const sel of sels) {
+          const el = document.querySelector(sel);
+          if (el && el.offsetParent !== null) return el.value ?? '';
+        }
+        return '';
+      }, selectors).catch(() => '');
       if (remaining.trim()) {
-        await currentInput.press('Enter');
+        await page.keyboard.press('Enter').catch(() => {});
         await page.waitForTimeout(300);
       }
       confirmed++;
