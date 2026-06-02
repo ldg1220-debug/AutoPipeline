@@ -198,7 +198,7 @@ async function generateComicScriptGemini(product) {
     `{"youtube_title":"35자 이내 제목","shortform_script":{"hook":"5초 강렬한 질문(20자이내)","context":"10초 문제공감(30~50자)","insight":"15초 핵심장점(60~100자)","summary":"5초 핵심정리(20~30자)","cta":"아래 링크에서 쿠팡 최저가로 확인해 보세요!"},"panel_story":{"problem":{"scene_prompt":"English Marvel comic style: dramatic scene showing the PROBLEM without product. Bold outlines, ben-day dots, vivid pop art colors. No text in image.","caption":"한국어캡션15자이내"},"hero":{"scene_prompt":"English Marvel comic style: product appears as HERO with spotlight, glowing aura, dramatic entrance. Bold outlines, ben-day dots. No text in image.","caption":"한국어캡션15자이내"},"solution":{"scene_prompt":"English Marvel comic style: person is happy and triumphant AFTER using product, problem solved. Bold outlines, ben-day dots. No text in image.","caption":"한국어캡션15자이내"}}}`;
 
   const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.85 } },
     { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
   );
