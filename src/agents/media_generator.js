@@ -49,7 +49,7 @@ async function generateImageGrokAurora(prompt, outputPath) {
   try {
     const res = await axios.post(
       'https://api.x.ai/v1/images/generations',
-      { model: 'grok-imagine-image', prompt, n: 1 },
+      { model: 'grok-2-image-1212', prompt, n: 1 },
       {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         timeout: 120000,
@@ -1700,7 +1700,7 @@ async function generateLongFormMedia(content) {
         await execFileAsync(ffmpegPath, [
           '-loop', '1', '-i', thumbShortsPath,
           '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-          '-t', '1',
+          '-t', '2',
           '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
           '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
           '-preset', 'fast', '-shortest', '-y', tmpThumbClip,

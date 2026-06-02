@@ -499,6 +499,22 @@ export async function publishContents(qaData, contentData) {
       result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped' };
     }
 
+    // 업로드 성공한 키워드를 DB에 'used' 마킹 → 중복 업로드 방지
+    const uploadSucceeded =
+      result.youtube?.video_id || result.youtube_shorts?.video_id;
+    if (uploadSucceeded) {
+      try {
+        db.prepare(
+          `INSERT INTO keywords (keyword, category, score, status, sources)
+           VALUES (?, ?, 70, 'used', 'youtube_upload')
+           ON CONFLICT(keyword) DO UPDATE SET status='used', used_at=datetime('now')`
+        ).run(content.keyword, content.category ?? 'economy');
+        logger.info(`[auto_publisher] 키워드 'used' 마킹: "${content.keyword}"`);
+      } catch (dbErr) {
+        logger.warn(`[auto_publisher] DB 마킹 실패 (${content.keyword}): ${dbErr.message}`);
+      }
+    }
+
     results.push(result);
 
     // 영상 간 딜레이 (rate limit 방지, 마지막 항목 제외)

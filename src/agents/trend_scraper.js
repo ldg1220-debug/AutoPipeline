@@ -224,10 +224,25 @@ export async function fetchTrends() {
       }))
       .sort((a, b) => b.score - a.score);
 
+    // 최근 7일 내 이미 업로드한 키워드 제외 (중복 방지)
+    let recentlyUsed = new Set();
+    try {
+      const usedRows = db.prepare(
+        `SELECT keyword FROM keywords WHERE status='used' AND used_at >= datetime('now','-7 days')`
+      ).all();
+      recentlyUsed = new Set(usedRows.map((r) => r.keyword));
+      if (recentlyUsed.size > 0) {
+        logger.info(`[trend_scraper] 최근 7일 사용 키워드 ${recentlyUsed.size}개 제외`);
+      }
+    } catch { /* DB 없으면 스킵 */ }
+
+    const freshSorted = sorted.filter((i) => !recentlyUsed.has(i.keyword));
+    const sortedFinal = freshSorted.length > 0 ? freshSorted : sorted; // 모두 사용된 경우 제한 해제
+
     // DAILY_VIDEOS 개수만큼 경제 아이템 선택 (기본값 1)
     const dailyLimit   = config.runtime.dailyVideos ?? 1;
-    const economyItems = sorted.filter((i) => i.category !== 'health').slice(0, dailyLimit);
-    const bestHealth   = sorted.find((i) => i.category === 'health');
+    const economyItems = sortedFinal.filter((i) => i.category !== 'health').slice(0, dailyLimit);
+    const bestHealth   = sortedFinal.find((i) => i.category === 'health');
     const selected     = bestHealth ? [...economyItems, bestHealth] : economyItems;
 
     // ── DB promised 키워드 최우선 처리 ────────────────────────────────────
