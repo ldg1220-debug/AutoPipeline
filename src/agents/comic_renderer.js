@@ -480,24 +480,58 @@ const PANEL_PEXELS_QUERY = {
 };
 
 /**
- * AI 이미지 생성: Grok → DALL-E 3 → Gemini Imagen → null
+ * AI 이미지 생성 (마블 코믹 스타일 장면)
+ * Gemini Flash → Grok Aurora → DALL-E 3 순으로 시도
  * @returns {{ path: string, isAI: boolean } | null}
  */
 async function generateComicImage(prompt, outputPath) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-  // 1순위: Grok Aurora (여러 모델명 시도)
+  const geminiKey = config.gemini?.apiKey ?? process.env.GEMINI_API_KEY;
+
+  // 1순위: Gemini Flash 네이티브 이미지 생성 (responseModalities: IMAGE)
+  // 동일 API 키로 텍스트 모델처럼 호출 — 별도 과금 없이 Imagen보다 접근 쉬움
+  if (geminiKey) {
+    const flashModels = [
+      'gemini-2.5-flash-image',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-image-preview',
+    ];
+    for (const model of flashModels) {
+      try {
+        const res = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt.slice(0, 4000) }] }],
+            generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 120000 },
+        );
+        const parts = res.data.candidates?.[0]?.content?.parts ?? [];
+        const img   = parts.find((p) => p.inlineData?.data);
+        if (img?.inlineData?.data) {
+          await fs.writeFile(outputPath, Buffer.from(img.inlineData.data, 'base64'));
+          logger.info(`[comic] Gemini Flash (${model}) 이미지 생성 성공`);
+          return { path: outputPath, isAI: true };
+        }
+      } catch (e) {
+        const status = e.response?.status ?? 'ERR';
+        const msg    = e.response?.data?.error?.message ?? e.message;
+        logger.warn(`[comic] Gemini Flash (${model}) 실패 (${status}): ${msg}`);
+        if (status !== 404 && status !== 400) break;
+      }
+    }
+  }
+
+  // 2순위: Grok Aurora (여러 모델명 시도)
   const grokKey = config.grok?.apiKey;
   if (grokKey) {
-    for (const model of ['grok-2-image-1212', 'aurora', 'grok-2-aurora']) {
+    for (const model of ['grok-2-image-1212', 'aurora', 'grok-2-aurora', 'grok-2-image']) {
       try {
         const res = await axios.post(
           'https://api.x.ai/v1/images/generations',
           { model, prompt, n: 1 },
-          {
-            headers: { Authorization: `Bearer ${grokKey}`, 'Content-Type': 'application/json' },
-            timeout: 120000,
-          },
+          { headers: { Authorization: `Bearer ${grokKey}`, 'Content-Type': 'application/json' }, timeout: 120000 },
         );
         const item = res.data.data?.[0];
         if (!item) continue;
@@ -513,34 +547,32 @@ async function generateComicImage(prompt, outputPath) {
           return { path: outputPath, isAI: true };
         }
       } catch (e) {
-        const status  = e.response?.status ?? 'ERR';
-        const detail  = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message;
+        const status = e.response?.status ?? 'ERR';
+        const detail = e.response?.data?.error?.message ?? e.response?.data?.message ?? e.message;
         logger.warn(`[comic] Grok (${model}) 실패 (${status}): ${detail}`);
-        if (status !== 404 && status !== 422) break; // 모델 없음 외 에러는 재시도 무의미
+        if (status !== 404 && status !== 422) break;
       }
     }
   }
 
-  // 2순위: DALL-E 3
+  // 3순위: DALL-E 3
   if (config.openai?.apiKey) {
     try {
       const res = await axios.post(
         'https://api.openai.com/v1/images/generations',
         { model: 'dall-e-3', prompt: prompt.slice(0, 4000), n: 1, size: '1024x1792', quality: 'standard' },
-        {
-          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-          timeout: 120000,
-        },
+        { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 },
       );
       const item = res.data.data?.[0];
       if (item?.b64_json) {
         await fs.writeFile(outputPath, Buffer.from(item.b64_json, 'base64'));
+        logger.info('[comic] DALL-E 3 이미지 생성 성공');
         return { path: outputPath, isAI: true };
       }
       if (item?.url) {
         const img = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
         await fs.writeFile(outputPath, Buffer.from(img.data));
-        logger.info('[comic] DALL-E 3 이미지 생성 성공');
+        logger.info('[comic] DALL-E 3 이미지 생성 성공 (URL)');
         return { path: outputPath, isAI: true };
       }
     } catch (e) {
@@ -548,10 +580,9 @@ async function generateComicImage(prompt, outputPath) {
     }
   }
 
-  // 3순위: Gemini Imagen 3
-  const geminiKey = config.gemini?.apiKey ?? process.env.GEMINI_API_KEY;
+  // 4순위: Gemini Imagen (유료 플랜 필요)
   if (geminiKey) {
-    for (const model of ['imagen-3.0-generate-002', 'imagen-3.0-generate-001']) {
+    for (const model of ['imagen-4.0-generate-001', 'imagen-4.0-fast-generate-001', 'imagen-3.0-generate-002']) {
       try {
         const res = await axios.post(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${geminiKey}`,
@@ -570,7 +601,7 @@ async function generateComicImage(prompt, outputPath) {
     }
   }
 
-  return null; // 모든 AI 소스 실패 → SVG 배경 사용
+  return null; // 모든 AI 실패 → SVG 폴백
 }
 
 // ── TTS ───────────────────────────────────────────────────────────────────────
@@ -728,44 +759,33 @@ async function loadOrGenerateCharacter() {
  * @param {string}       opts.captionText      - 하단 캡션
  * @param {string}       opts.outputPath
  */
-async function renderPanel({ aiBgSrc, productImageSrc, panelType, captionText, outputPath }) {
+async function renderPanel({ aiBgSrc, isAI, productImageSrc, panelType, captionText, outputPath }) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
   const cfg = PANEL_CFG[panelType] ?? PANEL_CFG.hero;
-
-  // ① SVG 배경을 기본 캔버스로 생성
-  const bgFn  = PANEL_BG_FN[panelType] ?? heroBgSvg;
-  const baseBuf = await sharp(bgFn(W, H)).resize(W, H).png().toBuffer();
-
   const composites = [];
+  let baseBuf;
 
-  // ② AI 생성 이미지가 있으면 저채도 텍스처로 블렌딩 (주인공은 SVG + 캐릭터)
-  if (aiBgSrc) {
-    try {
-      const imgBuf = await loadImageBuf(aiBgSrc);
-      if (imgBuf && imgBuf.length > 10_000) {
-        // 채도 제거 + 어둡게 → SVG 배경 위에 분위기 텍스처로만 활용
-        const tinted = await sharp(imgBuf)
-          .resize(W, H, { fit: 'cover', position: 'centre' })
-          .modulate({ saturation: 0.15, brightness: 0.45 })
-          .png()
-          .toBuffer();
-        // PNG에 alpha 채널이 없으면 multiply 대신 overlay 블렌드
-        composites.push({ input: tinted, top: 0, left: 0, blend: 'multiply' });
-      }
-    } catch { /* 텍스처 실패는 무시 */ }
+  if (aiBgSrc && isAI) {
+    // ━━ AI 성공 경로 ━━
+    // AI가 마블 스타일 장면 전체를 그렸으므로 그것이 메인 비주얼.
+    // SVG 효과(Ben-Day dots, SFX, 캡션, 테두리)만 얹는다.
+    const raw = await loadImageBuf(aiBgSrc);
+    baseBuf = await sharp(raw).resize(W, H, { fit: 'cover', position: 'centre' }).png().toBuffer();
+    // AI 이미지 위에 Ben-Day dots
+    composites.push({ input: benDaySvg(W, H, 0.05), top: 0, left: 0 });
+  } else {
+    // ━━ 폴백 경로 ━━
+    // SVG 배경 + 코드로 그린 고양이 캐릭터
+    const bgFn = PANEL_BG_FN[panelType] ?? heroBgSvg;
+    baseBuf = await sharp(bgFn(W, H)).resize(W, H).png().toBuffer();
+    composites.push({ input: benDaySvg(W, H), top: 0, left: 0 });
+    if (cfg.speedLines) {
+      composites.push({ input: speedLinesSvg(W * 0.5, H * 0.40), top: 0, left: 0 });
+    }
+    // SVG 고양이 캐릭터 (코드로 직접 드로잉)
+    composites.push({ input: buildCatCharacterLayer(panelType, W, H), top: 0, left: 0 });
   }
-
-  // ③ Ben-Day dots
-  composites.push({ input: benDaySvg(W, H), top: 0, left: 0 });
-
-  // ④ 히어로 패널 스피드 라인
-  if (cfg.speedLines) {
-    composites.push({ input: speedLinesSvg(W * 0.5, H * 0.40), top: 0, left: 0 });
-  }
-
-  // ⑤ SVG 고양이 캐릭터 (코드로 직접 그림 — PNG 파일 불필요)
-  composites.push({ input: buildCatCharacterLayer(panelType, W, H), top: 0, left: 0 });
 
   // ⑥ 제품 이미지 원형 배지 (히어로 패널 우측 하단)
   if (productImageSrc && panelType === 'hero') {
@@ -928,26 +948,64 @@ export async function generateComicMedia(content, outputDir) {
   logger.info(`[comic] TTS 생성 중: ${content.keyword}`);
   await generateComicAudio(ttsText, audioPath);
 
-  // ③ 3패널 — AI 배경 생성 시도 (실패해도 SVG 배경으로 대체)
+  // ③ 3패널 — AI 이미지 생성 (마블 엔딩 크레딧 스타일)
+  // 성공하면 AI 이미지가 완성된 장면 전체 / 실패하면 SVG 배경 + 코드 캐릭터
   const panelTypes = ['problem', 'hero', 'solution'];
-  const aiBgResults = [];   // { path, isAI } | null
+  const aiBgResults = [];
+
+  // 고양이 캐릭터 묘사 — 모든 패널에 일관된 캐릭터로 등장
+  const CAT_DESC =
+    'a chibi kawaii white cat professor character: large round expressive eyes, ' +
+    'small pointed ears, extremely fluffy white fur, beige/tan blazer, dark navy necktie. ' +
+    'Character drawn fully integrated into the scene in Marvel comic book style.';
+
+  const MARVEL_STYLE =
+    'Marvel Studios end-credit card illustration style. ' +
+    'Professional comic book artwork by top Marvel illustrators. ' +
+    'Bold thick black ink outlines, dynamic dramatic poses, ' +
+    'vivid saturated colors, cinematic lighting and shadows, ' +
+    'Ben-Day halftone dots texture throughout. ';
+
+  const PANEL_PROMPTS = {
+    problem: (scene) =>
+      MARVEL_STYLE +
+      `Panel mood: crisis, dread, discomfort. ` +
+      `The white cat professor character (${CAT_DESC}) looks horrified or miserable — ` +
+      `arms raised, sweat drops, distressed expression. ` +
+      `Scene: ${scene}. ` +
+      `Background: dramatic red and dark tones. NO text or letters anywhere.`,
+
+    hero: (scene) =>
+      MARVEL_STYLE +
+      `Panel mood: triumphant hero entrance, explosive energy. ` +
+      `The white cat professor character (${CAT_DESC}) bursts into frame heroically — ` +
+      `fist raised high, confident fierce expression, golden speed lines radiating from behind. ` +
+      `Character is the DOMINANT figure filling most of the frame. ` +
+      `Scene: ${scene}. ` +
+      `Background: deep black with gold/yellow radiating lines. NO text or letters anywhere.`,
+
+    solution: (scene) =>
+      MARVEL_STYLE +
+      `Panel mood: victory, joy, celebration. ` +
+      `The white cat professor character (${CAT_DESC}) gives a triumphant thumbs-up, ` +
+      `big smile, eyes closed in happiness, confetti falling around. ` +
+      `Scene: ${scene}. ` +
+      `Background: bright green with sparkles. NO text or letters anywhere.`,
+  };
 
   for (const type of panelTypes) {
-    const imgPath = path.join(outputDir, `${safe}_comic_bg_${type}.jpg`);
-    const panel   = story[type];
-    const comicPrompt =
-      `Marvel comic book panel, bold thick black outlines, ben-day dots halftone, vivid pop art colors, ` +
-      `dramatic cinematic composition. ` +
-      `${type === 'problem' ? 'Dramatic problem scene: ' : type === 'hero' ? 'Heroic action scene featuring ' + MAEILNAMJA_COMIC_BASE + ': ' : 'Happy successful resolution scene featuring ' + MAEILNAMJA_COMIC_BASE + ': '}` +
-      `${panel.scene_prompt}. ` +
-      `NO text, NO letters, NO words. 9:16 portrait.`;
+    const imgPath     = path.join(outputDir, `${safe}_comic_bg_${type}.jpg`);
+    const panel       = story[type];
+    const comicPrompt = (PANEL_PROMPTS[type] ?? PANEL_PROMPTS.hero)(panel.scene_prompt);
 
-    logger.info(`[comic] AI 배경 이미지 시도 (${type}): ${content.keyword}`);
+    logger.info(`[comic] AI 이미지 생성 (${type}): ${content.keyword}`);
     const result = await generateComicImage(comicPrompt, imgPath);
-    aiBgResults.push(result); // null if all AI failed
+    if (result) logger.info(`[comic] AI 이미지 성공 (${type}) — 마블 스타일 장면`);
+    else         logger.warn(`[comic] AI 실패 (${type}) — SVG 캐릭터 폴백 사용`);
+    aiBgResults.push(result);
   }
 
-  // ④ 3패널 Sharp 합성 (SVG 배경 + 캐릭터 주인공)
+  // ④ 3패널 Sharp 합성
   const panelPaths = [];
   for (let i = 0; i < panelTypes.length; i++) {
     const type      = panelTypes[i];
@@ -956,7 +1014,8 @@ export async function generateComicMedia(content, outputDir) {
     const aiResult  = aiBgResults[i];
 
     await renderPanel({
-      aiBgSrc:         aiResult?.path ?? null,  // AI 성공 시 텍스처로 활용
+      aiBgSrc:         aiResult?.path ?? null,
+      isAI:            aiResult?.isAI ?? false,   // true면 AI 장면이 메인 비주얼
       productImageSrc: null,
       panelType:       type,
       captionText:     panel.caption,
