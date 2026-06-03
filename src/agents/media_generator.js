@@ -1463,21 +1463,24 @@ async function generateMedia(content) {
 
   // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형)
   const thumbSceneUrl = sceneUrls[0];
-  if (thumbSceneUrl) {
+  if (!thumbSceneUrl) {
+    logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 썸네일 생성 건너뜀: ${content.keyword}`);
+  } else {
+    logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
     try {
       await generateThumbnail(content, thumbSceneUrl, thumbPath);
       result.thumbnail = thumbPath;
-      logger.info(`[media_generator] Thumbnail saved`);
+      logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 저장: ${thumbPath}`);
     } catch (err) {
-      logger.warn(`[media_generator] Thumbnail failed: ${err.message}`);
+      logger.error(`[media_generator] ❌ 롱폼 썸네일(16:9) 실패: ${err.message}`);
     }
 
     try {
       await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
       result.thumbnail_shorts = thumbShortsPath;
-      logger.info(`[media_generator] Shorts thumbnail saved`);
+      logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 저장: ${thumbShortsPath}`);
     } catch (err) {
-      logger.warn(`[media_generator] Shorts thumbnail failed: ${err.message}`);
+      logger.error(`[media_generator] ❌ 쇼츠 썸네일(9:16) 실패: ${err.message}`);
     }
   }
 
