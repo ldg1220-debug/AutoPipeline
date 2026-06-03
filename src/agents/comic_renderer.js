@@ -36,9 +36,11 @@ const CHARACTER_ASSET = path.resolve(__dirname, '../../src/assets/maeilnamja_com
 
 // AI 이미지 프롬프트에 삽입할 매읽남 캐릭터 묘사 (영문)
 const MAEILNAMJA_COMIC_BASE =
-  'chibi kawaii anime-style white Persian cat professor character, ' +
-  'bright white fluffy fur, large round expressive eyes, round cute face, ' +
-  'wearing beige/tan blazer with dark navy necktie. ' +
+  'chibi kawaii white cat superhero character, ' +
+  'bright white fluffy fur, large round expressive eyes, round cute face. ' +
+  'Wearing a form-fitting Marvel superhero suit: royal cobalt blue bodysuit, ' +
+  'gold shoulder pads, gold V-neck collar, gold belt with rectangular buckle, ' +
+  'gold open-book chest emblem (the hero reads books). ' +
   'Marvel comic book style: bold thick black outlines, ben-day dots halftone, vivid pop art colors.';
 
 // ── SVG helpers ─────────────────────────────────────────────────────────────
@@ -113,8 +115,9 @@ function catCharacterSvg(pose, cx, cy, h) {
   const sw   = Math.max(3, h * 0.030);  // 선 굵기 (코믹 스타일)
   const fur  = '#F4F2EE';               // 흰 털
   const pink = '#FFAAAA';               // 귀 속 / 코 / 볼 핑크
-  const suit = '#C8A84B';               // 베이지 블레이저
-  const tie  = '#1C2A78';               // 감청 넥타이
+  const suit = '#1435B8';               // 코발트 블루 히어로 슈트
+  const gold = '#F0C040';               // 금색 트림 (어깨패드 / 벨트 / 심볼)
+  const cape = '#CC2222';               // 빨간 망토 (히어로 패널 전용)
   const dark = '#111111';               // 아웃라인
 
   // ── 비율 ──
@@ -241,17 +244,38 @@ function catCharacterSvg(pose, cx, cy, h) {
               fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>`;
   }
 
+  // ── 망토 (히어로 포즈 전용 — 몸통보다 먼저 렌더링해야 뒤에 보임) ──
+  const capeEl = pose === 'hero' ? `
+    <path d="M${cx-bodyW*.38} ${bodyTop+bodyH*.06}
+             C${cx-bodyW*1.15} ${bodyTop+bodyH*.35} ${cx-bodyW*1.05} ${bodyTop+bodyH*.85} ${cx-bodyW*.55} ${cy+legH*.55}"
+          fill="${cape}" stroke="${dark}" stroke-width="${sw*1.1}"/>
+    <path d="M${cx-bodyW*.38} ${bodyTop+bodyH*.06}
+             L${cx-bodyW*.28} ${bodyTop+bodyH*.55}"
+          fill="none" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.4"/>` : '';
+
   // ── 공통: 다리, 꼬리, 몸통, 머리 ──
   return `
+    ${capeEl}
     ${armsEl}
     <path d="M${cx+bodyW*.47} ${bodyTop+bodyH*.62} Q${cx+bodyW*.88} ${bodyTop+bodyH*.28} ${cx+bodyW*.72} ${bodyTop-bodyH*.08}"
           fill="none" stroke="${fur}" stroke-width="${sw*4.5}" stroke-linecap="round"/>
     <rect x="${cx-bodyW/2}" y="${bodyTop}" width="${bodyW}" height="${bodyH}"
           rx="${h*.036}" fill="${suit}" stroke="${dark}" stroke-width="${sw*1.9}"/>
-    <path d="M${cx-bodyW*.50} ${bodyTop} L${cx-bodyW*.13} ${bodyTop} L${cx} ${bodyTop+bodyH*.19} L${cx+bodyW*.13} ${bodyTop} L${cx+bodyW*.50} ${bodyTop}"
-          fill="none" stroke="${dark}" stroke-width="${sw*.9}"/>
-    <polygon points="${cx},${bodyTop+bodyH*.04} ${cx-bodyW*.085},${bodyTop+bodyH*.13} ${cx},${bodyTop+bodyH*.52} ${cx+bodyW*.085},${bodyTop+bodyH*.13}"
-             fill="${tie}" stroke="${dark}" stroke-width="${sw*.85}"/>
+    <ellipse cx="${cx-bodyW*.50}" cy="${bodyTop+bodyH*.09}" rx="${bodyW*.19}" ry="${bodyH*.12}"
+             fill="${gold}" stroke="${dark}" stroke-width="${sw*.9}"/>
+    <ellipse cx="${cx+bodyW*.50}" cy="${bodyTop+bodyH*.09}" rx="${bodyW*.19}" ry="${bodyH*.12}"
+             fill="${gold}" stroke="${dark}" stroke-width="${sw*.9}"/>
+    <path d="M${cx-bodyW*.50} ${bodyTop} L${cx-bodyW*.14} ${bodyTop+bodyH*.28} L${cx} ${bodyTop+bodyH*.12} L${cx+bodyW*.14} ${bodyTop+bodyH*.28} L${cx+bodyW*.50} ${bodyTop}"
+          fill="${gold}" fill-opacity="0.28" stroke="${dark}" stroke-width="${sw*.9}"/>
+    <path d="M${cx-bodyW*.095} ${bodyTop+bodyH*.14} L${cx-bodyW*.115} ${bodyTop+bodyH*.26}
+             L${cx} ${bodyTop+bodyH*.38} L${cx+bodyW*.115} ${bodyTop+bodyH*.26} L${cx+bodyW*.095} ${bodyTop+bodyH*.14}"
+          fill="${gold}" stroke="${dark}" stroke-width="${sw*.75}"/>
+    <path d="M${cx-bodyW*.085} ${bodyTop+bodyH*.38} L${cx} ${bodyTop+bodyH*.60} L${cx+bodyW*.085} ${bodyTop+bodyH*.38}"
+          fill="${gold}" stroke="${dark}" stroke-width="${sw*.75}"/>
+    <rect x="${cx-bodyW*.50}" y="${bodyTop+bodyH*.69}" width="${bodyW}" height="${bodyH*.105}"
+          rx="${h*.012}" fill="${gold}" stroke="${dark}" stroke-width="${sw*.9}"/>
+    <rect x="${cx-bodyW*.095}" y="${bodyTop+bodyH*.66}" width="${bodyW*.19}" height="${bodyH*.165}"
+          rx="${h*.016}" fill="${gold}" stroke="${dark}" stroke-width="${sw}"/>
     <rect x="${cx-bodyW*.28}" y="${bodyTop+bodyH*.90}" width="${bodyW*.24}" height="${legH*.92}"
           rx="${h*.022}" fill="${suit}" stroke="${dark}" stroke-width="${sw}"/>
     <rect x="${cx+bodyW*.04}" y="${bodyTop+bodyH*.90}" width="${bodyW*.24}" height="${legH*.92}"
@@ -955,8 +979,11 @@ export async function generateComicMedia(content, outputDir) {
 
   // 고양이 캐릭터 묘사 — 모든 패널에 일관된 캐릭터로 등장
   const CAT_DESC =
-    'a chibi kawaii white cat professor character: large round expressive eyes, ' +
-    'small pointed ears, extremely fluffy white fur, beige/tan blazer, dark navy necktie. ' +
+    'a chibi kawaii white cat superhero character: large round expressive eyes, ' +
+    'small pointed ears, extremely fluffy white fur. ' +
+    'Wearing a form-fitting royal cobalt blue superhero suit with gold shoulder pads, ' +
+    'gold V-neck collar, gold belt with buckle, gold open-book chest emblem. ' +
+    'Hero panel: flowing crimson red cape. ' +
     'Character drawn fully integrated into the scene in Marvel comic book style.';
 
   const MARVEL_STYLE =

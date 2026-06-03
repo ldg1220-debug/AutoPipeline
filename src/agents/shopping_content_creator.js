@@ -226,7 +226,7 @@ async function generateComicScriptGemini(product) {
       const status = e.response?.status ?? 'ERR';
       logger.warn(`[shopping-comic] Gemini (${model}) 실패 (${status}): ${e.response?.data?.error?.message ?? e.message}`);
       lastErr = e;
-      if (status !== 404 && status !== 400) break; // 모델 없음 외 에러는 재시도 무의미
+      if (status !== 404 && status !== 400 && status !== 503) break; // 모델 없음/과부하 외 에러는 재시도 무의미
     }
   }
   throw lastErr;
