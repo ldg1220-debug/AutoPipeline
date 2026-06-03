@@ -99,6 +99,207 @@ function starburstPath(cx, cy, r1, r2, pts) {
   return p.join(' ');
 }
 
+// ── SVG 고양이 캐릭터 ─────────────────────────────────────────────────────────
+/**
+ * 치비 고양이 교수 캐릭터를 SVG 엘리먼트로 그린다.
+ * PNG 오버레이 없이 코드로 직접 드로잉 → 패널에 네이티브 통합.
+ *
+ * @param {'worried'|'hero'|'happy'} pose
+ * @param {number} cx   캐릭터 수평 중심 (px)
+ * @param {number} cy   캐릭터 바닥 기준 Y (px)
+ * @param {number} h    전체 캐릭터 높이 (px)
+ */
+function catCharacterSvg(pose, cx, cy, h) {
+  const sw   = Math.max(3, h * 0.030);  // 선 굵기 (코믹 스타일)
+  const fur  = '#F4F2EE';               // 흰 털
+  const pink = '#FFAAAA';               // 귀 속 / 코 / 볼 핑크
+  const suit = '#C8A84B';               // 베이지 블레이저
+  const tie  = '#1C2A78';               // 감청 넥타이
+  const dark = '#111111';               // 아웃라인
+
+  // ── 비율 ──
+  const legH   = h * 0.14;
+  const bodyH  = h * 0.33;
+  const bodyW  = h * 0.44;
+  const headR  = h * 0.28;
+
+  const bodyTop = cy - legH - bodyH;
+  const headCy  = bodyTop - headR * 0.62;  // 머리 중심
+
+  // ── 귀 ──
+  const earBW  = headR * 0.38;
+  const earPk  = headR * 0.50;
+  const earLX  = cx - headR * 0.50;
+  const earRX  = cx + headR * 0.50;
+  const earBY  = headCy - headR * 0.58;
+  const earTY  = earBY - earPk;
+
+  // ── 눈 ──
+  const eLX = cx - headR * 0.36;
+  const eRX = cx + headR * 0.36;
+  const eY  = headCy - headR * 0.06;
+  const eW  = headR * 0.195;
+  const eH  = headR * 0.245;
+  const bY  = eY - eH * 1.25;   // 눈썹 Y
+  const bL  = eW * 1.6;          // 눈썹 길이
+
+  // ── 포즈별 요소 ──
+  let eyesEl = '', browsEl = '', mouthEl = '', armsEl = '';
+
+  if (pose === 'worried') {
+    // 눈: 크게 뜸 + 하이라이트
+    eyesEl = `
+      <ellipse cx="${eLX}" cy="${eY}" rx="${eW*1.2}" ry="${eH*1.25}" fill="${dark}"/>
+      <ellipse cx="${eRX}" cy="${eY}" rx="${eW*1.2}" ry="${eH*1.25}" fill="${dark}"/>
+      <circle  cx="${eLX-eW*.28}" cy="${eY-eH*.3}" r="${eW*.38}" fill="white"/>
+      <circle  cx="${eRX-eW*.28}" cy="${eY-eH*.3}" r="${eW*.38}" fill="white"/>`;
+    // 눈썹: 가운데 위로 올라감 (걱정 표정)
+    browsEl = `
+      <path d="M${eLX-bL/2} ${bY+bL*.22} Q${eLX} ${bY-bL*.18} ${eLX+bL/2} ${bY}"
+            fill="none" stroke="${dark}" stroke-width="${sw*1.3}" stroke-linecap="round"/>
+      <path d="M${eRX-bL/2} ${bY} Q${eRX} ${bY-bL*.18} ${eRX+bL/2} ${bY+bL*.22}"
+            fill="none" stroke="${dark}" stroke-width="${sw*1.3}" stroke-linecap="round"/>`;
+    // 입: 약간 벌린 역호
+    mouthEl = `
+      <path d="M${cx-headR*.20} ${headCy+headR*.42} Q${cx} ${headCy+headR*.58} ${cx+headR*.20} ${headCy+headR*.42}"
+            fill="none" stroke="${dark}" stroke-width="${sw}" stroke-linecap="round"/>`;
+    // 팔: 양팔 번쩍 (OH NO! 포즈)
+    armsEl = `
+      <line x1="${cx-bodyW*.47}" y1="${bodyTop+bodyH*.28}"
+            x2="${cx-bodyW*.80}" y2="${bodyTop-bodyH*.12}"
+            stroke="${suit}" stroke-width="${sw*3.8}" stroke-linecap="round"/>
+      <circle cx="${cx-bodyW*.80}" cy="${bodyTop-bodyH*.12}" r="${h*.047}"
+              fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>
+      <line x1="${cx+bodyW*.47}" y1="${bodyTop+bodyH*.28}"
+            x2="${cx+bodyW*.80}" y2="${bodyTop-bodyH*.12}"
+            stroke="${suit}" stroke-width="${sw*3.8}" stroke-linecap="round"/>
+      <circle cx="${cx+bodyW*.80}" cy="${bodyTop-bodyH*.12}" r="${h*.047}"
+              fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>`;
+
+  } else if (pose === 'hero') {
+    // 눈: 반짝이 눈
+    eyesEl = `
+      <ellipse cx="${eLX}" cy="${eY}" rx="${eW*1.1}" ry="${eH*1.15}" fill="${dark}"/>
+      <ellipse cx="${eRX}" cy="${eY}" rx="${eW*1.1}" ry="${eH*1.15}" fill="${dark}"/>
+      <circle  cx="${eLX-eW*.26}" cy="${eY-eH*.28}" r="${eW*.34}" fill="white"/>
+      <circle  cx="${eRX-eW*.26}" cy="${eY-eH*.28}" r="${eW*.34}" fill="white"/>
+      <circle  cx="${eLX+eW*.18}" cy="${eY+eH*.12}" r="${eW*.18}" fill="white"/>
+      <circle  cx="${eRX+eW*.18}" cy="${eY+eH*.12}" r="${eW*.18}" fill="white"/>`;
+    // 눈썹: 자신감 (살짝 치켜올림)
+    browsEl = `
+      <path d="M${eLX-bL/2} ${bY+bL*.05} Q${eLX} ${bY-bL*.28} ${eLX+bL/2} ${bY+bL*.05}"
+            fill="none" stroke="${dark}" stroke-width="${sw*1.4}" stroke-linecap="round"/>
+      <path d="M${eRX-bL/2} ${bY+bL*.05} Q${eRX} ${bY-bL*.28} ${eRX+bL/2} ${bY+bL*.05}"
+            fill="none" stroke="${dark}" stroke-width="${sw*1.4}" stroke-linecap="round"/>`;
+    // 입: 크게 웃음 + 이빨
+    mouthEl = `
+      <path d="M${cx-headR*.30} ${headCy+headR*.36} Q${cx} ${headCy+headR*.64} ${cx+headR*.30} ${headCy+headR*.36}"
+            fill="#BB3333" stroke="${dark}" stroke-width="${sw*.9}"/>
+      <rect  x="${cx-headR*.24}" y="${headCy+headR*.36}" width="${headR*.48}" height="${headR*.15}" fill="white"/>`;
+    // 오른팔 주먹 들어올림, 왼팔 앞으로
+    armsEl = `
+      <line x1="${cx+bodyW*.46}" y1="${bodyTop+bodyH*.26}"
+            x2="${cx+bodyW*.82}" y2="${bodyTop-bodyH*.32}"
+            stroke="${suit}" stroke-width="${sw*3.8}" stroke-linecap="round"/>
+      <rect  x="${cx+bodyW*.76}" y="${bodyTop-bodyH*.46}" width="${h*.12}" height="${h*.105}"
+             rx="${h*.026}" fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>
+      <line x1="${cx-bodyW*.46}" y1="${bodyTop+bodyH*.26}"
+            x2="${cx-bodyW*.86}" y2="${bodyTop+bodyH*.42}"
+            stroke="${suit}" stroke-width="${sw*3.8}" stroke-linecap="round"/>
+      <circle cx="${cx-bodyW*.86}" cy="${bodyTop+bodyH*.42}" r="${h*.047}"
+              fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>`;
+
+  } else { // happy
+    // 눈: 초승달 (^_^)
+    eyesEl = `
+      <path d="M${eLX-eW} ${eY} Q${eLX} ${eY-eH*1.45} ${eLX+eW} ${eY}"
+            fill="${dark}"/>
+      <path d="M${eRX-eW} ${eY} Q${eRX} ${eY-eH*1.45} ${eRX+eW} ${eY}"
+            fill="${dark}"/>`;
+    browsEl = `
+      <path d="M${eLX-bL/2} ${bY+bL*.08} Q${eLX} ${bY-bL*.22} ${eLX+bL/2} ${bY+bL*.08}"
+            fill="none" stroke="${dark}" stroke-width="${sw*1.4}" stroke-linecap="round"/>
+      <path d="M${eRX-bL/2} ${bY+bL*.08} Q${eRX} ${bY-bL*.22} ${eRX+bL/2} ${bY+bL*.08}"
+            fill="none" stroke="${dark}" stroke-width="${sw*1.4}" stroke-linecap="round"/>`;
+    mouthEl = `
+      <path d="M${cx-headR*.32} ${headCy+headR*.36} Q${cx} ${headCy+headR*.66} ${cx+headR*.32} ${headCy+headR*.36}"
+            fill="#BB3333" stroke="${dark}" stroke-width="${sw*.9}"/>
+      <rect  x="${cx-headR*.26}" y="${headCy+headR*.36}" width="${headR*.52}" height="${headR*.15}" fill="white"/>`;
+    // 오른팔 엄지 척, 왼팔은 자연스럽게
+    armsEl = `
+      <line x1="${cx+bodyW*.46}" y1="${bodyTop+bodyH*.26}"
+            x2="${cx+bodyW*.86}" y2="${bodyTop+bodyH*.06}"
+            stroke="${suit}" stroke-width="${sw*3.8}" stroke-linecap="round"/>
+      <rect  x="${cx+bodyW*.83}" y="${bodyTop+bodyH*.03}" width="${h*.105}" height="${h*.09}"
+             rx="${h*.022}" fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>
+      <rect  x="${cx+bodyW*.83}" y="${bodyTop-bodyH*.07}" width="${h*.068}" height="${h*.11}"
+             rx="${h*.022}" fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>
+      <line x1="${cx-bodyW*.46}" y1="${bodyTop+bodyH*.26}"
+            x2="${cx-bodyW*.62}" y2="${bodyTop+bodyH*.62}"
+            stroke="${suit}" stroke-width="${sw*3.8}" stroke-linecap="round"/>
+      <circle cx="${cx-bodyW*.62}" cy="${bodyTop+bodyH*.62}" r="${h*.047}"
+              fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>`;
+  }
+
+  // ── 공통: 다리, 꼬리, 몸통, 머리 ──
+  return `
+    ${armsEl}
+    <path d="M${cx+bodyW*.47} ${bodyTop+bodyH*.62} Q${cx+bodyW*.88} ${bodyTop+bodyH*.28} ${cx+bodyW*.72} ${bodyTop-bodyH*.08}"
+          fill="none" stroke="${fur}" stroke-width="${sw*4.5}" stroke-linecap="round"/>
+    <rect x="${cx-bodyW/2}" y="${bodyTop}" width="${bodyW}" height="${bodyH}"
+          rx="${h*.036}" fill="${suit}" stroke="${dark}" stroke-width="${sw*1.9}"/>
+    <path d="M${cx-bodyW*.50} ${bodyTop} L${cx-bodyW*.13} ${bodyTop} L${cx} ${bodyTop+bodyH*.19} L${cx+bodyW*.13} ${bodyTop} L${cx+bodyW*.50} ${bodyTop}"
+          fill="none" stroke="${dark}" stroke-width="${sw*.9}"/>
+    <polygon points="${cx},${bodyTop+bodyH*.04} ${cx-bodyW*.085},${bodyTop+bodyH*.13} ${cx},${bodyTop+bodyH*.52} ${cx+bodyW*.085},${bodyTop+bodyH*.13}"
+             fill="${tie}" stroke="${dark}" stroke-width="${sw*.85}"/>
+    <rect x="${cx-bodyW*.28}" y="${bodyTop+bodyH*.90}" width="${bodyW*.24}" height="${legH*.92}"
+          rx="${h*.022}" fill="${suit}" stroke="${dark}" stroke-width="${sw}"/>
+    <rect x="${cx+bodyW*.04}" y="${bodyTop+bodyH*.90}" width="${bodyW*.24}" height="${legH*.92}"
+          rx="${h*.022}" fill="${suit}" stroke="${dark}" stroke-width="${sw}"/>
+    <ellipse cx="${cx-bodyW*.16}" cy="${cy}" rx="${h*.072}" ry="${h*.040}" fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>
+    <ellipse cx="${cx+bodyW*.16}" cy="${cy}" rx="${h*.072}" ry="${h*.040}" fill="${fur}" stroke="${dark}" stroke-width="${sw}"/>
+    <circle cx="${cx}" cy="${headCy}" r="${headR}" fill="${fur}" stroke="${dark}" stroke-width="${sw*1.9}"/>
+    <polygon points="${earLX-earBW},${earBY} ${earLX+earBW},${earBY} ${earLX},${earTY}"
+             fill="${fur}" stroke="${dark}" stroke-width="${sw*1.9}"/>
+    <polygon points="${earLX-earBW*.52},${earBY-headR*.04} ${earLX+earBW*.52},${earBY-headR*.04} ${earLX},${earTY+earPk*.28}"
+             fill="${pink}"/>
+    <polygon points="${earRX-earBW},${earBY} ${earRX+earBW},${earBY} ${earRX},${earTY}"
+             fill="${fur}" stroke="${dark}" stroke-width="${sw*1.9}"/>
+    <polygon points="${earRX-earBW*.52},${earBY-headR*.04} ${earRX+earBW*.52},${earBY-headR*.04} ${earRX},${earTY+earPk*.28}"
+             fill="${pink}"/>
+    <ellipse cx="${cx-headR*.56}" cy="${headCy+headR*.26}" rx="${headR*.22}" ry="${headR*.14}" fill="${pink}" opacity="0.55"/>
+    <ellipse cx="${cx+headR*.56}" cy="${headCy+headR*.26}" rx="${headR*.22}" ry="${headR*.14}" fill="${pink}" opacity="0.55"/>
+    ${browsEl}
+    ${eyesEl}
+    <polygon points="${cx-headR*.075},${headCy+headR*.26} ${cx+headR*.075},${headCy+headR*.26} ${cx},${headCy+headR*.36}"
+             fill="${pink}" stroke="${dark}" stroke-width="${sw*.65}"/>
+    <line x1="${cx-headR*.12}" y1="${headCy+headR*.31}" x2="${cx-headR*.74}" y2="${headCy+headR*.23}" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.65"/>
+    <line x1="${cx-headR*.12}" y1="${headCy+headR*.34}" x2="${cx-headR*.74}" y2="${headCy+headR*.34}" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.65"/>
+    <line x1="${cx-headR*.12}" y1="${headCy+headR*.37}" x2="${cx-headR*.74}" y2="${headCy+headR*.45}" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.65"/>
+    <line x1="${cx+headR*.12}" y1="${headCy+headR*.31}" x2="${cx+headR*.74}" y2="${headCy+headR*.23}" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.65"/>
+    <line x1="${cx+headR*.12}" y1="${headCy+headR*.34}" x2="${cx+headR*.74}" y2="${headCy+headR*.34}" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.65"/>
+    <line x1="${cx+headR*.12}" y1="${headCy+headR*.37}" x2="${cx+headR*.74}" y2="${headCy+headR*.45}" stroke="${dark}" stroke-width="${sw*.7}" opacity="0.65"/>
+    ${mouthEl}`;
+}
+
+/**
+ * 패널 크기에 맞게 고양이 캐릭터를 SVG 버퍼로 반환.
+ * Sharp composite에 직접 사용 가능.
+ */
+function buildCatCharacterLayer(panelType, panelW, panelH) {
+  const configs = {
+    problem:  { pose: 'worried',    cx: panelW * 0.71, cy: panelH * 0.88, h: panelH * 0.43 },
+    hero:     { pose: 'hero',       cx: panelW * 0.50, cy: panelH * 0.84, h: panelH * 0.72 },
+    solution: { pose: 'happy',      cx: panelW * 0.30, cy: panelH * 0.85, h: panelH * 0.56 },
+  };
+  const { pose, cx, cy, h } = configs[panelType] ?? configs.hero;
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${panelW}" height="${panelH}">
+      ${catCharacterSvg(pose, cx, cy, h)}
+    </svg>`,
+  );
+}
+
 /** 사운드 이펙트 SVG (POW! / BOOM! / PERFECT!) */
 function soundFxSvg(cfg) {
   const { text, textColor, bgColor, cx, cy, size, angle } = cfg;
@@ -527,7 +728,7 @@ async function loadOrGenerateCharacter() {
  * @param {string}       opts.captionText      - 하단 캡션
  * @param {string}       opts.outputPath
  */
-async function renderPanel({ aiBgSrc, productImageSrc, characterImageSrc, panelType, captionText, outputPath }) {
+async function renderPanel({ aiBgSrc, productImageSrc, panelType, captionText, outputPath }) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
   const cfg = PANEL_CFG[panelType] ?? PANEL_CFG.hero;
@@ -563,44 +764,8 @@ async function renderPanel({ aiBgSrc, productImageSrc, characterImageSrc, panelT
     composites.push({ input: speedLinesSvg(W * 0.5, H * 0.40), top: 0, left: 0 });
   }
 
-  // ⑤ 매읽남 캐릭터 — 패널별 크기/위치 (모든 패널에 표시)
-  if (characterImageSrc) {
-    try {
-      const charBuf = await loadImageBuf(characterImageSrc);
-      let charSharp = sharp(charBuf);
-
-      let charH, left, top;
-
-      if (panelType === 'problem') {
-        // 소형 + 좌우반전 → 우하단 (OH NO! 상황을 겪는 캐릭터)
-        charH = Math.round(H * 0.44);
-        charSharp = charSharp.flop();
-        const resized = await charSharp.resize(null, charH, { fit: 'inside' }).png().toBuffer();
-        const meta    = await sharp(resized).metadata();
-        left = W - meta.width - 30;
-        top  = Math.round(H * 0.44);
-        composites.push({ input: resized, left: Math.max(0, left), top: Math.max(0, top) });
-      } else if (panelType === 'hero') {
-        // 대형 + 중앙 → 히어로 주인공
-        charH = Math.round(H * 0.72);
-        const resized = await charSharp.resize(null, charH, { fit: 'inside' }).png().toBuffer();
-        const meta    = await sharp(resized).metadata();
-        left = Math.round((W - meta.width) / 2);
-        top  = Math.round(H * 0.07);
-        composites.push({ input: resized, left: Math.max(0, left), top: Math.max(0, top) });
-      } else { // solution
-        // 중형 + 좌측 → 해결 완료 포즈
-        charH = Math.round(H * 0.58);
-        const resized = await charSharp.resize(null, charH, { fit: 'inside' }).png().toBuffer();
-        const meta    = await sharp(resized).metadata();
-        left = Math.round(W * 0.04);
-        top  = Math.round(H * 0.28);
-        composites.push({ input: resized, left: Math.max(0, left), top: Math.max(0, top) });
-      }
-    } catch (e) {
-      logger.warn(`[comic] 캐릭터 오버레이 실패: ${e.message}`);
-    }
-  }
+  // ⑤ SVG 고양이 캐릭터 (코드로 직접 그림 — PNG 파일 불필요)
+  composites.push({ input: buildCatCharacterLayer(panelType, W, H), top: 0, left: 0 });
 
   // ⑥ 제품 이미지 원형 배지 (히어로 패널 우측 하단)
   if (productImageSrc && panelType === 'hero') {
@@ -763,14 +928,6 @@ export async function generateComicMedia(content, outputDir) {
   logger.info(`[comic] TTS 생성 중: ${content.keyword}`);
   await generateComicAudio(ttsText, audioPath);
 
-  // ② 매읽남 캐릭터 에셋 로드 (없으면 생성)
-  const characterPath = await loadOrGenerateCharacter();
-  if (characterPath) {
-    logger.info(`[comic] 매읽남 캐릭터 준비 완료: ${path.basename(characterPath)}`);
-  } else {
-    logger.warn('[comic] 매읽남 캐릭터 이미지를 가져올 수 없습니다 — 캐릭터 없이 진행');
-  }
-
   // ③ 3패널 — AI 배경 생성 시도 (실패해도 SVG 배경으로 대체)
   const panelTypes = ['problem', 'hero', 'solution'];
   const aiBgResults = [];   // { path, isAI } | null
@@ -799,12 +956,11 @@ export async function generateComicMedia(content, outputDir) {
     const aiResult  = aiBgResults[i];
 
     await renderPanel({
-      aiBgSrc:          aiResult?.path ?? null,          // AI 성공 시 텍스처로 활용
-      productImageSrc:  null,
-      characterImageSrc: characterPath,                  // 모든 패널에 캐릭터 표시
-      panelType:        type,
-      captionText:      panel.caption,
-      outputPath:       panelPath,
+      aiBgSrc:         aiResult?.path ?? null,  // AI 성공 시 텍스처로 활용
+      productImageSrc: null,
+      panelType:       type,
+      captionText:     panel.caption,
+      outputPath:      panelPath,
     });
     panelPaths.push(panelPath);
   }
