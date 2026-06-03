@@ -38,25 +38,23 @@ const forceCategory = forceCatIdx !== -1 ? args[forceCatIdx + 1] : 'economy';
 const autoMode = args.includes('--auto') || !process.stdin.isTTY;
 
 /**
- * 각 키워드에 대해 "어떤 각도로, 어떤 포인트를 다룰지" 미리 요약한다.
- * gpt-4o-mini로 병렬 호출해 최대 10초 내 완료.
- * API 키 없거나 --auto 모드면 빈 Map 반환.
+ * 각 키워드를 서로 내용이 겹치지 않는 독립적인 글 주제 2~3개로 확장한다.
+ * 반환된 배열의 각 항목이 블로그 포스트 1개가 된다.
  *
- * @param {object[]} keywords
- * @returns {Promise<Map<string, {angle:string, points:string[]}>>}
+ * --auto 모드나 API 키 없을 때는 원본 keywords를 그대로 반환.
+ *
+ * @param {object[]} keywords  점수 정렬된 키워드 배열
+ * @returns {Promise<object[]>} 확장된 주제 배열 (각 항목 = 블로그 포스트 1개)
  */
-async function generateKeywordSummaries(keywords) {
-  if (autoMode || !config.openai?.apiKey) return new Map();
+async function expandKeywordsToAngles(keywords) {
+  if (autoMode || !config.openai?.apiKey) return keywords;
 
-  console.log('\n⏳ 각 키워드 주제 미리보기 생성 중...');
+  console.log('\n⏳ 키워드별 독립 글 주제 생성 중...');
 
   const results = await Promise.allSettled(
     keywords.map(async (kw) => {
       const keyword  = kw.keyword ?? kw;
       const category = kw.category ?? 'economy';
-      const grouped  = kw.grouped_keywords?.length > 1
-        ? `(묶인 키워드: ${kw.grouped_keywords.join(', ')})`
-        : '';
 
       try {
         const res = await axios.post(
@@ -66,81 +64,132 @@ async function generateKeywordSummaries(keywords) {
             messages: [{
               role: 'user',
               content:
-                `한국 블로그 포스트 키워드: "${keyword}" ${grouped}\n` +
-                `카테고리: ${category}\n\n` +
-                `이 키워드로 글을 쓸 때:\n` +
-                `1. angle: 독자에게 줄 핵심 가치를 한 문장(30자 이내)\n` +
-                `2. points: 다룰 핵심 포인트 2~3개 (각 15자 이내 배열)\n\n` +
-                `JSON만 반환: {"angle":"...","points":["...","..."]}`
+                `한국 블로그 키워드 "${keyword}" (${category})\n\n` +
+                `이 키워드를 기반으로 각각 완전히 독립된 블로그 포스트가 될 수 있는 구체적인 주제 2~3개를 만들어줘.\n\n` +
+                `조건:\n` +
+                `- 주제끼리 내용이 겹치면 안 됨 (독자가 둘 다 읽을 이유가 있어야 함)\n` +
+                `- 각 주제는 단독 포스트로 충분한 분량과 깊이가 가능해야 함\n` +
+                `- title: 검색에 잘 걸리는 구체적인 문장형 제목 (40자 이내)\n` +
+                `- desc: 이 글에서 독자가 얻는 핵심 가치 한 줄 (30자 이내)\n` +
+                `- points: 글에서 다룰 핵심 소제목 2개 (각 15자 이내)\n\n` +
+                `JSON만 반환: {"angles":[{"title":"...","desc":"...","points":["...","..."]}]}`
             }],
-            temperature: 0.3,
-            max_tokens: 120,
+            temperature: 0.4,
+            max_tokens: 400,
           },
           {
             headers: {
               Authorization: `Bearer ${config.openai.apiKey}`,
               'Content-Type': 'application/json',
             },
-            timeout: 12000,
+            timeout: 15000,
           }
         );
         const parsed = JSON.parse(res.data.choices[0].message.content);
-        return { keyword, summary: parsed };
+        return {
+          parentKeyword: keyword,
+          category,
+          score: kw.score ?? 0,
+          forced: kw.forced ?? false,
+          angles: Array.isArray(parsed.angles) ? parsed.angles : [],
+        };
       } catch {
-        return { keyword, summary: null };
+        // API 실패 시 원본 키워드를 단일 항목으로 폴백
+        return {
+          parentKeyword: keyword,
+          category,
+          score: kw.score ?? 0,
+          forced: kw.forced ?? false,
+          angles: [{ title: keyword, desc: '', points: [] }],
+        };
       }
     })
   );
 
-  const map = new Map();
-  results.forEach((r) => {
-    if (r.status === 'fulfilled' && r.value?.summary) {
-      map.set(r.value.keyword, r.value.summary);
+  const expanded = [];
+  results.forEach((r, i) => {
+    if (r.status !== 'fulfilled') {
+      // Promise 자체 실패 시 원본 유지
+      expanded.push({ ...keywords[i], parentKeyword: keywords[i].keyword ?? keywords[i] });
+      return;
+    }
+    const { parentKeyword, category, score, forced, angles } = r.value;
+    for (const a of angles) {
+      expanded.push({
+        keyword:      a.title ?? parentKeyword,
+        parentKeyword,
+        category,
+        score,
+        forced,
+        blog_draft:   null,
+        angleDesc:    a.desc ?? '',
+        anglePoints:  Array.isArray(a.points) ? a.points : [],
+      });
     }
   });
-  return map;
+
+  return expanded;
 }
 
 /**
- * 키워드 목록을 출력하고, 사용자가 번호로 선택할 수 있게 한다.
- * TIMEOUT_SEC 초 안에 입력이 없거나 Enter만 치면 전체 자동 선택.
- * --auto 플래그 또는 TTY가 아닌 환경(크론, 파이프)에서는 즉시 자동 선택.
+ * 확장된 주제 목록을 부모 키워드 기준으로 그룹핑해 출력하고,
+ * 사용자가 번호로 원하는 항목을 선택하게 한다.
  *
- * @param {object[]} keywords  점수 정렬된 키워드 배열
- * @param {number}   timeoutSec 입력 대기 시간(초), 기본 90
- * @returns {Promise<object[]>} 선택된(또는 전체) 키워드 배열
+ * TIMEOUT_SEC 초 안에 입력 없거나 Enter만 치면 전체 자동 선택.
+ * --auto 또는 비-TTY 환경에서는 즉시 자동 선택.
+ *
+ * @param {object[]} items     expandKeywordsToAngles() 반환값
+ * @param {number}   timeoutSec 입력 대기 시간(초), 기본 120
+ * @returns {Promise<object[]>} 선택된 항목 배열
  */
-async function askUserKeywordSelection(keywords, summaries = new Map(), timeoutSec = 90) {
-  if (autoMode) return keywords; // 자동 모드: 프롬프트 없이 바로 반환
+async function askUserKeywordSelection(items, timeoutSec = 120) {
+  if (autoMode) return items;
 
   const catEmoji = { finance: '📈', economy: '💹', realestate: '🏠', health: '💊', beauty: '✨', social: '📰', entertainment: '🎬' };
-  const SEP = '─'.repeat(64);
+  const SEP = '─'.repeat(66);
+
+  // 부모 키워드 기준 그룹핑 (순서 유지)
+  const groups = [];
+  const groupMap = new Map();
+  for (const item of items) {
+    const pk = item.parentKeyword ?? item.keyword;
+    if (!groupMap.has(pk)) {
+      const g = { parentKeyword: pk, category: item.category, items: [] };
+      groups.push(g);
+      groupMap.set(pk, g);
+    }
+    groupMap.get(pk).items.push(item);
+  }
+
+  // 번호를 flat하게 부여 (1, 2, 3, ...)
+  let num = 0;
+  const flatList = []; // 인덱스 → item 매핑용
 
   console.log('\n' + SEP);
-  console.log('📋 오늘 작성할 블로그 키워드 후보 (점수 순)');
+  console.log('📋 오늘 작성할 블로그 주제 후보');
   console.log(SEP);
 
-  keywords.forEach((kw, i) => {
-    const score   = String((kw.score ?? 0).toFixed(2)).padStart(6);
-    const cat     = kw.category ?? 'economy';
-    const emoji   = catEmoji[cat] ?? '📌';
-    const keyword = kw.keyword ?? kw;
-    const num     = String(i + 1).padStart(2);
+  for (const group of groups) {
+    const emoji = catEmoji[group.category] ?? '📌';
+    console.log(`\n  [${emoji} ${group.parentKeyword}]`);
 
-    console.log(`\n  ${num}. ${emoji} ${keyword}  (${score}점 / ${cat})`);
-
-    const s = summaries.get(keyword);
-    if (s) {
-      console.log(`      → ${s.angle}`);
-      if (Array.isArray(s.points) && s.points.length) {
-        console.log(`         • ${s.points.join('  •  ')}`);
+    for (const item of group.items) {
+      num++;
+      flatList.push(item);
+      const numStr = String(num).padStart(3);
+      console.log(`  ${numStr}. ${item.keyword}`);
+      if (item.angleDesc) {
+        console.log(`        → ${item.angleDesc}`);
+      }
+      if (item.anglePoints?.length) {
+        console.log(`           • ${item.anglePoints.join('  •  ')}`);
       }
     }
-  });
+  }
 
   console.log('\n' + SEP);
   console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  Enter = 전체 자동 선택)');
-  console.log(`⏱  ${timeoutSec}초 내 입력 없으면 점수 순 자동 선택됩니다.\n`);
+  console.log(`⏱  ${timeoutSec}초 내 입력 없으면 자동 선택됩니다.\n`);
 
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
@@ -151,37 +200,35 @@ async function askUserKeywordSelection(keywords, summaries = new Map(), timeoutS
       answered = true;
       clearTimeout(timer);
       rl.close();
-      console.log(`\n✅ ${reason}: ${selected.map((k) => `"${k.keyword ?? k}"`).join(', ')}\n`);
+      console.log(`\n✅ ${reason} (${selected.length}개):`);
+      selected.forEach((k) => console.log(`   - ${k.keyword}`));
+      console.log();
       resolve(selected);
     };
 
-    // 타임아웃: 자동 선택
     const timer = setTimeout(() => {
-      done(keywords, `⏱ ${timeoutSec}초 초과 — 점수 순 자동 선택`);
+      done(items, `⏱ ${timeoutSec}초 초과 — 자동 선택`);
     }, timeoutSec * 1000);
 
     rl.once('line', (line) => {
       const input = line.trim();
+      if (!input) return done(items, '→ 전체 자동 선택');
 
-      // 입력 없음 → 전체 자동
-      if (!input) return done(keywords, '→ 전체 자동 선택');
-
-      // 범위 표기 지원 (예: 1-3 → 1,2,3)
-      const expanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
+      // 범위 표기 지원 (1-3 → 1,2,3)
+      const rangeExpanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
         const from = parseInt(a, 10), to = parseInt(b, 10);
-        return Array.from({ length: to - from + 1 }, (__, k) => from + k).join(',');
+        return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
       });
 
-      const indices = expanded
+      const indices = rangeExpanded
         .split(',')
         .map((s) => parseInt(s.trim(), 10) - 1)
-        .filter((n) => Number.isFinite(n) && n >= 0 && n < keywords.length);
+        .filter((n) => Number.isFinite(n) && n >= 0 && n < flatList.length);
 
-      if (indices.length === 0) return done(keywords, '→ 유효한 번호 없음 — 전체 자동 선택');
+      if (indices.length === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
 
-      // 중복 제거 + 순서 유지
       const unique = [...new Set(indices)];
-      done(unique.map((i) => keywords[i]), `→ 선택 완료`);
+      done(unique.map((i) => flatList[i]), '→ 선택 완료');
     });
   });
 }
@@ -406,15 +453,13 @@ async function main() {
     logger.warn(`[blog:pipeline] Part 1.56 실패 (계속 진행): ${err.message}`);
   }
 
-  // ── 키워드 선택 프롬프트 (TTY 환경에서만, --auto 없을 때) ──────────────
-  // 이미 점수·중복 필터링된 최종 후보 목록을 보여주고 사용자가 선택한다.
-  // 미선택 또는 타임아웃 시 현재 점수 순 그대로 진행.
-  const keywordSummaries = await generateKeywordSummaries(contentData.contents);
-  const userSelectedKws  = await askUserKeywordSelection(contentData.contents, keywordSummaries);
-  if (userSelectedKws !== contentData.contents) {
-    contentData.contents = userSelectedKws;
-    logger.info(`[blog:pipeline] 사용자 선택 키워드 ${contentData.contents.length}개로 진행`);
-  }
+  // ── 키워드 → 독립 글 주제 확장 + 사용자 선택 ───────────────────────────
+  // 각 키워드를 2~3개의 독립 글 주제로 확장한 뒤 사용자가 선택한다.
+  // --auto 또는 비-TTY 환경에서는 확장 없이 원본 키워드 그대로 진행.
+  const expandedItems   = await expandKeywordsToAngles(contentData.contents);
+  const userSelectedKws = await askUserKeywordSelection(expandedItems);
+  contentData.contents  = userSelectedKws;
+  logger.info(`[blog:pipeline] 선택된 글 주제 ${contentData.contents.length}개로 진행`);
 
   if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] 선택된 키워드 없음. 종료.');
