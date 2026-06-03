@@ -217,8 +217,8 @@ async function main() {
   const filterIds = args.filter((a) => !a.startsWith('--'));
   const mode      = isComic ? 'COMIC' : 'NORMAL';
 
-  // --no-upload 플래그 또는 YOUTUBE_UPLOAD=false 환경변수로 업로드 비활성화
-  if (noUpload) process.env.YOUTUBE_UPLOAD = 'false';
+  // 쇼핑 파이프라인은 업로드 비활성화 (별도 채널 운영 예정 — 플로우 완성 후 활성화)
+  process.env.YOUTUBE_UPLOAD = 'false';
 
   logger.info(`[shopping] ===== 쇼핑 파이프라인 시작 [${mode}] ${filterIds.length ? `(${filterIds.join(', ')})` : '(전체)'} =====`);
 
