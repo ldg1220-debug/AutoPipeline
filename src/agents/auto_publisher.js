@@ -42,6 +42,37 @@ async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
 }
 
 /**
+ * 오늘(KST) 롱폼 업로드 수를 로컬 파일로 추적.
+ * 서버 시간이 UTC여도 KST 날짜 기준으로 계산한다.
+ */
+const UPLOAD_LOG_PATH = path.resolve(__dirname, '../../output/upload_day_log.json');
+
+function getTodayKST() {
+  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+async function getTodayLongFormCount() {
+  try {
+    const log = JSON.parse(await fs.readFile(UPLOAD_LOG_PATH, 'utf8'));
+    if (log.date !== getTodayKST()) return 0;
+    return log.longFormCount ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function markTodayLongFormUpload() {
+  const today = getTodayKST();
+  let count = 0;
+  try {
+    const log = JSON.parse(await fs.readFile(UPLOAD_LOG_PATH, 'utf8'));
+    if (log.date === today) count = log.longFormCount ?? 0;
+  } catch {}
+  await fs.mkdir(path.dirname(UPLOAD_LOG_PATH), { recursive: true });
+  await fs.writeFile(UPLOAD_LOG_PATH, JSON.stringify({ date: today, longFormCount: count + 1 }));
+}
+
+/**
  * 공개 시간 계산 — 다음 날 7:15 AM KST (업로드 후 최소 12시간 후 보장)
  * KST = UTC+9 → 7:15 KST = 22:15 UTC (전날)
  */
@@ -97,9 +128,10 @@ async function uploadVideoFile(videoPath, metadata, accessToken) {
  * YouTube에 쇼츠(숏폼) 영상을 업로드한다.
  * 파일 규칙: output/media/<keyword>.mp4 (9:16 세로 포맷, ≤60초)
  * #Shorts 해시태그를 제목·설명에 추가해 YouTube가 쇼츠로 인식하도록 한다.
- * 쇼츠는 예약 발행 대신 즉시 공개 처리한다.
+ * scheduleForTomorrow=true 이면 롱폼과 동일하게 다음 날 7:15 KST 예약,
+ * false 이면 즉시 공개한다.
  */
-async function publishShortsToYouTube(content, accessToken, longFormUrl = null) {
+async function publishShortsToYouTube(content, accessToken, longFormUrl = null, scheduleForTomorrow = false) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const mediaDir    = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
 
@@ -139,8 +171,12 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
 
-  // Shorts는 즉시 공개로 업로드한다.
-  // private+publishAt(예약)으로 올리면 YouTube가 공개 전환 시 thumbnails.set을 무시/리셋한다.
+  // scheduleForTomorrow=true: 롱폼과 같은 날 공개되도록 내일 7:15 KST 예약
+  // scheduleForTomorrow=false: 오늘 롱폼 없는 상태이므로 즉시 공개
+  const shortsStatus = scheduleForTomorrow
+    ? { privacyStatus: 'private', publishAt: getOptimalPublishTime(), selfDeclaredMadeForKids: false, containsSyntheticMedia: true }
+    : { privacyStatus: 'public', selfDeclaredMadeForKids: false, containsSyntheticMedia: true };
+
   const metadata = {
     snippet: {
       title: shortsTitle,
@@ -149,15 +185,15 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
       categoryId: '22',
       defaultLanguage: 'ko',
     },
-    status: {
-      privacyStatus: 'public',
-      selfDeclaredMadeForKids: false,
-      containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기
-    },
+    status: shortsStatus,
   };
 
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
-  logger.info(`[auto_publisher] Shorts uploaded: https://youtube.com/shorts/${videoId}`);
+  if (scheduleForTomorrow) {
+    logger.info(`[auto_publisher] Shorts scheduled (tomorrow 7:15 KST): https://youtube.com/shorts/${videoId}`);
+  } else {
+    logger.info(`[auto_publisher] Shorts uploaded (public now): https://youtube.com/shorts/${videoId}`);
+  }
 
   // YouTube Shorts는 thumbnails.set API가 동작하지 않음 (채널 인증 정책 / Shorts 제한).
   // 대신 media_generator에서 영상 앞에 1초 썸네일 인트로를 삽입했으므로
@@ -176,9 +212,10 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null) 
 /**
  * YouTube에 롱폼 영상을 예약 업로드한다.
  * 파일 규칙: output/media/<keyword>_long.mp4
- * publishAt은 현재 시각 + 2시간으로 설정한다.
+ * scheduleForTomorrow=true: 내일 7:15 KST 예약 (오늘 이미 롱폼 업로드됨)
+ * scheduleForTomorrow=false: 즉시 공개 (오늘 첫 번째 업로드)
  */
-async function publishToYouTube(content, accessToken) {
+async function publishToYouTube(content, accessToken, scheduleForTomorrow = true) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const mediaDir    = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/media');
   // long-form 파일 우선, 없으면 기존 <keyword>.mp4 (하위 호환)
@@ -193,7 +230,7 @@ async function publishToYouTube(content, accessToken) {
   }
   const videoPath = longExists ? longPath : legacyPath;
 
-  const publishAt    = getOptimalPublishTime(); // 다음 날 7:15 AM KST
+  const publishAt    = scheduleForTomorrow ? getOptimalPublishTime() : null; // null = 즉시 공개
   const channelCfg   = getYouTubeChannelConfig(content.category);
   const seriesName   = content.series_name ?? channelCfg.seriesName ?? '매일읽어주는남자';
 
@@ -232,15 +269,16 @@ async function publishToYouTube(content, accessToken) {
       categoryId: '22',
       defaultLanguage: 'ko',
     },
-    status: {
-      privacyStatus: 'private',
-      publishAt,
-      selfDeclaredMadeForKids: false,
-      containsSyntheticMedia: true, // AI 생성 콘텐츠 정직 표기 (페널티 없음)
-    },
+    status: scheduleForTomorrow
+      ? { privacyStatus: 'private', publishAt, selfDeclaredMadeForKids: false, containsSyntheticMedia: true }
+      : { privacyStatus: 'public', selfDeclaredMadeForKids: false, containsSyntheticMedia: true },
   };
 
-  logger.info(`[auto_publisher] Scheduled publish at: ${publishAt} (KST 7:15 AM)`);
+  if (scheduleForTomorrow) {
+    logger.info(`[auto_publisher] Long-form scheduled: ${publishAt} (KST 7:15 AM 다음 날)`);
+  } else {
+    logger.info(`[auto_publisher] Long-form uploading as public (오늘 첫 업로드 — 즉시 공개)`);
+  }
   const videoId = await uploadVideoFile(videoPath, metadata, accessToken);
   logger.info(`[auto_publisher] Long-form uploaded: https://youtu.be/${videoId}`);
 
@@ -474,10 +512,16 @@ export async function publishContents(qaData, contentData) {
       continue;
     }
 
+    // 오늘(KST) 롱폼 업로드 여부 확인 → 있으면 다음 날 예약, 없으면 즉시 공개
+    const todayCount = await getTodayLongFormCount();
+    const scheduleForTomorrow = todayCount > 0;
+    logger.info(`[auto_publisher] 오늘(KST) 롱폼 업로드 수: ${todayCount} → ${scheduleForTomorrow ? '다음 날 7:15 예약' : '즉시 공개'}`);
+
     // 롱폼 업로드
     try {
-      result.youtube = await publishToYouTube(content, accessToken);
+      result.youtube = await publishToYouTube(content, accessToken, scheduleForTomorrow);
       logger.info(`[auto_publisher] Long-form upload: ${result.youtube.url ?? result.youtube.status}`);
+      if (result.youtube.video_id) await markTodayLongFormUpload();
     } catch (err) {
       logger.error(`[auto_publisher] Long-form upload failed: ${content.keyword}`, { message: err.message });
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
@@ -488,7 +532,7 @@ export async function publishContents(qaData, contentData) {
       await new Promise((r) => setTimeout(r, 8000));
       try {
         const longFormUrl = result.youtube?.url ?? null;
-        result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl);
+        result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl, scheduleForTomorrow);
         logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
       } catch (err) {
         logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
