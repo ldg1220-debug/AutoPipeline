@@ -32,6 +32,7 @@
     "blog:publish": "node src/agents/blog_publisher.js",
     "blog:analytics": "node src/agents/blog_analytics.js",
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
+    "blog:pipeline:auto": "node scripts/run-blog-pipeline.js --auto",
     "blog:login": "node scripts/tistory-login.js",
     "blog:setup-categories": "node scripts/setup-tistory-categories.js",
     "blog:setup-pages": "node scripts/setup-blog-pages.js",

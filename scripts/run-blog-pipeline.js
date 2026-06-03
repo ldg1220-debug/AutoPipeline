@@ -1,7 +1,9 @@
 /**
  * 블로그 파이프라인 1회 즉시 실행 스크립트
  * npm run blog:pipeline
+ * npm run blog:pipeline -- --auto   (키워드 선택 프롬프트 건너뜀)
  */
+import readline from 'readline';
 import { mineKeywords } from '../src/agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
@@ -25,12 +27,86 @@ const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 // ── CLI 인자 파싱 ──────────────────────────────────────────────────────────
 // --force-keyword "키워드"  : 특정 키워드를 무조건 최우선 처리
+// --force-category "카테고리": force-keyword의 카테고리 지정 (기본 economy)
+// --auto                    : 키워드 선택 프롬프트 건너뜀 (자동 선택)
 const args = process.argv.slice(2);
 const forceKwIdx = args.indexOf('--force-keyword');
 const forceKeyword = forceKwIdx !== -1 ? args[forceKwIdx + 1] : null;
-// --force-category "카테고리"  : force-keyword의 카테고리 지정 (기본 economy)
 const forceCatIdx = args.indexOf('--force-category');
 const forceCategory = forceCatIdx !== -1 ? args[forceCatIdx + 1] : 'economy';
+const autoMode = args.includes('--auto') || !process.stdin.isTTY;
+
+/**
+ * 키워드 목록을 출력하고, 사용자가 번호로 선택할 수 있게 한다.
+ * TIMEOUT_SEC 초 안에 입력이 없거나 Enter만 치면 전체 자동 선택.
+ * --auto 플래그 또는 TTY가 아닌 환경(크론, 파이프)에서는 즉시 자동 선택.
+ *
+ * @param {object[]} keywords  점수 정렬된 키워드 배열
+ * @param {number}   timeoutSec 입력 대기 시간(초), 기본 90
+ * @returns {Promise<object[]>} 선택된(또는 전체) 키워드 배열
+ */
+async function askUserKeywordSelection(keywords, timeoutSec = 90) {
+  if (autoMode) return keywords; // 자동 모드: 프롬프트 없이 바로 반환
+
+  const catEmoji = { finance: '📈', economy: '💹', realestate: '🏠', health: '💊', beauty: '✨', social: '📰', entertainment: '🎬' };
+
+  console.log('\n' + '─'.repeat(60));
+  console.log('📋 발굴된 키워드 목록 (점수 순)');
+  console.log('─'.repeat(60));
+  keywords.forEach((kw, i) => {
+    const score = String((kw.score ?? 0).toFixed(3)).padStart(7);
+    const cat   = kw.category ?? 'economy';
+    const emoji = catEmoji[cat] ?? '📌';
+    const label = cat.padEnd(12);
+    console.log(`  ${String(i + 1).padStart(2)}. ${score}점  ${emoji} ${label}  ${kw.keyword ?? kw}`);
+  });
+  console.log('─'.repeat(60));
+  console.log(`번호를 입력하세요 (예: 1,3,5  /  1-3  /  Enter = 전체 자동 선택)`);
+  console.log(`⏱  ${timeoutSec}초 내 입력 없으면 점수 순 자동 선택됩니다.\n`);
+
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+    let answered = false;
+
+    const done = (selected, reason) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      rl.close();
+      console.log(`\n✅ ${reason}: ${selected.map((k) => `"${k.keyword ?? k}"`).join(', ')}\n`);
+      resolve(selected);
+    };
+
+    // 타임아웃: 자동 선택
+    const timer = setTimeout(() => {
+      done(keywords, `⏱ ${timeoutSec}초 초과 — 점수 순 자동 선택`);
+    }, timeoutSec * 1000);
+
+    rl.once('line', (line) => {
+      const input = line.trim();
+
+      // 입력 없음 → 전체 자동
+      if (!input) return done(keywords, '→ 전체 자동 선택');
+
+      // 범위 표기 지원 (예: 1-3 → 1,2,3)
+      const expanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
+        const from = parseInt(a, 10), to = parseInt(b, 10);
+        return Array.from({ length: to - from + 1 }, (__, k) => from + k).join(',');
+      });
+
+      const indices = expanded
+        .split(',')
+        .map((s) => parseInt(s.trim(), 10) - 1)
+        .filter((n) => Number.isFinite(n) && n >= 0 && n < keywords.length);
+
+      if (indices.length === 0) return done(keywords, '→ 유효한 번호 없음 — 전체 자동 선택');
+
+      // 중복 제거 + 순서 유지
+      const unique = [...new Set(indices)];
+      done(unique.map((i) => keywords[i]), `→ 선택 완료`);
+    });
+  });
+}
 
 async function main() {
   const start = Date.now();
@@ -250,6 +326,20 @@ async function main() {
     else logger.info('[blog:pipeline] Part 1.56: 유사 테마 중복 없음');
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.56 실패 (계속 진행): ${err.message}`);
+  }
+
+  // ── 키워드 선택 프롬프트 (TTY 환경에서만, --auto 없을 때) ──────────────
+  // 이미 점수·중복 필터링된 최종 후보 목록을 보여주고 사용자가 선택한다.
+  // 미선택 또는 타임아웃 시 현재 점수 순 그대로 진행.
+  const userSelectedKws = await askUserKeywordSelection(contentData.contents);
+  if (userSelectedKws !== contentData.contents) {
+    contentData.contents = userSelectedKws;
+    logger.info(`[blog:pipeline] 사용자 선택 키워드 ${contentData.contents.length}개로 진행`);
+  }
+
+  if (!contentData.contents.length) {
+    logger.warn('[blog:pipeline] 선택된 키워드 없음. 종료.');
+    process.exit(0);
   }
 
   // Part 1.6: Competitor Analyzer — 인사이트 캐시 (7일 주기)
