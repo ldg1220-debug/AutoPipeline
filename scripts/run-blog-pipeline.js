@@ -4,6 +4,7 @@
  * npm run blog:pipeline -- --auto   (키워드 선택 프롬프트 건너뜀)
  */
 import readline from 'readline';
+import axios from 'axios';
 import { mineKeywords } from '../src/agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
@@ -37,6 +38,70 @@ const forceCategory = forceCatIdx !== -1 ? args[forceCatIdx + 1] : 'economy';
 const autoMode = args.includes('--auto') || !process.stdin.isTTY;
 
 /**
+ * 각 키워드에 대해 "어떤 각도로, 어떤 포인트를 다룰지" 미리 요약한다.
+ * gpt-4o-mini로 병렬 호출해 최대 10초 내 완료.
+ * API 키 없거나 --auto 모드면 빈 Map 반환.
+ *
+ * @param {object[]} keywords
+ * @returns {Promise<Map<string, {angle:string, points:string[]}>>}
+ */
+async function generateKeywordSummaries(keywords) {
+  if (autoMode || !config.openai?.apiKey) return new Map();
+
+  console.log('\n⏳ 각 키워드 주제 미리보기 생성 중...');
+
+  const results = await Promise.allSettled(
+    keywords.map(async (kw) => {
+      const keyword  = kw.keyword ?? kw;
+      const category = kw.category ?? 'economy';
+      const grouped  = kw.grouped_keywords?.length > 1
+        ? `(묶인 키워드: ${kw.grouped_keywords.join(', ')})`
+        : '';
+
+      try {
+        const res = await axios.post(
+          'https://api.openai.com/v1/chat/completions',
+          {
+            model: 'gpt-4o-mini',
+            messages: [{
+              role: 'user',
+              content:
+                `한국 블로그 포스트 키워드: "${keyword}" ${grouped}\n` +
+                `카테고리: ${category}\n\n` +
+                `이 키워드로 글을 쓸 때:\n` +
+                `1. angle: 독자에게 줄 핵심 가치를 한 문장(30자 이내)\n` +
+                `2. points: 다룰 핵심 포인트 2~3개 (각 15자 이내 배열)\n\n` +
+                `JSON만 반환: {"angle":"...","points":["...","..."]}`
+            }],
+            temperature: 0.3,
+            max_tokens: 120,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${config.openai.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 12000,
+          }
+        );
+        const parsed = JSON.parse(res.data.choices[0].message.content);
+        return { keyword, summary: parsed };
+      } catch {
+        return { keyword, summary: null };
+      }
+    })
+  );
+
+  const map = new Map();
+  results.forEach((r) => {
+    if (r.status === 'fulfilled' && r.value?.summary) {
+      map.set(r.value.keyword, r.value.summary);
+    }
+  });
+  return map;
+}
+
+/**
  * 키워드 목록을 출력하고, 사용자가 번호로 선택할 수 있게 한다.
  * TIMEOUT_SEC 초 안에 입력이 없거나 Enter만 치면 전체 자동 선택.
  * --auto 플래그 또는 TTY가 아닌 환경(크론, 파이프)에서는 즉시 자동 선택.
@@ -45,23 +110,36 @@ const autoMode = args.includes('--auto') || !process.stdin.isTTY;
  * @param {number}   timeoutSec 입력 대기 시간(초), 기본 90
  * @returns {Promise<object[]>} 선택된(또는 전체) 키워드 배열
  */
-async function askUserKeywordSelection(keywords, timeoutSec = 90) {
+async function askUserKeywordSelection(keywords, summaries = new Map(), timeoutSec = 90) {
   if (autoMode) return keywords; // 자동 모드: 프롬프트 없이 바로 반환
 
   const catEmoji = { finance: '📈', economy: '💹', realestate: '🏠', health: '💊', beauty: '✨', social: '📰', entertainment: '🎬' };
+  const SEP = '─'.repeat(64);
 
-  console.log('\n' + '─'.repeat(60));
-  console.log('📋 발굴된 키워드 목록 (점수 순)');
-  console.log('─'.repeat(60));
+  console.log('\n' + SEP);
+  console.log('📋 오늘 작성할 블로그 키워드 후보 (점수 순)');
+  console.log(SEP);
+
   keywords.forEach((kw, i) => {
-    const score = String((kw.score ?? 0).toFixed(3)).padStart(7);
-    const cat   = kw.category ?? 'economy';
-    const emoji = catEmoji[cat] ?? '📌';
-    const label = cat.padEnd(12);
-    console.log(`  ${String(i + 1).padStart(2)}. ${score}점  ${emoji} ${label}  ${kw.keyword ?? kw}`);
+    const score   = String((kw.score ?? 0).toFixed(2)).padStart(6);
+    const cat     = kw.category ?? 'economy';
+    const emoji   = catEmoji[cat] ?? '📌';
+    const keyword = kw.keyword ?? kw;
+    const num     = String(i + 1).padStart(2);
+
+    console.log(`\n  ${num}. ${emoji} ${keyword}  (${score}점 / ${cat})`);
+
+    const s = summaries.get(keyword);
+    if (s) {
+      console.log(`      → ${s.angle}`);
+      if (Array.isArray(s.points) && s.points.length) {
+        console.log(`         • ${s.points.join('  •  ')}`);
+      }
+    }
   });
-  console.log('─'.repeat(60));
-  console.log(`번호를 입력하세요 (예: 1,3,5  /  1-3  /  Enter = 전체 자동 선택)`);
+
+  console.log('\n' + SEP);
+  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  Enter = 전체 자동 선택)');
   console.log(`⏱  ${timeoutSec}초 내 입력 없으면 점수 순 자동 선택됩니다.\n`);
 
   return new Promise((resolve) => {
@@ -331,7 +409,8 @@ async function main() {
   // ── 키워드 선택 프롬프트 (TTY 환경에서만, --auto 없을 때) ──────────────
   // 이미 점수·중복 필터링된 최종 후보 목록을 보여주고 사용자가 선택한다.
   // 미선택 또는 타임아웃 시 현재 점수 순 그대로 진행.
-  const userSelectedKws = await askUserKeywordSelection(contentData.contents);
+  const keywordSummaries = await generateKeywordSummaries(contentData.contents);
+  const userSelectedKws  = await askUserKeywordSelection(contentData.contents, keywordSummaries);
   if (userSelectedKws !== contentData.contents) {
     contentData.contents = userSelectedKws;
     logger.info(`[blog:pipeline] 사용자 선택 키워드 ${contentData.contents.length}개로 진행`);
