@@ -18,6 +18,7 @@ const SERIES_MAP = {
   economy:       '오늘 읽는 경제뉴스',
   realestate:    '오늘 읽는 부동산',
   health:        '오늘 읽는 건강뉴스',
+  beauty:        '오늘 읽는 피부미용',
   entertainment: '오늘 읽는 핫이슈',
   social:        '오늘 읽는 핫이슈',
 };
@@ -110,13 +111,14 @@ async function scoreKeywordsWithLLM(keywords) {
   const scoringPrompt = `한국 경제 유튜브 채널용 뉴스 키워드를 스코어링하세요. JSON만 반환, 다른 텍스트 금지.
 
 점수 기준:
-- category: "finance"|"realestate"|"health"|"entertainment"|"social"|"economy"
+- category: "finance"|"realestate"|"health"|"beauty"|"entertainment"|"social"|"economy"
   ✗ 사람 이름(연예인·정치인)만 있는 키워드 → category:"entertainment", commercial_value:5 이하
   ★ 금리·주가·부동산·대출·재테크·물가·환율·실업 → category:"economy" or "finance"
+  ★ 피부·미용·스킨케어·화장품·선크림·보습·여드름 → category:"beauty"
 - virality: 0~40
-- commercial_value: 0~40 (재테크·부동산·건강=35~40, 연예·가십=5 이하)
+- commercial_value: 0~40 (재테크·부동산·건강·뷰티=35~40, 연예·가십=5 이하)
 - freshness_hours: 0~20
-- niche_premium: 0~20 (경제·금융·부동산·건강=15~20, 연예=0~3)
+- niche_premium: 0~20 (경제·금융·부동산·건강·뷰티=15~20, 연예=0~3)
 
 출력: { "items": [{ "keyword":"...", "category":"...", "virality":0, "commercial_value":0, "freshness_hours":0, "niche_premium":0, "source_url":"..." }] }
 
@@ -188,7 +190,7 @@ export async function fetchTrends() {
       const ECONOMY_SOURCES = ['yonhap_economy', 'mk_economy', 'mk_realestate', 'yonhap_health'];
       const economyItems = allItems.filter((i) => ECONOMY_SOURCES.includes(i.source));
       const fallbackItems = (economyItems.length > 0 ? economyItems : priorityItems).slice(0, 10);
-      const CATEGORY_SCORE = { economy: 75, finance: 75, realestate: 70, health: 65, social: 40, entertainment: 10 };
+      const CATEGORY_SCORE = { economy: 75, finance: 75, realestate: 70, health: 65, beauty: 62, social: 40, entertainment: 10 };
       scored = fallbackItems.map((item) => {
         const cat = item.sourceCategory ?? 'economy';
         const base = CATEGORY_SCORE[cat] ?? 40;
@@ -199,7 +201,7 @@ export async function fetchTrends() {
           virality: Math.round(base * 0.4),
           commercial_value: Math.round(base * 0.4),
           freshness_hours: 15,
-          niche_premium: cat === 'economy' || cat === 'finance' || cat === 'realestate' ? 18 : cat === 'health' ? 15 : 3,
+          niche_premium: cat === 'economy' || cat === 'finance' || cat === 'realestate' ? 18 : cat === 'health' || cat === 'beauty' ? 15 : 3,
         };
       });
     }
@@ -240,10 +242,11 @@ export async function fetchTrends() {
     const sortedFinal = freshSorted.length > 0 ? freshSorted : sorted; // 모두 사용된 경우 제한 해제
 
     // DAILY_VIDEOS 개수만큼 경제 아이템 선택 (기본값 1)
+    // health/beauty는 별도 보너스 슬롯으로 하나 추가
     const dailyLimit   = config.runtime.dailyVideos ?? 1;
-    const economyItems = sortedFinal.filter((i) => i.category !== 'health').slice(0, dailyLimit);
-    const bestHealth   = sortedFinal.find((i) => i.category === 'health');
-    const selected     = bestHealth ? [...economyItems, bestHealth] : economyItems;
+    const economyItems = sortedFinal.filter((i) => i.category !== 'health' && i.category !== 'beauty').slice(0, dailyLimit);
+    const bestHealthOrBeauty = sortedFinal.find((i) => i.category === 'health' || i.category === 'beauty');
+    const selected     = bestHealthOrBeauty ? [...economyItems, bestHealthOrBeauty] : economyItems;
 
     // ── DB promised 키워드 최우선 처리 ────────────────────────────────────
     // 지난 영상 스크립트에서 "다음 에피소드" 예고한 키워드를 맨 앞에 삽입
