@@ -438,6 +438,10 @@ async function uploadYouTubeCaptions(videoId, srtPath, accessToken) {
  * 업로드된 YouTube 영상에 썸네일을 설정한다.
  * thumbnails.set API는 multipart/form-data로 이미지를 전송한다.
  * swap-thumbnails.js 스크립트에서도 재사용하기 위해 export.
+ *
+ * 403 Forbidden 원인:
+ *   "Custom thumbnails are only available to verified YouTube accounts."
+ *   → youtube.com/features 에서 채널 인증(전화번호) 필요
  */
 export async function uploadYouTubeThumbnail(videoId, thumbnailPath, accessToken) {
   let imageData;
@@ -448,20 +452,39 @@ export async function uploadYouTubeThumbnail(videoId, thumbnailPath, accessToken
     return false;
   }
 
-  await axios.post(
-    `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`,
-    imageData,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'image/jpeg',
-        'Content-Length': imageData.length,
-      },
-      timeout: 60000,
+  try {
+    await axios.post(
+      `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`,
+      imageData,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'image/jpeg',
+          'Content-Length': imageData.length,
+        },
+        timeout: 60000,
+      }
+    );
+    logger.info(`[auto_publisher] Thumbnail uploaded for video: ${videoId}`);
+    return true;
+  } catch (err) {
+    const status = err.response?.status;
+    const apiErr  = err.response?.data?.error?.errors?.[0];
+    const reason  = apiErr?.reason  ?? 'unknown';
+    const detail  = apiErr?.message ?? err.message;
+    if (status === 403) {
+      logger.error(
+        `[auto_publisher] ❌ 썸네일 403 Forbidden — reason="${reason}" | ${detail}\n` +
+        `  ⬛ 채널 인증이 필요합니다: https://www.youtube.com/features 에서 전화번호 인증 후\n` +
+        `     "커스텀 미리보기 이미지" 항목을 활성화하세요. videoId=${videoId}`
+      );
+    } else {
+      logger.error(
+        `[auto_publisher] ❌ thumbnails.set HTTP ${status ?? '?'} — reason="${reason}" | ${detail} | videoId=${videoId}`
+      );
     }
-  );
-  logger.info(`[auto_publisher] Thumbnail uploaded for video: ${videoId}`);
-  return true;
+    throw err;
+  }
 }
 
 /**

@@ -1661,6 +1661,41 @@ async function generateLongFormMedia(content) {
     logger.error(`[media_generator] Long-form ffmpeg render failed: ${err.message}`);
   }
 
+  // ── 5.5. 롱폼 영상에 썸네일 인트로 2초 삽입 ─────────────────────────────
+  // thumbnails.set API 실패(채널 미인증) 대비 — YouTube 자동 커버 후보 프레임에 포함되도록 함
+  if (result.video) {
+    const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
+    try {
+      await fs.access(thumbShortsPath);
+      const tmpThumbClip  = videoPath.replace(/\.mp4$/, '_lthumbclip.mp4');
+      const tmpMergedPath = videoPath.replace(/\.mp4$/, '_lmerged.mp4');
+
+      await execFileAsync(ffmpegPath, [
+        '-loop', '1', '-i', thumbShortsPath,
+        '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+        '-t', '2',
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
+        '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
+        '-preset', 'fast', '-shortest', '-y', tmpThumbClip,
+      ]);
+
+      await execFileAsync(ffmpegPath, [
+        '-i', tmpThumbClip,
+        '-i', videoPath,
+        '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
+        '-map', '[v]', '-map', '[a]',
+        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMergedPath,
+      ]);
+
+      await fs.unlink(videoPath);
+      await fs.rename(tmpMergedPath, videoPath);
+      await fs.unlink(tmpThumbClip);
+      logger.info(`[media_generator] Long-form thumbnail intro prepended (2s cover frame)`);
+    } catch (thumbErr) {
+      logger.warn(`[media_generator] Long-form thumbnail prepend skipped: ${thumbErr.message}`);
+    }
+  }
+
   // ── 6. 숏폼 추출 — source_section 구간을 롱폼에서 잘라냄 ──────────────
   if (result.video) {
     try {
