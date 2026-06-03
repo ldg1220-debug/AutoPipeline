@@ -98,13 +98,20 @@ async function callModel(model, prompt) {
 function buildGroupPrompt(keywords) {
   return (
     `다음 한국어 키워드 목록을 의미적으로 같은 주제끼리 그룹핑해줘.\n` +
-    `같은 경제·사회 현상을 다루거나 밀접하게 연관된 키워드는 한 그룹으로 묶고,\n` +
+    `같은 주제를 다루거나 밀접하게 연관된 키워드는 한 그룹으로 묶고,\n` +
     `완전히 다른 주제면 각자 별도 그룹으로 분리해.\n\n` +
     keywords.map((k, i) => `${i}: ${k}`).join('\n') +
     `\n\n` +
     `판단 기준:\n` +
     `- 한 블로그 포스트에서 자연스럽게 함께 다룰 수 있는가?\n` +
     `- 독자가 하나를 검색했을 때 나머지도 궁금해할 가능성이 높은가?\n\n` +
+    `⚠️ 반드시 같은 그룹으로 묶어야 하는 경우 (내용이 실질적으로 중복됨):\n` +
+    `- 같은 제품군 변형: 선스틱 / 선크림 / 자외선차단제 / 썬크림\n` +
+    `- 같은 피부 기능: 수분크림 / 보습크림 / 에센스 / 수분세럼\n` +
+    `- 같은 피부 문제: 여드름 치료 / 트러블 케어 / 여드름 원인\n` +
+    `- 같은 계절 관리: 봄 피부관리 / 봄철 스킨케어 루틴\n` +
+    `- 같은 금융 현상: 금리 인상 영향 / 기준금리 전망\n` +
+    `- 같은 부동산 이슈: 전세사기 / 전세보증금 반환\n\n` +
     `각 그룹에 묶은 이유를 한 줄로 설명해줘.\n` +
     `JSON만 반환: {"groups":[{"indices":[0,2],"reasoning":"이유"},{"indices":[1],"reasoning":"이유"},...]}`
   );
@@ -119,7 +126,7 @@ function buildReviewPrompt(keywords, groups) {
   }).join('\n');
 
   return (
-    `아래는 한국 경제 블로그의 키워드 그룹핑 결과야.\n` +
+    `아래는 한국 블로그(경제·부동산·뷰티·건강)의 키워드 그룹핑 결과야.\n` +
     `블로그 독자와 SEO 관점에서 이 그룹핑이 얼마나 자연스러운지 평가해줘.\n\n` +
     `키워드: ${keywords.join(', ')}\n\n` +
     `그룹핑 결과:\n${groupDesc}\n\n` +
@@ -127,6 +134,10 @@ function buildReviewPrompt(keywords, groups) {
     `- 같은 그룹 키워드가 하나의 포스트에서 자연스럽게 연결되는가? (30점)\n` +
     `- 독자가 한 주제를 찾을 때 나머지도 함께 알고 싶어할 것인가? (30점)\n` +
     `- 그룹이 너무 억지로 묶이거나 반대로 불필요하게 분리되진 않았는가? (40점)\n\n` +
+    `⚠️ 감점 기준 (RETRY 트리거):\n` +
+    `- 선스틱/선크림/자외선차단제처럼 사실상 같은 제품군이 별도 그룹으로 나뉜 경우 -30점\n` +
+    `- 수분크림/보습크림/에센스처럼 같은 기능 제품이 분리된 경우 -20점\n` +
+    `- 같은 경제 현상(금리 인상/기준금리 전망)이 분리된 경우 -20점\n\n` +
     `JSON만 반환:\n` +
     `{"score":85,"issues":["문제점 있으면 서술","없으면 빈 배열"],"verdict":"PASS 또는 RETRY"}`
   );
@@ -154,14 +165,15 @@ async function clusterWithModel(model, keywords) {
     if (!covered.has(i)) groups.push({ indices: [i], reasoning: '(자동 보완)' });
   });
 
-  // 그룹당 최대 2개 제한 — 3개 이상이면 첫 2개만 묶고 나머지는 개별 분리
+  // 그룹당 최대 3개 제한 (뷰티/건강처럼 변형 제품군이 많은 카테고리 수용)
+  // 4개 이상이면 첫 3개만 묶고 나머지는 개별 분리
   const limitedGroups = [];
   for (const g of groups) {
-    if (g.indices.length <= 2) {
+    if (g.indices.length <= 3) {
       limitedGroups.push(g);
     } else {
-      limitedGroups.push({ indices: g.indices.slice(0, 2), reasoning: g.reasoning });
-      for (const idx of g.indices.slice(2)) {
+      limitedGroups.push({ indices: g.indices.slice(0, 3), reasoning: g.reasoning });
+      for (const idx of g.indices.slice(3)) {
         limitedGroups.push({ indices: [idx], reasoning: '(그룹 초과 분리)' });
       }
     }
