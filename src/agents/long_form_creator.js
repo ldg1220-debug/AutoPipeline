@@ -28,10 +28,14 @@ export async function createLongFormAndShorts(item, blogDraft) {
     competitorCtx  = formatInsightsForPrompt(insights);
   } catch { /* 인사이트 없으면 스킵 */ }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt =
     `당신은 한국 경제 유튜브 채널 "매일읽어주는남자" 수석 PD입니다.\n\n` +
-    `[오늘 날짜] ${today} (이 날짜 기준으로 작성 — 과거 연도 언급 금지)\n` +
+    `[오늘 날짜] ${today} (KST 기준)\n` +
+    `[⚠️ AI 지식 기준점 경고] 학습 데이터는 2023~2024년 기준이지만 지금은 2026년입니다.\n` +
+    `  - 2023·2024·2025년 경제 수치·정책을 "현재" "최신" "올해"로 표현 금지\n` +
+    `  - 시점이 있는 수치는 반드시 "○○년 기준" "당시" 등 연도 명시\n` +
+    `  - 확인 불가한 2026년 수치 창작 금지 — "최근" 등 일반 표현 사용\n` +
     `[키워드] ${item.keyword}\n` +
     `[카테고리] ${item.category ?? '경제'}\n\n` +
     (competitorCtx ? `${competitorCtx}\n\n` : '') +

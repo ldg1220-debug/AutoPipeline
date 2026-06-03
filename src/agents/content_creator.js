@@ -123,11 +123,15 @@ async function generateContent(item, competitorCtx = '') {
     item.figures    ? `핵심 수치/팩트: ${item.figures}` : '',
   ].filter(Boolean).join('\n');
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const contentPrompt = `당신은 유튜브 채널 "매일읽어주는남자"의 전속 작가입니다.
 채널의 나레이터 캐릭터 "매읽남"의 목소리로 55초짜리 숏폼 대본을 써야 합니다.
 
-오늘 날짜: ${today} (이 날짜 기준으로 작성할 것 — 과거 연도 언급 금지)
+오늘 날짜: ${today} (KST 기준)
+⚠️ AI 지식 기준점 경고: 당신의 학습 데이터는 2023~2024년 기준이지만, 지금은 2026년입니다.
+  - 2023년·2024년·2025년 수치(금리·지수·정책 등)를 "현재", "최신", "올해"로 쓰지 마세요
+  - 특정 시점 수치는 반드시 "○○년 기준" "당시" 등 연도를 명시하세요
+  - 확인되지 않은 2026년 수치는 창작하지 말고 "최근" 등 일반 표현을 쓰세요
 키워드: ${item.keyword}
 카테고리: ${item.category}
 시리즈: ${seriesName}

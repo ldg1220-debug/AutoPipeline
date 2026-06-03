@@ -110,7 +110,7 @@ async function callGPT4oMini(prompt) {
 // ── Pass 1: 검색 의도 분석 ──────────────────────────────────────────────────
 async function pass1Intent(keyword, category, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass1_intent.md');
-  const today    = new Date().toISOString().slice(0, 10);
+  const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt   = fillTemplate(template, { keyword, category, today }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
@@ -119,7 +119,7 @@ async function pass1Intent(keyword, category, benchmarkCtx = '') {
 // ── Pass 2: H2/H3 아웃라인 + FAQ 생성 ─────────────────────────────────────
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass2_outline.md');
-  const today    = new Date().toISOString().slice(0, 10);
+  const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt   = fillTemplate(template, {
     keyword,
     category,
@@ -137,7 +137,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
 async function pass3Body(keyword, section, targetReader, outlineContext) {
   const template = await loadPrompt('blog_pass3_body.md');
-  const today    = new Date().toISOString().slice(0, 10);
+  const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt = fillTemplate(template, {
     keyword,
     heading:       section.heading,
@@ -163,7 +163,7 @@ async function pass3Faq(keyword, faqItem, targetReader) {
 // ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
 async function pass4FactCheck(keyword, sections) {
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
-  const today    = new Date().toISOString().slice(0, 10);
+  const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
 
   const prompt = `아래 블로그 본문에서 허구·검증 불가 인용과 시제 오류를 수정하세요.\n\n` +
     `오늘 날짜: ${today}\n\n` +
