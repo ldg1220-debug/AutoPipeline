@@ -30,6 +30,7 @@
     "blog:assets": "node src/agents/blog_asset_builder.js",
     "blog:monetize": "node src/agents/monetizer.js",
     "blog:publish": "node src/agents/blog_publisher.js",
+    "blog:fix-categories": "node scripts/fix-post-categories.js",
     "blog:analytics": "node src/agents/blog_analytics.js",
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:pipeline:auto": "node scripts/run-blog-pipeline.js --auto",
