@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>쇼핑 영상 파이프라인</title>
+  <style>
+    :root {
+      --bg: #0d0d1a;
+      --surface: #13132a;
+      --surface2: #1a1a35;
+      --border: #2a2a50;
+      --accent: #00d4ff;
+      --accent2: #7c3aed;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --radius: 12px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding-bottom: 60px;
+    }
+    header {
+      background: linear-gradient(135deg, var(--surface) 0%, #1a0a40 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+    }
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .header-sub { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; }
+    .pipeline {
+      max-width: 960px;
+      margin: 32px auto;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .step-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.3s, opacity 0.3s;
+    }
+    .step-card.locked { opacity: 0.4; pointer-events: none; }
+    .step-card.active { border-color: var(--accent); }
+    .step-card.done { border-color: var(--success); }
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-num {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.9rem;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .step-card.active .step-num { background: var(--accent); color: #000; }
+    .step-card.done .step-num { background: var(--success); color: #000; }
+    .step-title { font-weight: 600; font-size: 1rem; }
+    .step-badge {
+      margin-left: auto;
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: var(--border);
+      color: var(--text-muted);
+    }
+    .step-card.active .step-badge { background: rgba(0,212,255,0.15); color: var(--accent); }
+    .step-card.done .step-badge { background: rgba(16,185,129,0.15); color: var(--success); }
+    .step-body { padding: 20px; }
+    /* 버튼 */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 20px; border-radius: 8px; border: none;
+      font-size: 0.88rem; font-weight: 600; cursor: pointer;
+      transition: all 0.2s; white-space: nowrap;
+    }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-primary:hover { background: #00b8d9; transform: translateY(-1px); }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-success { background: var(--success); color: #000; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 6px 14px; font-size: 0.8rem; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+    /* 그리드 */
+    .grid { display: grid; gap: 12px; }
+    .grid-3 { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    /* 제품 카드 */
+    .product-card {
+      background: var(--surface2);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .product-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .product-card.selected { border-color: var(--accent); background: rgba(0,212,255,0.08); }
+    .product-card img {
+      width: 100%; aspect-ratio: 1;
+      object-fit: cover; background: var(--border);
+      display: block;
+    }
+    .product-card .info { padding: 10px; }
+    .product-card .name { font-size: 0.82rem; font-weight: 600; margin-bottom: 4px; line-height: 1.3; }
+    .product-card .category { font-size: 0.72rem; color: var(--text-muted); }
+    .product-card .price { font-size: 0.78rem; color: var(--accent); margin-top: 4px; font-weight: 600; }
+    /* 영상 카드 */
+    .video-card {
+      background: var(--surface2);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .video-card:hover { border-color: var(--accent); }
+    .video-card .thumb {
+      width: 100%; aspect-ratio: 16/9;
+      object-fit: cover; background: var(--border);
+      display: block;
+    }
+    .video-card .duration {
+      position: absolute; bottom: 60px; right: 8px;
+      background: rgba(0,0,0,0.8); color: #fff;
+      font-size: 0.72rem; padding: 2px 6px; border-radius: 4px;
+    }
+    .video-card .vid-info { padding: 8px 10px; }
+    .video-card .vid-title { font-size: 0.78rem; color: var(--text-muted); }
+    /* 대본 에디터 */
+    .script-editor {
+      width: 100%; min-height: 200px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      color: var(--text);
+      font-size: 0.9rem;
+      line-height: 1.7;
+      resize: vertical;
+      font-family: inherit;
+    }
+    .script-editor:focus { outline: none; border-color: var(--accent); }
+    /* 썸네일 */
+    .thumbnail-preview {
+      max-width: 200px; border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    /* 음성 플레이어 */
+    audio { width: 100%; margin-top: 8px; }
+    /* 드롭존 */
+    .dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: var(--text-muted);
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(0,212,255,0.05);
+      color: var(--text);
+    }
+    .dropzone .dz-icon { font-size: 2.5rem; margin-bottom: 8px; }
+    /* 플랫폼 체크박스 */
+    .platform-list { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .platform-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .platform-item:hover { border-color: var(--accent); }
+    .platform-item.checked { border-color: var(--accent); background: rgba(0,212,255,0.08); }
+    .platform-item input { display: none; }
+    .platform-icon { font-size: 1.3rem; }
+    .platform-name { font-size: 0.88rem; font-weight: 600; }
+    /* 상태 목록 */
+    .status-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+    .status-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-dot.pending { background: var(--text-muted); }
+    .status-dot.running { background: var(--warning); animation: pulse 1s infinite; }
+    .status-dot.success { background: var(--success); }
+    .status-dot.error { background: var(--danger); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+    /* 링크 결과 */
+    .result-link {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 16px;
+      background: rgba(16,185,129,0.1);
+      border: 1px solid var(--success);
+      border-radius: 8px;
+      color: var(--success);
+      text-decoration: none;
+      font-size: 0.88rem;
+      transition: all 0.2s;
+    }
+    .result-link:hover { background: rgba(16,185,129,0.2); }
+    /* 토스트 */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      font-size: 0.88rem;
+      box-shadow: var(--shadow);
+      transform: translateY(100px); opacity: 0;
+      transition: all 0.3s;
+      z-index: 9999;
+      max-width: 340px;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.success { border-color: var(--success); }
+    #toast.error { border-color: var(--danger); }
+    /* 로딩 스피너 */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 3px solid rgba(0,212,255,0.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* 유틸 */
+    .flex { display: flex; }
+    .gap-8 { gap: 8px; }
+    .gap-12 { gap: 12px; }
+    .mt-12 { margin-top: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .text-muted { color: var(--text-muted); font-size: 0.85rem; }
+    .tag {
+      display: inline-block;
+      background: rgba(124,58,237,0.15);
+      color: #a78bfa;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 0.75rem;
+      margin: 2px;
+    }
+    input[type="text"], input[type="search"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-size: 0.88rem;
+      flex: 1;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>🎬</div>
+  <h1>쇼핑 영상 파이프라인</h1>
+  <div class="header-sub">AutoPipeline v1.0 | 7단계 자동화</div>
+</header>
+
+<div class="pipeline">
+
+  <!-- STEP 1: 트렌딩 제품 -->
+  <div class="step-card active" id="step1">
+    <div class="step-header" onclick="toggleStep('step1')">
+      <div class="step-num">1</div>
+      <div class="step-title">트렌딩 제품 수집</div>
+      <div class="step-badge" id="badge1">대기 중</div>
+    </div>
+    <div class="step-body" id="body1">
+      <div class="flex gap-8 mt-12" style="margin-bottom:16px">
+        <button class="btn btn-primary" onclick="loadTrending()">
+          <span id="trending-spinner"></span> 쿠팡 인기상품 불러오기
+        </button>
+        <span class="text-muted" id="trending-source"></span>
+      </div>
+      <div class="grid grid-3" id="product-grid"></div>
+      <div id="selected-product" class="mt-12" style="display:none">
+        <hr/>
+        <div style="font-size:0.85rem;color:var(--text-muted)">선택된 제품:</div>
+        <div style="font-weight:600;margin-top:4px" id="selected-product-name"></div>
+        <button class="btn btn-primary mt-12" onclick="goToStep2()">다음 단계 →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: 영상 소스 검색 -->
+  <div class="step-card locked" id="step2">
+    <div class="step-header" onclick="toggleStep('step2')">
+      <div class="step-num">2</div>
+      <div class="step-title">영상 소스 검색</div>
+      <div class="step-badge" id="badge2">잠김</div>
+    </div>
+    <div class="step-body" id="body2">
+      <div class="flex gap-8 mt-12" style="margin-bottom:16px">
+        <input type="text" id="video-search-q" placeholder="제품명 입력..." />
+        <button class="btn btn-primary" onclick="searchVideos()">
+          <span id="video-spinner"></span> 검색
+        </button>
+      </div>
+      <div class="grid grid-2" id="video-grid"></div>
+      <div id="video-proceed" class="mt-12" style="display:none">
+        <hr/>
+        <button class="btn btn-primary" onclick="goToStep3()">다음 단계 → 스크립트 생성</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: 스크립트 + 썸네일 -->
+  <div class="step-card locked" id="step3">
+    <div class="step-header" onclick="toggleStep('step3')">
+      <div class="step-num">3</div>
+      <div class="step-title">스크립트 + 썸네일 생성</div>
+      <div class="step-badge" id="badge3">잠김</div>
+    </div>
+    <div class="step-body" id="body3">
+      <div class="flex gap-8 mt-12" style="margin-bottom:16px">
+        <button class="btn btn-primary" onclick="generateScript()">
+          <span id="script-spinner"></span> AI 대본 생성
+        </button>
+        <button class="btn btn-secondary" onclick="generateScript()" id="regen-btn" style="display:none">
+          재생성
+        </button>
+        <button class="btn btn-secondary" onclick="saveScript()" id="save-btn" style="display:none">
+          저장
+        </button>
+      </div>
+
+      <div id="script-section" style="display:none">
+        <div style="margin-bottom:8px;font-size:0.85rem;color:var(--text-muted)">대본 편집 (직접 수정 가능)</div>
+        <textarea class="script-editor" id="script-text" rows="10"></textarea>
+
+        <div class="mt-12">
+          <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px">YouTube 제목</div>
+          <input type="text" id="yt-title" style="width:100%" />
+        </div>
+        <div class="mt-12">
+          <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px">태그</div>
+          <div id="tags-list"></div>
+        </div>
+
+        <hr/>
+        <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:8px">썸네일</div>
+        <div class="flex gap-12" style="align-items:flex-start;flex-wrap:wrap">
+          <img id="thumbnail-img" class="thumbnail-preview" style="display:none" alt="썸네일" />
+          <div>
+            <button class="btn btn-secondary btn-sm" onclick="generateThumbnail()">
+              <span id="thumb-spinner"></span> 썸네일 생성 (DALL-E 3)
+            </button>
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px">
+              OpenAI API 키 필요
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-16">
+          <button class="btn btn-primary" onclick="goToStep4()">다음 단계 → AI 음성 생성</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: AI 음성 생성 -->
+  <div class="step-card locked" id="step4">
+    <div class="step-header" onclick="toggleStep('step4')">
+      <div class="step-num">4</div>
+      <div class="step-title">AI 음성 생성</div>
+      <div class="step-badge" id="badge4">잠김</div>
+    </div>
+    <div class="step-body" id="body4">
+      <div class="flex gap-8 mt-12" style="margin-bottom:16px">
+        <button class="btn btn-primary" onclick="generateTTS()">
+          <span id="tts-spinner"></span> 음성 생성 (TTS)
+        </button>
+      </div>
+      <div id="tts-result" style="display:none">
+        <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:4px">생성된 음성</div>
+        <audio id="audio-player" controls style="display:none"></audio>
+        <div id="tts-text-msg" class="text-muted"></div>
+        <div class="mt-12">
+          <a id="srt-download" href="#" download style="display:none" class="result-link">
+            📄 SRT 자막 다운로드
+          </a>
+        </div>
+        <div class="mt-16">
+          <button class="btn btn-primary" onclick="goToStep5()">다음 단계 → 편집 연결</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5: 편집 연결 -->
+  <div class="step-card locked" id="step5">
+    <div class="step-header" onclick="toggleStep('step5')">
+      <div class="step-num">5</div>
+      <div class="step-title">편집 연결 (CapCut)</div>
+      <div class="step-badge" id="badge5">잠김</div>
+    </div>
+    <div class="step-body" id="body5">
+      <div class="mt-12" style="margin-bottom:16px">
+        <a href="https://www.capcut.com" target="_blank" rel="noopener" class="btn btn-primary">
+          ✂️ CapCut 웹에서 편집하기 (새 탭)
+        </a>
+        <div class="text-muted mt-12">
+          편집 완료 후 완성된 영상을 아래에 업로드하세요.
+        </div>
+      </div>
+
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('video-file-input').click()">
+        <div class="dz-icon">📁</div>
+        <div>클릭하거나 파일을 끌어다 놓으세요</div>
+        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:6px">MP4, MOV · 최대 500MB</div>
+      </div>
+      <input type="file" id="video-file-input" accept="video/*" style="display:none" onchange="handleVideoUpload(event)" />
+
+      <div id="upload-progress" style="display:none;margin-top:12px">
+        <div style="font-size:0.85rem;color:var(--text-muted)" id="upload-status">업로드 중...</div>
+      </div>
+      <div id="upload-done" style="display:none;margin-top:16px">
+        <div style="color:var(--success);font-size:0.88rem;margin-bottom:12px">✅ 업로드 완료!</div>
+        <button class="btn btn-primary" onclick="goToStep6()">다음 단계 → 배포</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6: 멀티플랫폼 배포 -->
+  <div class="step-card locked" id="step6">
+    <div class="step-header" onclick="toggleStep('step6')">
+      <div class="step-num">6</div>
+      <div class="step-title">멀티플랫폼 배포</div>
+      <div class="step-badge" id="badge6">잠김</div>
+    </div>
+    <div class="step-body" id="body6">
+      <div class="mt-12" style="margin-bottom:16px">
+        <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px">배포할 플랫폼 선택</div>
+        <div class="platform-list" id="platform-list">
+          <label class="platform-item checked" id="pl-youtube">
+            <input type="checkbox" value="youtube" checked onchange="togglePlatform(this, 'pl-youtube')" />
+            <span class="platform-icon">▶️</span>
+            <span class="platform-name">YouTube Shorts</span>
+          </label>
+          <label class="platform-item checked" id="pl-tiktok">
+            <input type="checkbox" value="tiktok" checked onchange="togglePlatform(this, 'pl-tiktok')" />
+            <span class="platform-icon">🎵</span>
+            <span class="platform-name">TikTok</span>
+          </label>
+          <label class="platform-item" id="pl-instagram">
+            <input type="checkbox" value="instagram" onchange="togglePlatform(this, 'pl-instagram')" />
+            <span class="platform-icon">📸</span>
+            <span class="platform-name">Instagram Reels</span>
+          </label>
+          <label class="platform-item" id="pl-threads">
+            <input type="checkbox" value="threads" onchange="togglePlatform(this, 'pl-threads')" />
+            <span class="platform-icon">🧵</span>
+            <span class="platform-name">Threads</span>
+          </label>
+        </div>
+        <button class="btn btn-success" onclick="startPublish()">
+          <span id="publish-spinner"></span> 배포 시작
+        </button>
+      </div>
+
+      <div class="status-list" id="publish-status-list"></div>
+    </div>
+  </div>
+
+  <!-- STEP 7: 결과 대시보드 -->
+  <div class="step-card locked" id="step7">
+    <div class="step-header" onclick="toggleStep('step7')">
+      <div class="step-num">7</div>
+      <div class="step-title">배포 결과 대시보드</div>
+      <div class="step-badge" id="badge7">잠김</div>
+    </div>
+    <div class="step-body" id="body7">
+      <div class="mt-12">
+        <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">플랫폼별 업로드 결과</div>
+        <div id="result-links" style="display:flex;flex-direction:column;gap:10px"></div>
+        <hr/>
+        <button class="btn btn-secondary mt-12" onclick="resetPipeline()">
+          🔄 새 영상 시작하기
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 토스트 알림 -->
+<div id="toast"></div>
+
+<script>
+// =============================================
+// 상태 관리
+// =============================================
+const state = {
+  selectedProduct: null,
+  selectedVideos: [],
+  script: null,
+  thumbnailPrompt: null,
+  uploadedVideoPath: null,
+  uploadedVideoFilename: null,
+  publishResults: null,
+};
+
+// =============================================
+// 유틸 함수
+// =============================================
+function showToast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  setTimeout(() => { el.className = ''; }, 3500);
+}
+
+function setSpinner(id, on) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = on ? '<span class="spinner"></span>' : '';
+}
+
+function unlockStep(stepId) {
+  const card = document.getElementById(stepId);
+  card.classList.remove('locked');
+  card.classList.add('active');
+  const num = stepId.replace('step', '');
+  document.getElementById('badge' + num).textContent = '진행 중';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function markDone(stepId) {
+  const card = document.getElementById(stepId);
+  card.classList.remove('active');
+  card.classList.add('done');
+  const num = stepId.replace('step', '');
+  document.getElementById('badge' + num).textContent = '완료';
+}
+
+function toggleStep(stepId) {
+  const body = document.getElementById('body' + stepId.replace('step', ''));
+  body.style.display = body.style.display === 'none' ? '' : 'none';
+}
+
+function fmtDuration(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// =============================================
+// STEP 1 — 트렌딩 제품
+// =============================================
+async function loadTrending() {
+  setSpinner('trending-spinner', true);
+  const grid = document.getElementById('product-grid');
+  grid.innerHTML = '<div class="text-muted">불러오는 중...</div>';
+
+  try {
+    const res = await fetch('/api/trending');
+    const data = await res.json();
+
+    document.getElementById('trending-source').textContent =
+      data.source === 'mock' ? '(mock 데이터)' : '(쿠팡 실시간)';
+
+    grid.innerHTML = '';
+    data.products.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'product-card';
+      card.innerHTML = `
+        <img src="${p.image || 'https://via.placeholder.com/200x200/1a1a35/00d4ff?text=?'}"
+             alt="${p.name}" onerror="this.src='https://via.placeholder.com/200x200/1a1a35/00d4ff?text=IMG'" />
+        <div class="info">
+          <div class="name">${p.name}</div>
+          <div class="category">${p.category}</div>
+          ${p.price ? `<div class="price">${p.price}</div>` : ''}
+        </div>
+      `;
+      card.onclick = () => selectProduct(p, card);
+      grid.appendChild(card);
+    });
+    showToast(`${data.products.length}개 제품 로드 완료`, 'success');
+  } catch (err) {
+    grid.innerHTML = '<div style="color:var(--danger)">로드 실패: ' + err.message + '</div>';
+    showToast('제품 로드 실패', 'error');
+  } finally {
+    setSpinner('trending-spinner', false);
+  }
+}
+
+function selectProduct(product, cardEl) {
+  document.querySelectorAll('.product-card').forEach(c => c.classList.remove('selected'));
+  cardEl.classList.add('selected');
+  state.selectedProduct = product;
+
+  const sel = document.getElementById('selected-product');
+  document.getElementById('selected-product-name').textContent = product.name;
+  sel.style.display = '';
+
+  // Step 2 검색창에 제품명 자동 입력
+  document.getElementById('video-search-q').value = product.name;
+}
+
+function goToStep2() {
+  if (!state.selectedProduct) { showToast('제품을 선택해주세요.', 'error'); return; }
+  markDone('step1');
+  unlockStep('step2');
+}
+
+// =============================================
+// STEP 2 — 영상 소스 검색
+// =============================================
+async function searchVideos() {
+  const q = document.getElementById('video-search-q').value.trim();
+  if (!q) { showToast('검색어를 입력해주세요.', 'error'); return; }
+
+  setSpinner('video-spinner', true);
+  const grid = document.getElementById('video-grid');
+  grid.innerHTML = '<div class="text-muted">검색 중...</div>';
+
+  try {
+    const res = await fetch(`/api/videos/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+
+    grid.innerHTML = '';
+    data.videos.forEach(v => {
+      const card = document.createElement('div');
+      card.className = 'video-card';
+      card.innerHTML = `
+        <img class="thumb" src="${v.thumbnail}"
+             alt="${v.title}" onerror="this.src='https://via.placeholder.com/320x180/1a1a35/00d4ff?text=VIDEO'" />
+        <div class="duration">${fmtDuration(v.duration)}</div>
+        <div class="vid-info">
+          <div class="vid-title">${v.title || v.source}</div>
+        </div>
+      `;
+      card.onclick = () => window.open(v.download_url, '_blank');
+      grid.appendChild(card);
+    });
+
+    document.getElementById('video-proceed').style.display = '';
+    showToast(`${data.videos.length}개 영상 검색 완료 (${data.source})`, 'success');
+  } catch (err) {
+    grid.innerHTML = '<div style="color:var(--danger)">검색 실패: ' + err.message + '</div>';
+    showToast('영상 검색 실패', 'error');
+  } finally {
+    setSpinner('video-spinner', false);
+  }
+}
+
+function goToStep3() {
+  markDone('step2');
+  unlockStep('step3');
+}
+
+// =============================================
+// STEP 3 — 스크립트 + 썸네일
+// =============================================
+async function generateScript() {
+  if (!state.selectedProduct) { showToast('먼저 제품을 선택해주세요.', 'error'); return; }
+  setSpinner('script-spinner', true);
+  document.getElementById('script-section').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/script/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_name: state.selectedProduct.name,
+        product_url: state.selectedProduct.coupang_url,
+        keywords: [state.selectedProduct.category],
+      }),
+    });
+    const data = await res.json();
+    state.script = data;
+    state.thumbnailPrompt = data.thumbnail_prompt;
+
+    // 대본 텍스트로 조합
+    const s = data.script;
+    const fullText = [s.hook, s.context, s.insight, s.summary, s.cta]
+      .filter(Boolean).join('\n\n');
+    document.getElementById('script-text').value = fullText;
+    document.getElementById('yt-title').value = data.youtube_title || '';
+
+    // 태그
+    const tagList = document.getElementById('tags-list');
+    tagList.innerHTML = (data.tags || []).map(t => `<span class="tag">#${t}</span>`).join('');
+
+    document.getElementById('script-section').style.display = '';
+    document.getElementById('regen-btn').style.display = '';
+    document.getElementById('save-btn').style.display = '';
+
+    showToast('대본 생성 완료! (' + (data.source === 'mock' ? 'Mock' : 'GPT-4o') + ')', 'success');
+  } catch (err) {
+    showToast('대본 생성 실패: ' + err.message, 'error');
+  } finally {
+    setSpinner('script-spinner', false);
+  }
+}
+
+function saveScript() {
+  const text = document.getElementById('script-text').value;
+  if (state.script) state.script._editedText = text;
+  showToast('대본이 저장되었습니다.', 'success');
+}
+
+async function generateThumbnail() {
+  if (!state.thumbnailPrompt) { showToast('먼저 대본을 생성해주세요.', 'error'); return; }
+  setSpinner('thumb-spinner', true);
+
+  try {
+    const res = await fetch('/api/script/thumbnail', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: state.thumbnailPrompt,
+        product_name: state.selectedProduct?.name,
+      }),
+    });
+    const data = await res.json();
+    const img = document.getElementById('thumbnail-img');
+    img.src = data.image_url;
+    img.style.display = '';
+    showToast('썸네일 생성 완료!', 'success');
+  } catch (err) {
+    showToast('썸네일 생성 실패: ' + err.message, 'error');
+  } finally {
+    setSpinner('thumb-spinner', false);
+  }
+}
+
+function goToStep4() {
+  markDone('step3');
+  unlockStep('step4');
+}
+
+// =============================================
+// STEP 4 — TTS 음성 생성
+// =============================================
+async function generateTTS() {
+  if (!state.script) { showToast('먼저 대본을 생성해주세요.', 'error'); return; }
+  setSpinner('tts-spinner', true);
+
+  const scriptText = document.getElementById('script-text')?.value
+    || state.script?._editedText
+    || Object.values(state.script?.script || {}).join(' ');
+
+  try {
+    const res = await fetch('/api/script/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        script: scriptText,
+        product_name: state.selectedProduct?.name,
+      }),
+    });
+    const data = await res.json();
+
+    document.getElementById('tts-result').style.display = '';
+
+    if (data.mp3_url) {
+      const audio = document.getElementById('audio-player');
+      audio.src = data.mp3_url;
+      audio.style.display = '';
+    } else {
+      document.getElementById('tts-text-msg').textContent = data.message || 'TTS API 미설정 — 텍스트 파일로 저장됨';
+    }
+
+    if (data.srt_url) {
+      const srtLink = document.getElementById('srt-download');
+      srtLink.href = data.srt_url;
+      srtLink.style.display = '';
+    }
+
+    showToast('음성/자막 생성 완료! (' + data.source + ')', 'success');
+  } catch (err) {
+    showToast('음성 생성 실패: ' + err.message, 'error');
+  } finally {
+    setSpinner('tts-spinner', false);
+  }
+}
+
+function goToStep5() {
+  markDone('step4');
+  unlockStep('step5');
+}
+
+// =============================================
+// STEP 5 — 편집 + 영상 업로드
+// =============================================
+const dropzone = document.getElementById('dropzone');
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadVideoFile(file);
+});
+
+function handleVideoUpload(event) {
+  const file = event.target.files[0];
+  if (file) uploadVideoFile(file);
+}
+
+async function uploadVideoFile(file) {
+  const statusEl = document.getElementById('upload-status');
+  document.getElementById('upload-progress').style.display = '';
+  document.getElementById('upload-done').style.display = 'none';
+  statusEl.textContent = `업로드 중: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
+
+  const formData = new FormData();
+  formData.append('video', file);
+
+  try {
+    const res = await fetch('/api/upload-video', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || '업로드 실패');
+
+    state.uploadedVideoPath = data.path;
+    state.uploadedVideoFilename = data.filename;
+    statusEl.textContent = `✅ ${data.filename} 업로드 완료`;
+    document.getElementById('upload-done').style.display = '';
+    showToast('영상 업로드 완료!', 'success');
+  } catch (err) {
+    statusEl.textContent = '❌ 업로드 실패: ' + err.message;
+    showToast('업로드 실패: ' + err.message, 'error');
+  }
+}
+
+function goToStep6() {
+  markDone('step5');
+  unlockStep('step6');
+}
+
+// =============================================
+// STEP 6 — 멀티플랫폼 배포
+// =============================================
+function togglePlatform(checkbox, labelId) {
+  const label = document.getElementById(labelId);
+  if (checkbox.checked) label.classList.add('checked');
+  else label.classList.remove('checked');
+}
+
+async function startPublish() {
+  const platforms = [...document.querySelectorAll('#platform-list input:checked')]
+    .map(cb => cb.value);
+
+  if (platforms.length === 0) { showToast('플랫폼을 하나 이상 선택해주세요.', 'error'); return; }
+  if (!state.uploadedVideoFilename) { showToast('업로드된 영상이 없습니다.', 'error'); return; }
+
+  setSpinner('publish-spinner', true);
+
+  // 상태 아이템 생성
+  const statusList = document.getElementById('publish-status-list');
+  statusList.innerHTML = '';
+  const statusItems = {};
+  platforms.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'status-item';
+    item.innerHTML = `<div class="status-dot running" id="dot-${p}"></div>
+      <div>${platformLabel(p)} — <span id="msg-${p}">업로드 중...</span></div>`;
+    statusList.appendChild(item);
+    statusItems[p] = item;
+  });
+
+  const title = document.getElementById('yt-title')?.value
+    || state.selectedProduct?.name
+    || '쇼핑 영상';
+
+  try {
+    const res = await fetch('/api/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_path: state.uploadedVideoFilename,
+        title,
+        description: document.getElementById('script-text')?.value?.slice(0, 500) || '',
+        tags: state.script?.tags || [],
+        platforms,
+      }),
+    });
+    const data = await res.json();
+    state.publishResults = data.results;
+
+    // 상태 업데이트
+    for (const [platform, result] of Object.entries(data.results)) {
+      const dot = document.getElementById('dot-' + platform);
+      const msg = document.getElementById('msg-' + platform);
+      if (!dot || !msg) continue;
+
+      if (result.status === 'success') {
+        dot.className = 'status-dot success';
+        msg.innerHTML = result.url
+          ? `완료 <a href="${result.url}" target="_blank" style="color:var(--accent)">${result.url}</a>`
+          : '완료';
+      } else if (result.status === 'stub') {
+        dot.className = 'status-dot pending';
+        msg.textContent = result.message || 'stub (미구현)';
+      } else {
+        dot.className = 'status-dot error';
+        msg.textContent = result.message || '실패';
+      }
+    }
+
+    showToast('배포 완료!', 'success');
+    setTimeout(() => goToStep7(), 1500);
+  } catch (err) {
+    showToast('배포 실패: ' + err.message, 'error');
+  } finally {
+    setSpinner('publish-spinner', false);
+  }
+}
+
+function platformLabel(p) {
+  const map = { youtube: '▶️ YouTube Shorts', tiktok: '🎵 TikTok', instagram: '📸 Instagram', threads: '🧵 Threads' };
+  return map[p] || p;
+}
+
+// =============================================
+// STEP 7 — 결과 대시보드
+// =============================================
+function goToStep7() {
+  markDone('step6');
+  unlockStep('step7');
+
+  const linksEl = document.getElementById('result-links');
+  linksEl.innerHTML = '';
+
+  if (!state.publishResults) {
+    linksEl.innerHTML = '<div class="text-muted">결과 없음</div>';
+    return;
+  }
+
+  for (const [platform, result] of Object.entries(state.publishResults)) {
+    const item = document.createElement('div');
+    if (result.url) {
+      item.innerHTML = `<a href="${result.url}" target="_blank" class="result-link">
+        ${platformLabel(platform)} 업로드 완료 → ${result.url}
+      </a>`;
+    } else {
+      item.innerHTML = `<div class="status-item">
+        <div class="status-dot ${result.status === 'error' ? 'error' : 'pending'}"></div>
+        <div>${platformLabel(platform)} — ${result.message || result.status}</div>
+      </div>`;
+    }
+    linksEl.appendChild(item);
+  }
+}
+
+function resetPipeline() {
+  if (!confirm('새 영상을 시작하시겠습니까? 현재 작업이 초기화됩니다.')) return;
+  location.reload();
+}
+
+// 초기 로드 시 제품 자동 로드
+window.addEventListener('DOMContentLoaded', () => {
+  loadTrending();
+});
+</script>
+</body>
+</html>
