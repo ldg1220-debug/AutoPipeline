@@ -434,21 +434,25 @@
     <div class="step-body" id="body2">
       <div class="flex gap-8 mt-12" style="margin-bottom:8px;flex-wrap:wrap">
         <input type="text" id="video-search-q" placeholder="제품명 입력 (예: 무기자차 선스틱)..." style="min-width:200px" />
-        <button class="btn btn-primary" onclick="searchVideos()">
-          <span id="video-spinner"></span> 🛒 타오바오 검색
+        <button class="btn btn-primary" onclick="searchVideos('taobao')">
+          <span id="video-spinner"></span> 🛒 타오바오
         </button>
-        <button class="btn btn-secondary btn-sm" onclick="searchVideos(true)" title="Pexels 스톡 영상으로 검색">
+        <button class="btn btn-secondary" onclick="searchVideos('bilibili')" title="빌리빌리(중국 유튜브)에서 제품 영상 검색">
+          📺 빌리빌리
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="searchVideos('pexels')" title="Pexels 스톡 영상으로 검색">
           📸 Pexels
         </button>
       </div>
-      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:14px" id="video-source-label">
-        한국어 입력 → 중국어 자동 번역 → 타오바오 스크래핑
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px" id="video-source-label">
+        한국어 입력 → 중국어 자동 번역 → 타오바오/빌리빌리 검색
       </div>
+      <div id="video-error-banner" style="display:none;font-size:0.78rem;color:var(--warning);background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:8px 12px;margin-bottom:10px"></div>
       <div class="grid grid-2" id="video-grid"></div>
       <div id="video-proceed" class="mt-12" style="display:none">
         <hr/>
         <div class="text-muted" style="margin-bottom:8px;font-size:0.82rem">
-          💡 타오바오 링크를 열어 영상을 다운로드 후 CapCut으로 편집하세요
+          💡 영상을 참고해 CapCut으로 편집하세요
         </div>
         <button class="btn btn-primary" onclick="goToStep3()">다음 단계 → 스크립트 생성</button>
       </div>
@@ -811,29 +815,47 @@ function goToStep2() {
 }
 
 // =============================================
-// STEP 2 — 영상 소스 검색 (타오바오 우선)
+// STEP 2 — 영상 소스 검색
 // =============================================
-async function searchVideos(forcePexels = false) {
+async function searchVideos(source = 'taobao') {
   const q = document.getElementById('video-search-q').value.trim();
   if (!q) { showToast('검색어를 입력해주세요.', 'error'); return; }
 
   setSpinner('video-spinner', true);
-  const grid = document.getElementById('video-grid');
-  grid.innerHTML = '<div class="text-muted">🔍 타오바오 검색 중... (한국어 → 중국어 번역 → 타오바오 스크래핑)</div>';
+  const grid        = document.getElementById('video-grid');
+  const errBanner   = document.getElementById('video-error-banner');
+  errBanner.style.display = 'none';
+
+  const sourceMessages = {
+    taobao:   '🔍 타오바오 검색 중... (한국어 → 중국어 번역 → 스크래핑, 약 30초 소요)',
+    bilibili:  '🔍 빌리빌리 검색 중... (한국어 → 중국어 번역)',
+    pexels:   '🔍 Pexels 스톡 영상 검색 중...',
+  };
+  grid.innerHTML = `<div class="text-muted">${sourceMessages[source] || '검색 중...'}</div>`;
 
   try {
-    const url = `/api/videos/search?q=${encodeURIComponent(q)}${forcePexels ? '&source=pexels' : ''}`;
+    const url = `/api/videos/search?q=${encodeURIComponent(q)}&source=${source}`;
     const res  = await fetch(url);
     const data = await res.json();
 
     const sourceLabel = {
-      taobao: '🛒 타오바오',
-      pexels: '📸 Pexels',
-      mock:   '🔧 mock',
+      taobao:   '🛒 타오바오',
+      bilibili:  '📺 빌리빌리',
+      pexels:   '📸 Pexels',
+      mock:     '🔧 mock (오프라인)',
     }[data.source] || data.source;
 
     document.getElementById('video-source-label').textContent =
       `${sourceLabel} · ${data.videos.length}개${data.chinese_query ? ` · 검색어: ${data.chinese_query}` : ''}`;
+
+    // 폴백 이유 또는 오류 표시
+    if (data.fallback_reason) {
+      errBanner.textContent = `⚠️ ${data.fallback_reason}`;
+      errBanner.style.display = '';
+    } else if (data.source === 'mock') {
+      errBanner.textContent = '⚠️ 타오바오/빌리빌리 접근 실패 — 네트워크 상태를 확인하거나 Playwright가 설치되어 있는지 확인하세요 (npx playwright install chromium)';
+      errBanner.style.display = '';
+    }
 
     grid.innerHTML = '';
     if (data.videos.length === 0) {
@@ -842,34 +864,42 @@ async function searchVideos(forcePexels = false) {
     data.videos.forEach(v => {
       const card = document.createElement('div');
       card.className = 'video-card';
-      const isTaobao = data.source === 'taobao';
+
+      // 소스별 링크 텍스트
+      const linkText = { taobao: '타오바오↗', bilibili: '빌리빌리↗', pexels: '보기↗' }[v.source] || '열기↗';
+      // 소스 배지 색상
+      const badgeColor = { taobao: '#e53935', bilibili: '#00a1d6', pexels: '#07c160' }[v.source] || 'var(--accent)';
+      const badgeText  = { taobao: '🛒', bilibili: '📺', pexels: '📸' }[v.source] || '▶';
+
+      // 조회수 표시 (Bilibili)
+      const playInfo = v.play_count ? ` · 조회 ${(v.play_count/10000).toFixed(1)}만` : '';
+      const durInfo  = v.duration   ? ` · ${v.duration}` : '';
 
       card.innerHTML = `
         <div style="position:relative;cursor:pointer">
           <img class="thumb" src="${v.thumbnail || ''}"
                alt="${v.title || ''}"
                onerror="this.src='https://via.placeholder.com/320x180/1a1a35/00d4ff?text=클릭+미리보기'" />
-          <!-- 클릭 유도 오버레이 -->
           <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;background:rgba(0,0,0,0.5)"
                onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0">
             <div style="background:var(--accent);color:#000;border-radius:50%;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:1.2rem">▶</div>
           </div>
-          ${v.has_video ? '<div style="position:absolute;top:8px;left:8px;background:rgba(0,212,255,0.9);color:#000;font-size:0.68rem;padding:2px 7px;border-radius:10px;font-weight:700">▶ 영상</div>' : ''}
+          <div style="position:absolute;top:8px;left:8px;background:${badgeColor};color:#fff;font-size:0.68rem;padding:2px 7px;border-radius:10px;font-weight:700">${badgeText} ${v.source === 'bilibili' ? 'B站' : v.source}</div>
         </div>
         <div class="vid-info" style="display:flex;align-items:center;gap:6px;padding:8px 10px">
-          <div class="vid-title" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.78rem">
-            ${v.title || '제품 영상'}
+          <div style="flex:1;min-width:0">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.78rem">${v.title || '제품 영상'}</div>
+            ${playInfo || durInfo ? `<div style="font-size:0.68rem;color:var(--text-muted)">${durInfo}${playInfo}</div>` : ''}
           </div>
           ${v.page_url ? `<a href="${v.page_url}" target="_blank" rel="noopener"
                onclick="event.stopPropagation()"
                style="font-size:0.68rem;color:var(--text-muted);white-space:nowrap;text-decoration:none;flex-shrink:0">
-               ${isTaobao ? '타오바오↗' : '열기↗'}
+               ${linkText}
              </a>` : ''}
         </div>
       `;
-      // 클릭 → 영상 미리보기 모달
-      card.querySelector('div[style*="inset:0"]').onclick = () => openVideoModal(v, isTaobao);
-      card.querySelector('img.thumb').onclick = () => openVideoModal(v, isTaobao);
+      card.querySelector('div[style*="inset:0"]').onclick = () => openVideoModal(v);
+      card.querySelector('img.thumb').onclick = () => openVideoModal(v);
       grid.appendChild(card);
     });
 
@@ -884,14 +914,13 @@ async function searchVideos(forcePexels = false) {
 }
 
 // ─── 영상 미리보기 모달 ────────────────────────────────────────────────────
-async function openVideoModal(v, isTaobao) {
+async function openVideoModal(v) {
   const modal   = document.getElementById('video-modal');
   const loading = document.getElementById('modal-loading');
   const videoEl = document.getElementById('modal-video');
   const actions = document.getElementById('modal-actions');
   const titleEl = document.getElementById('modal-title');
 
-  // 초기화
   titleEl.textContent = v.title || '영상 로딩 중...';
   loading.style.display = '';
   videoEl.style.display = 'none';
@@ -899,28 +928,46 @@ async function openVideoModal(v, isTaobao) {
   actions.innerHTML = '';
   modal.classList.add('show');
 
-  // 이미 직접 영상 URL 있는 경우
-  if (v.video_url && (v.video_url.includes('.mp4') || v.source === 'pexels')) {
+  // Pexels: 직접 mp4 URL
+  if (v.video_url && v.source === 'pexels') {
     playVideoInModal(v.video_url, v.page_url, v.title);
     return;
   }
 
-  // 타오바오: 서버에서 영상 URL 추출
-  if (isTaobao && v.page_url) {
+  // Bilibili: bvid로 영상 URL 추출 시도
+  if (v.source === 'bilibili' && v.bvid) {
+    try {
+      const res  = await fetch(`/api/videos/fetch-video?bvid=${encodeURIComponent(v.bvid)}`);
+      const data = await res.json();
+      if (data.video_url) {
+        playVideoInModal(data.video_url, v.page_url, v.title);
+      } else {
+        // 로그인 필요 → 빌리빌리 페이지로 유도
+        showModalExternalLink(v.page_url, v.title, '빌리빌리에서 시청 (로그인 없이 직접 스트림 불가)');
+      }
+    } catch {
+      showModalExternalLink(v.page_url, v.title, '빌리빌리에서 시청');
+    }
+    return;
+  }
+
+  // Taobao: 서버에서 영상 URL 추출
+  if (v.source === 'taobao' && v.page_url) {
     try {
       const res  = await fetch(`/api/videos/fetch-video?url=${encodeURIComponent(v.page_url)}`);
       const data = await res.json();
       if (data.video_url) {
         playVideoInModal(data.video_url, v.page_url, v.title);
       } else {
-        showModalNoVideo(v.page_url, v.title);
+        showModalExternalLink(v.page_url, v.title, '타오바오에서 시청');
       }
-    } catch (err) {
-      showModalNoVideo(v.page_url, v.title);
+    } catch {
+      showModalExternalLink(v.page_url, v.title, '타오바오에서 시청');
     }
-  } else {
-    showModalNoVideo(v.page_url, v.title);
+    return;
   }
+
+  showModalExternalLink(v.page_url, v.title, '외부 링크에서 시청');
 }
 
 function playVideoInModal(videoUrl, pageUrl, title) {
@@ -936,16 +983,16 @@ function playVideoInModal(videoUrl, pageUrl, title) {
   `;
 }
 
-function showModalNoVideo(pageUrl, title) {
+function showModalExternalLink(pageUrl, title, label) {
   const loading = document.getElementById('modal-loading');
   const actions = document.getElementById('modal-actions');
   loading.innerHTML = `
-    <div style="font-size:2rem;margin-bottom:8px">📦</div>
-    <div>영상 URL을 직접 추출하지 못했습니다.</div>
-    <div style="font-size:0.78rem;margin-top:6px;color:var(--text-muted)">타오바오에서 직접 영상을 다운로드하세요</div>
+    <div style="font-size:2rem;margin-bottom:8px">🔗</div>
+    <div>앱 내 미리보기를 지원하지 않는 영상입니다.</div>
+    <div style="font-size:0.78rem;margin-top:6px;color:var(--text-muted)">${label || '외부 링크에서 시청하세요'}</div>
   `;
   if (pageUrl) {
-    actions.innerHTML = `<a href="${pageUrl}" target="_blank" class="btn btn-primary btn-sm">타오바오에서 열기 ↗</a>`;
+    actions.innerHTML = `<a href="${pageUrl}" target="_blank" class="btn btn-primary btn-sm">${label || '외부에서 열기'} ↗</a>`;
   }
 }
 
