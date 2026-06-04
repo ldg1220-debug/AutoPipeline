@@ -476,8 +476,15 @@
       </div>
 
       <div id="script-section" style="display:none">
-        <div style="margin-bottom:8px;font-size:0.85rem;color:var(--text-muted)">대본 편집 (직접 수정 가능)</div>
-        <textarea class="script-editor" id="script-text" rows="10"></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:0.85rem;color:var(--text-muted)">대본 편집 (직접 수정 가능)</div>
+          <div id="script-char-count" style="font-size:0.78rem;color:var(--accent);font-weight:600"></div>
+        </div>
+        <textarea class="script-editor" id="script-text" rows="5"
+          oninput="updateCharCount(this.value)"></textarea>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px">
+          💡 목표: 공백 포함 90~130자 · 10% 빠른 속도로 15~20초
+        </div>
 
         <div class="mt-12">
           <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:6px">YouTube 제목</div>
@@ -951,6 +958,16 @@ function closeVideoModal(e) {
   videoEl.src = '';
 }
 
+function updateCharCount(text) {
+  const count = text.length;
+  const sec   = Math.round(count / 6.5);
+  const el    = document.getElementById('script-char-count');
+  if (!el) return;
+  const color = count < 90 ? 'var(--warning)' : count > 130 ? 'var(--danger)' : 'var(--accent)';
+  el.style.color = color;
+  el.textContent = `${count}자 · 약 ${sec}초`;
+}
+
 function goToStep3() {
   markDone('step2');
   unlockStep('step3');
@@ -978,12 +995,19 @@ async function generateScript() {
     state.script = data;
     state.thumbnailPrompt = data.thumbnail_prompt;
 
-    // 대본 텍스트로 조합
-    const s = data.script;
-    const fullText = [s.hook, s.context, s.insight, s.summary, s.cta]
-      .filter(Boolean).join('\n\n');
+    // 대본 텍스트 조합 (full_script 우선)
+    const s = data.script || {};
+    const fullText = data.full_script ||
+      [s.hook, s.main, s.cta, s.context, s.insight, s.summary]
+        .filter(Boolean).join(' ');
     document.getElementById('script-text').value = fullText;
     document.getElementById('yt-title').value = data.youtube_title || '';
+
+    // 글자 수 표시
+    const charCount = data.char_count || fullText.length;
+    const estSec = Math.round(charCount / 6.5);
+    document.getElementById('script-char-count').textContent =
+      `${charCount}자 · 약 ${estSec}초 (10% 빠른 속도 기준)`;
 
     // 태그
     const tagList = document.getElementById('tags-list');
@@ -993,7 +1017,8 @@ async function generateScript() {
     document.getElementById('regen-btn').style.display = '';
     document.getElementById('save-btn').style.display = '';
 
-    showToast('대본 생성 완료! (' + (data.source === 'mock' ? 'Mock' : 'GPT-4o') + ')', 'success');
+    const model = data.model || (data.source === 'mock' ? 'mock' : 'AI');
+    showToast(`대본 생성 완료! (${model}) ${charCount}자 · 약 ${estSec}초`, 'success');
   } catch (err) {
     showToast('대본 생성 실패: ' + err.message, 'error');
   } finally {

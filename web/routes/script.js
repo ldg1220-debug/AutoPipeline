@@ -133,9 +133,12 @@ router.post('/generate', async (req, res) => {
     logger.info(`[script] Gemini 대본 생성 시작: ${product_name}`);
 
     const systemPrompt =
-      '당신은 한국 쇼핑 영상 전문 대본 작가입니다. ' +
-      'YouTube Shorts에 최적화된 60초 내외 대본을 작성합니다. ' +
-      '시청자의 구매 욕구를 자극하는 흥미로운 훅과 설득력 있는 구성으로 작성하세요. ' +
+      '당신은 한국 쇼핑 쇼츠 영상 전문 대본 작가입니다.\n' +
+      '⚠️ 분량 규칙 (절대 준수):\n' +
+      '- 전체 대본 총 글자 수: 공백 포함 90~130자\n' +
+      '- 평소보다 10% 빠른 속도로 읽었을 때 15~20초가 되는 분량\n' +
+      '- 한 문장 = 15~25자 내외, 3~4문장으로 구성\n' +
+      '- 절대 초과 금지: 130자를 넘으면 무조건 탈락\n' +
       '반드시 JSON 형식으로만 응답하세요. 코드블록(```) 없이 순수 JSON만 출력하세요.';
 
     const { data: result, model } = await callGemini(
@@ -153,48 +156,51 @@ router.post('/generate', async (req, res) => {
 });
 
 /**
- * GPT 프롬프트 작성
+ * 대본 프롬프트 (15~20초 / 90~130자)
  */
 function buildScriptPrompt(productName, productUrl, keywords) {
   const kwStr = Array.isArray(keywords) ? keywords.join(', ') : (keywords || '');
   return `
-아래 제품에 대한 YouTube Shorts 쇼핑 영상 대본을 작성해주세요.
-
 제품명: ${productName}
-${productUrl ? `제품 URL: ${productUrl}` : ''}
 ${kwStr ? `키워드: ${kwStr}` : ''}
 
-다음 JSON 형식으로 응답해주세요:
+아래 JSON 형식으로 쇼핑 쇼츠 대본을 작성하세요.
+
+⚠️ 분량 규칙:
+- hook + main + cta 세 부분을 모두 합친 총 글자 수: 90~130자 (공백 포함)
+- 초과 시 무조건 줄여서 재작성
+- 각 부분 예시 길이: hook 20~30자, main 50~70자, cta 15~25자
+
 {
   "script": {
-    "hook": "첫 3초 시선 사로잡는 문장 (의문형 또는 놀라운 사실)",
-    "context": "제품 소개 및 문제 상황 제시 (15초)",
-    "insight": "제품의 핵심 장점 및 차별화 포인트 (20초)",
-    "summary": "사용 후 변화/혜택 요약 (10초)",
-    "cta": "구매 유도 마무리 문장 (5초)"
+    "hook": "첫 2~3초 강렬한 한 문장 (궁금증 유발 또는 공감)",
+    "main": "핵심 장점 1~2가지 + 구체적 특징 (2~3문장)",
+    "cta": "짧은 구매 유도 마무리 (1문장)"
   },
-  "youtube_title": "클릭률 높은 YouTube 제목 (60자 이내, #Shorts 포함)",
+  "full_script": "hook + main + cta를 자연스럽게 이어 붙인 전체 대본 (공백 포함 90~130자)",
+  "char_count": 전체_글자수_숫자,
+  "youtube_title": "클릭률 높은 YouTube 제목 (40자 이내, #Shorts 포함)",
   "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"],
-  "thumbnail_prompt": "DALL-E 썸네일 생성용 영어 프롬프트"
+  "thumbnail_prompt": "썸네일용 영어 프롬프트 (product showcase, vertical 9:16)"
 }
 `.trim();
 }
 
 /**
- * mock 대본 데이터
+ * mock 대본 데이터 (15~20초 / 90~130자)
  */
 function generateMockScript(productName) {
+  const hook = `${productName}, 이거 진짜예요?`;
+  const main  = `백탁 없고 끈적임 없이 쫙 발리는 게 포인트예요. 야외 활동할 때 덧발라도 전혀 무겁지 않아요.`;
+  const cta   = `아래 링크에서 바로 확인해 보세요! #Shorts`;
+  const full  = `${hook} ${main} ${cta}`;
   return {
-    script: {
-      hook: `여러분, ${productName} 써보셨나요? 이거 하나로 생활이 바뀝니다!`,
-      context: `요즘 핫한 ${productName}! 많은 분들이 구매 전 고민하시는데요, 오늘 제가 직접 써본 솔직 후기를 알려드릴게요.`,
-      insight: `${productName}의 가장 큰 장점은 바로 실용성과 가성비입니다. 기존 제품 대비 30% 이상 효율이 높고, 사용법도 정말 간단해서 누구나 쉽게 활용할 수 있어요.`,
-      summary: `사용한 지 한 달, 확실히 달라진 일상을 경험했습니다. 시간도 절약되고 만족도도 최고예요!`,
-      cta: `지금 쿠팡에서 특가 진행 중이에요. 링크는 댓글에 있으니 서두르세요! #Shorts`,
-    },
-    youtube_title: `${productName} 실사용 후기 | 이거 진짜 사야 해요? #Shorts`,
-    tags: [productName, '쿠팡', '추천', '리뷰', 'Shorts', '쇼핑'],
-    thumbnail_prompt: `Professional product showcase of ${productName} on clean white background, vibrant colors, modern minimalist style, 9:16 vertical format`,
+    script: { hook, main, cta },
+    full_script: full,
+    char_count: full.length,
+    youtube_title: `${productName} 솔직 후기 #Shorts`,
+    tags: [productName, '쿠팡', '추천', '리뷰', 'Shorts'],
+    thumbnail_prompt: `Professional product showcase of ${productName} on clean white background, vibrant colors, 9:16 vertical format`,
   };
 }
 
@@ -209,12 +215,13 @@ router.post('/tts', async (req, res) => {
     return res.status(400).json({ error: '대본(script)이 필요합니다.' });
   }
 
-  // 전체 대본 텍스트 조합
+  // 전체 대본 텍스트 조합 (full_script 우선, 없으면 파트 조합)
   const fullText = typeof script === 'string'
     ? script
-    : [script.hook, script.context, script.insight, script.summary, script.cta]
-        .filter(Boolean)
-        .join(' ');
+    : req.body.full_script ||
+      [script.hook, script.main, script.cta,
+       script.context, script.insight, script.summary]
+        .filter(Boolean).join(' ');
 
   await ensureOutputDir();
 
