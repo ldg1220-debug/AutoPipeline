@@ -596,19 +596,6 @@ async function main() {
       return false;
     };
 
-    // 4글자 이상 공통 부분문자열이 존재하면 유사 주제로 판단
-    const isSimilar = (kwNorm, pubNorm) => {
-      if (kwNorm.length < 2 || pubNorm.length < 2) return false;
-      const shorter = kwNorm.length <= pubNorm.length ? kwNorm : pubNorm;
-      const longer  = kwNorm.length <= pubNorm.length ? pubNorm : kwNorm;
-      if (shorter.length >= 4 && longer.includes(shorter)) return true;
-      for (let len = 4; len <= shorter.length; len++) {
-        for (let s = 0; s <= shorter.length - len; s++) {
-          if (longer.includes(shorter.slice(s, s + len))) return true;
-        }
-      }
-      return false;
-    };
 
     const before = contentData.contents.length;
     contentData.contents = contentData.contents.filter((c) => {
