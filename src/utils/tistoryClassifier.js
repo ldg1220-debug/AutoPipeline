@@ -220,6 +220,7 @@ export async function matchBestCategory(categories, keyword, internalCategory) {
     finance:       ['경제·금융', '재테크', '금융', '투자'],
     realestate:    ['부동산'],
     health:        ['건강'],
+    beauty:        ['뷰티', '뷰티·미용', '건강'],
     entertainment: ['연예·사회', '연예', '문화', '방송'],
     social:        ['연예·사회', '사회', '이슈', '생활'],
   };

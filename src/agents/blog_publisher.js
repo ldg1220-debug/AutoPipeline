@@ -318,17 +318,62 @@ async function publishPost(page, content, blogName, context) {
   } catch (err) {
     logger.warn(`[blog_publisher] Tag generation failed: ${err.message}`);
   }
+  // 에디터 본문 카테고리 선택 (완료 버튼 클릭 전, 에디터 우측 패널)
+  if (bestCategory?.id) {
+    try {
+      const catId = String(bestCategory.id);
+      // 에디터 우측 패널의 네이티브 select[name="categoryId"] 또는 select[name="category"]
+      let editorCatSet = false;
+      for (const sel of ['select[name="categoryId"]', 'select[name="category"]']) {
+        try {
+          await page.selectOption(sel, { value: catId }, { timeout: 1500 });
+          logger.info(`[blog_publisher] Editor category set via ${sel}: ${bestCategory.name}`);
+          editorCatSet = true;
+          break;
+        } catch { /* 다음 */ }
+      }
+      // JS evaluate 폴백 — React 래핑 select에도 동작
+      if (!editorCatSet) {
+        editorCatSet = await page.evaluate(({ id }) => {
+          const sel = document.querySelector('select[name="categoryId"]')
+            ?? document.querySelector('select[name="category"]')
+            ?? [...document.querySelectorAll('select')].find((s) =>
+                [...s.options].some((o) => o.value && o.value !== '0'));
+          if (!sel) return false;
+          const opt = [...sel.options].find((o) => o.value === id);
+          if (!opt) return false;
+          sel.value = id;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          sel.dispatchEvent(new Event('input',  { bubbles: true }));
+          return true;
+        }, { id: catId }).catch(() => false);
+        if (editorCatSet) logger.info(`[blog_publisher] Editor category set via JS: ${bestCategory.name}`);
+      }
+      if (!editorCatSet) logger.info(`[blog_publisher] Editor category select not found (will rely on API inject)`);
+    } catch (err) {
+      logger.warn(`[blog_publisher] Editor category set failed: ${err.message}`);
+    }
+  }
+
   logger.info(`[blog_publisher] URL[4-before-sidebar]: ${page.url()}`);
 
   // ── 발행 플로우: page.route() 인터셉트 ──────────────────────────────────
   // visibility:20(공개) + content:html(실제 본문)으로 교체 → 한 번에 공개 발행
   let publishApiResp = null;
   await page.route('**/manage/post.json', async (route) => {
+    const rawPostData = route.request().postData() ?? '{}';
     let data = {};
-    try { data = JSON.parse(route.request().postData() ?? '{}'); } catch { /* 유지 */ }
+    try { data = JSON.parse(rawPostData); } catch { /* form-encoded — 유지 */ }
+    // 원본 postData 키 로깅 (진단용)
+    logger.info(`[blog_publisher] API intercept keys: ${Object.keys(data).join(', ') || '(파싱 실패)'}`);
     data.visibility = 20;
     data.content = html;
-    if (bestCategory?.id) data.categoryId = Number(bestCategory.id) || bestCategory.id;
+    if (bestCategory?.id) {
+      const catId = Number(bestCategory.id) || bestCategory.id;
+      data.categoryId = catId;  // 내부 API 필드명
+      data.category   = catId;  // 공개 API 필드명 (fallback)
+      logger.info(`[blog_publisher] Category injected: ${bestCategory.name} (${catId})`);
+    }
     if (thumbnailCdnUrl) data.thumbnail = thumbnailCdnUrl;  // 대표 이미지 API 직접 주입
     try {
       const resp = await route.fetch({ postData: JSON.stringify(data) });
