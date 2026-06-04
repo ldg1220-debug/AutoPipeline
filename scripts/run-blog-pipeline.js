@@ -522,14 +522,79 @@ async function main() {
     }
   }
 
-  // Part 1.55: 이미 발행된 포스트와 중복 주제 제거 (4글자 공통 부분문자열 기준)
+  // Part 1.54: 시즌 미스매치 키워드 제거
+  // 한국 기준: 3~5월=봄, 6~8월=여름, 9~11월=가을, 12~2월=겨울
+  try {
+    const curMonth = new Date().getMonth() + 1; // 1-12
+    const curSeason = curMonth >= 3 && curMonth <= 5 ? '봄'
+      : curMonth >= 6 && curMonth <= 8 ? '여름'
+      : curMonth >= 9 && curMonth <= 11 ? '가을'
+      : '겨울';
+
+    // 각 시즌을 나타내는 키워드 패턴
+    const SEASON_PATTERNS = {
+      봄:  [/봄/,  /환절기봄/, /꽃가루/, /봄철/],
+      여름: [/여름/, /더위/, /냉감/, /자외선차단/, /땀/, /여름철/],
+      가을: [/가을/, /환절기가을/, /낙엽/, /가을철/],
+      겨울: [/겨울/, /동절기/, /한파/, /건조한겨울/, /겨울철/, /겨울피부/],
+    };
+
+    const offSeasonPatterns = Object.entries(SEASON_PATTERNS)
+      .filter(([s]) => s !== curSeason)
+      .flatMap(([, patterns]) => patterns);
+
+    const before154 = contentData.contents.length;
+    contentData.contents = contentData.contents.filter((c) => {
+      if (c.forced) return true;
+      const kw = c.keyword;
+      const isOffSeason = offSeasonPatterns.some((p) => p.test(kw));
+      if (isOffSeason) {
+        logger.info(`[blog:pipeline] Part 1.54: "${kw}" 제외 → 현재 시즌(${curSeason})과 맞지 않음`);
+        return false;
+      }
+      return true;
+    });
+    const removed154 = before154 - contentData.contents.length;
+    if (removed154 > 0) logger.info(`[blog:pipeline] Part 1.54: 시즌 미스매치 ${removed154}개 제외 (현재: ${curSeason})`);
+    else logger.info(`[blog:pipeline] Part 1.54: 시즌 필터 통과 (현재: ${curSeason})`);
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.54 시즌 필터 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.55: 이미 발행된 포스트와 중복 주제 제거 (21일 이내, 6글자 공통 부분문자열 기준)
   try {
     const published = db
-      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published'`)
+      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published' AND used_at >= datetime('now', '-21 days')`)
       .all()
       .map((r) => r.keyword.replace(/[\s&]/g, '').toLowerCase());
 
     const normalize = (kw) => (kw ?? '').replace(/[\s&]/g, '').toLowerCase();
+
+    // 공통 조사/어미를 제거한 후 6글자 이상 실질 키워드가 겹쳐야 유사로 판단
+    // "추천", "방법", "디시", "더쿠" 등 범용 단어는 제외 후 매칭
+    const GENERIC_TOKENS = ['추천', '방법', '디시', '더쿠', '가이드', '정리', '총정리', '완벽', '비교'];
+    const stripGeneric = (s) => {
+      let r = s;
+      for (const t of GENERIC_TOKENS) r = r.split(t).join('');
+      return r;
+    };
+
+    const isSimilar = (kwNorm, pubNorm) => {
+      const kwCore = stripGeneric(kwNorm);
+      const pubCore = stripGeneric(pubNorm);
+      if (kwCore.length < 2 || pubCore.length < 2) return false;
+      const shorter = kwCore.length <= pubCore.length ? kwCore : pubCore;
+      const longer  = kwCore.length <= pubCore.length ? pubCore : kwCore;
+      // 한쪽이 다른 쪽을 포함: 전체 포함은 항상 중복
+      if (shorter.length >= 4 && longer.includes(shorter)) return true;
+      // 부분 일치: 6글자 이상 실질 키워드가 겹쳐야 유사
+      for (let len = 6; len <= shorter.length; len++) {
+        for (let s = 0; s <= shorter.length - len; s++) {
+          if (longer.includes(shorter.slice(s, s + len))) return true;
+        }
+      }
+      return false;
+    };
 
     // 4글자 이상 공통 부분문자열이 존재하면 유사 주제로 판단
     const isSimilar = (kwNorm, pubNorm) => {
