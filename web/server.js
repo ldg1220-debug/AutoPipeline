@@ -122,7 +122,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || '서버 오류가 발생했습니다.' });
 });
 
-app.listen(PORT, () => {
-  logger.info(`[server] 쇼핑 영상 파이프라인 서버 실행 중: http://localhost:${PORT}`);
-  console.log(`\n  쇼핑 영상 파이프라인 서버 → http://localhost:${PORT}\n`);
+// 0.0.0.0 바인딩 — Windows localhost 접속 문제 해결
+app.listen(PORT, '0.0.0.0', () => {
+  logger.info(`[server] 서버 실행 중: http://localhost:${PORT}`);
+  console.log(`\n  ✅ 브라우저에서 열기 → http://localhost:${PORT}\n`);
+  console.log(`  (안 열리면 http://127.0.0.1:${PORT} 로 접속)\n`);
 });

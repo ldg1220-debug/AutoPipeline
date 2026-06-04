@@ -374,15 +374,24 @@
       <div class="step-badge" id="badge2">잠김</div>
     </div>
     <div class="step-body" id="body2">
-      <div class="flex gap-8 mt-12" style="margin-bottom:16px">
-        <input type="text" id="video-search-q" placeholder="제품명 입력..." />
+      <div class="flex gap-8 mt-12" style="margin-bottom:8px;flex-wrap:wrap">
+        <input type="text" id="video-search-q" placeholder="제품명 입력 (예: 무기자차 선스틱)..." style="min-width:200px" />
         <button class="btn btn-primary" onclick="searchVideos()">
-          <span id="video-spinner"></span> 검색
+          <span id="video-spinner"></span> 🛒 타오바오 검색
         </button>
+        <button class="btn btn-secondary btn-sm" onclick="searchVideos(true)" title="Pexels 스톡 영상으로 검색">
+          📸 Pexels
+        </button>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:14px" id="video-source-label">
+        한국어 입력 → 중국어 자동 번역 → 타오바오 스크래핑
       </div>
       <div class="grid grid-2" id="video-grid"></div>
       <div id="video-proceed" class="mt-12" style="display:none">
         <hr/>
+        <div class="text-muted" style="margin-bottom:8px;font-size:0.82rem">
+          💡 타오바오 링크를 열어 영상을 다운로드 후 CapCut으로 편집하세요
+        </div>
         <button class="btn btn-primary" onclick="goToStep3()">다음 단계 → 스크립트 생성</button>
       </div>
     </div>
@@ -737,38 +746,62 @@ function goToStep2() {
 }
 
 // =============================================
-// STEP 2 — 영상 소스 검색
+// STEP 2 — 영상 소스 검색 (타오바오 우선)
 // =============================================
-async function searchVideos() {
+async function searchVideos(forcePexels = false) {
   const q = document.getElementById('video-search-q').value.trim();
   if (!q) { showToast('검색어를 입력해주세요.', 'error'); return; }
 
   setSpinner('video-spinner', true);
   const grid = document.getElementById('video-grid');
-  grid.innerHTML = '<div class="text-muted">검색 중...</div>';
+  grid.innerHTML = '<div class="text-muted">🔍 타오바오 검색 중... (한국어 → 중국어 번역 → 타오바오 스크래핑)</div>';
 
   try {
-    const res = await fetch(`/api/videos/search?q=${encodeURIComponent(q)}`);
+    const url = `/api/videos/search?q=${encodeURIComponent(q)}${forcePexels ? '&source=pexels' : ''}`;
+    const res  = await fetch(url);
     const data = await res.json();
+
+    const sourceLabel = {
+      taobao: '🛒 타오바오',
+      pexels: '📸 Pexels',
+      mock:   '🔧 mock',
+    }[data.source] || data.source;
+
+    document.getElementById('video-source-label').textContent =
+      `${sourceLabel} · ${data.videos.length}개${data.chinese_query ? ` · 검색어: ${data.chinese_query}` : ''}`;
 
     grid.innerHTML = '';
     data.videos.forEach(v => {
       const card = document.createElement('div');
       card.className = 'video-card';
+
+      const hasVideo = !!v.video_url;
+      const openUrl  = v.page_url || v.video_url || '#';
+
       card.innerHTML = `
-        <img class="thumb" src="${v.thumbnail}"
-             alt="${v.title}" onerror="this.src='https://via.placeholder.com/320x180/1a1a35/00d4ff?text=VIDEO'" />
-        <div class="duration">${fmtDuration(v.duration)}</div>
-        <div class="vid-info">
-          <div class="vid-title">${v.title || v.source}</div>
+        <div style="position:relative">
+          <img class="thumb" src="${v.thumbnail || ''}"
+               alt="${v.title || ''}"
+               onerror="this.src='https://via.placeholder.com/320x180/1a1a35/00d4ff?text=클릭해서+열기'" />
+          ${hasVideo ? '<div style="position:absolute;top:8px;right:8px;background:rgba(0,212,255,0.9);color:#000;font-size:0.7rem;padding:2px 7px;border-radius:10px;font-weight:700">▶ 영상</div>' : ''}
+          ${v.duration ? `<div class="duration">${fmtDuration(v.duration)}</div>` : ''}
+        </div>
+        <div class="vid-info" style="display:flex;align-items:center;gap:6px">
+          <div class="vid-title" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${v.title || '제품 영상'}
+          </div>
+          <a href="${openUrl}" target="_blank" rel="noopener"
+             onclick="event.stopPropagation()"
+             style="font-size:0.72rem;color:var(--accent);white-space:nowrap;text-decoration:none">
+            ${data.source === 'taobao' ? '타오바오 →' : '열기 →'}
+          </a>
         </div>
       `;
-      card.onclick = () => window.open(v.download_url, '_blank');
       grid.appendChild(card);
     });
 
     document.getElementById('video-proceed').style.display = '';
-    showToast(`${data.videos.length}개 영상 검색 완료 (${data.source})`, 'success');
+    showToast(`${data.videos.length}개 영상 검색 완료 (${sourceLabel})`, 'success');
   } catch (err) {
     grid.innerHTML = '<div style="color:var(--danger)">검색 실패: ' + err.message + '</div>';
     showToast('영상 검색 실패', 'error');
