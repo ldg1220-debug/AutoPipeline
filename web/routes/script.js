@@ -1,6 +1,6 @@
 /**
  * 스크립트 / TTS / 썸네일 생성 API 라우터
- * - POST /generate  : GPT-4o로 쇼핑 대본 생성
+ * - POST /generate  : Gemini 2.5 Flash로 쇼핑 대본 생성
  * - POST /tts       : 네이버 클로바 또는 텍스트 파일로 음성 생성
  * - POST /thumbnail : DALL-E 3으로 썸네일 이미지 생성
  */
@@ -60,9 +60,61 @@ function formatSRTTime(seconds) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
+// Gemini 모델 우선순위 (최신 → 구버전 fallback)
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-flash-latest',
+];
+
+/**
+ * Gemini REST API 호출 (모델 자동 fallback)
+ * - 모든 parts의 text 합산 (thinking 모델 대응)
+ * - 코드블록(``` ```) 내 JSON 추출
+ */
+async function callGemini(apiKey, systemPrompt, userPrompt) {
+  for (const model of GEMINI_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const body = {
+        contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+        generationConfig: { temperature: 0.8, maxOutputTokens: 1500 },
+      };
+      const response = await axios.post(url, body, { timeout: 40000 });
+
+      // HTTP 레벨 에러 (503 등) 감지
+      if (response.data?.error) {
+        throw new Error(`API 오류: ${response.data.error.message}`);
+      }
+
+      // 모든 parts의 text 합산 (thinking 모델은 여러 parts 반환)
+      const parts = response.data.candidates?.[0]?.content?.parts ?? [];
+      const text = parts
+        .filter((p) => p.text && !p.thought)
+        .map((p) => p.text)
+        .join('');
+
+      if (!text) throw new Error('빈 응답');
+
+      // 코드블록 내 JSON 또는 순수 JSON 추출
+      const jsonMatch =
+        text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) ??
+        text.match(/(\{[\s\S]*\})/);
+
+      if (!jsonMatch) throw new Error('JSON 파싱 불가');
+      return { data: JSON.parse(jsonMatch[1] ?? jsonMatch[0]), model };
+    } catch (err) {
+      logger.warn(`[script/gemini] ${model} 실패: ${err.message}`);
+    }
+  }
+  throw new Error('모든 Gemini 모델 실패');
+}
+
 /**
  * POST /api/script/generate
- * GPT-4o로 쇼핑 대본 생성
+ * Gemini 2.5 Flash로 쇼핑 대본 생성
  */
 router.post('/generate', async (req, res) => {
   const { product_name, product_url, keywords } = req.body;
@@ -71,47 +123,32 @@ router.post('/generate', async (req, res) => {
     return res.status(400).json({ error: '제품명(product_name)이 필요합니다.' });
   }
 
-  // OpenAI API 키 확인
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    logger.warn('[script] OPENAI_API_KEY 없음 → mock 대본 사용');
-    const mockScript = generateMockScript(product_name);
-    return res.json({ ...mockScript, source: 'mock' });
+    logger.warn('[script] GEMINI_API_KEY 없음 → mock 대본 사용');
+    return res.json({ ...generateMockScript(product_name), source: 'mock' });
   }
 
   try {
-    logger.info(`[script] GPT-4o 대본 생성 시작: ${product_name}`);
+    logger.info(`[script] Gemini 대본 생성 시작: ${product_name}`);
 
-    const prompt = buildScriptPrompt(product_name, product_url, keywords);
+    const systemPrompt =
+      '당신은 한국 쇼핑 영상 전문 대본 작가입니다. ' +
+      'YouTube Shorts에 최적화된 60초 내외 대본을 작성합니다. ' +
+      '시청자의 구매 욕구를 자극하는 흥미로운 훅과 설득력 있는 구성으로 작성하세요. ' +
+      '반드시 JSON 형식으로만 응답하세요. 코드블록(```) 없이 순수 JSON만 출력하세요.';
 
-    const { default: OpenAI } = await import('openai');
-    const openai = new OpenAI({ apiKey });
+    const { data: result, model } = await callGemini(
+      apiKey,
+      systemPrompt,
+      buildScriptPrompt(product_name, product_url, keywords)
+    );
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content:
-            '당신은 한국 쇼핑 영상 전문 대본 작가입니다. ' +
-            'YouTube Shorts에 최적화된 60초 내외 대본을 작성합니다. ' +
-            '시청자의 구매 욕구를 자극하는 흥미로운 훅과 설득력 있는 구성으로 작성하세요. ' +
-            '반드시 JSON 형식으로만 응답하세요.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      response_format: { type: 'json_object' },
-      max_tokens: 1500,
-      temperature: 0.8,
-    });
-
-    const result = JSON.parse(completion.choices[0].message.content);
-    logger.info('[script] 대본 생성 완료');
-    res.json({ ...result, source: 'openai' });
+    logger.info(`[script] 대본 생성 완료 (${model})`);
+    res.json({ ...result, source: 'gemini', model });
   } catch (err) {
     logger.error(`[script] 대본 생성 실패: ${err.message}`);
-    const mockScript = generateMockScript(product_name);
-    res.json({ ...mockScript, source: 'mock', error: err.message });
+    res.json({ ...generateMockScript(product_name), source: 'mock', error: err.message });
   }
 });
 
