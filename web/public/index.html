@@ -291,18 +291,34 @@
       font-size: 0.75rem;
       margin: 2px;
     }
-    input[type="text"], input[type="search"] {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 14px;
-      color: var(--text);
-      font-size: 0.88rem;
-      flex: 1;
+    /* 카테고리 선택 */
+    .cat-toolbar {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 12px; flex-wrap: wrap;
     }
-    input:focus { outline: none; border-color: var(--accent); }
-    hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-  </style>
+    .cat-group-label {
+      font-size: 0.72rem; color: var(--text-muted);
+      font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; margin-top: 8px; width: 100%;
+    }
+    .cat-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .cat-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 20px;
+      background: var(--surface2); border: 1px solid var(--border);
+      font-size: 0.78rem; cursor: pointer;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .cat-chip:hover { border-color: var(--accent); color: var(--accent); }
+    .cat-chip.active {
+      background: rgba(0,212,255,0.15);
+      border-color: var(--accent); color: var(--accent); font-weight: 600;
+    }
+    .cat-group-section { margin-bottom: 10px; }
+    .cat-group-title {
+      font-size: 0.72rem; font-weight: 700; color: var(--text-muted);
+      margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
 </head>
 <body>
 
@@ -322,12 +338,24 @@
       <div class="step-badge" id="badge1">대기 중</div>
     </div>
     <div class="step-body" id="body1">
-      <div class="flex gap-8 mt-12" style="margin-bottom:16px">
-        <button class="btn btn-primary" onclick="loadTrending()">
-          <span id="trending-spinner"></span> 쿠팡 인기상품 불러오기
-        </button>
-        <span class="text-muted" id="trending-source"></span>
+
+      <!-- 카테고리 선택 패널 -->
+      <div id="cat-panel" style="margin-bottom:16px">
+        <div style="font-size:0.85rem;font-weight:600;margin-bottom:10px">카테고리 선택</div>
+        <div id="cat-groups" style="display:flex;flex-direction:column;gap:8px">
+          <!-- JS로 렌더링 -->
+          <div style="color:var(--text-muted);font-size:0.82rem">카테고리 불러오는 중...</div>
+        </div>
       </div>
+
+      <div class="flex gap-8" style="margin-bottom:16px;align-items:center">
+        <button class="btn btn-primary" onclick="loadTrending()">
+          <span id="trending-spinner"></span> 인기상품 불러오기
+        </button>
+        <span style="font-size:0.82rem;color:var(--accent);font-weight:600" id="cat-selected-label">카테고리를 선택하세요</span>
+        <span class="text-muted" id="trending-source" style="margin-left:auto"></span>
+      </div>
+
       <div class="grid grid-3" id="product-grid"></div>
       <div id="selected-product" class="mt-12" style="display:none">
         <hr/>
@@ -600,15 +628,65 @@ function fmtDuration(sec) {
 }
 
 // =============================================
-// STEP 1 — 트렌딩 제품
+// STEP 1 — 카테고리 + 트렌딩 제품
 // =============================================
+let selectedCategoryId = '393760';
+
+async function initCategories() {
+  try {
+    const res = await fetch('/api/trending/categories');
+    const data = await res.json();
+    renderCategoryGroups(data.groups);
+    // 기본값 '생활용품' 활성화
+    selectCategory('393760', '🏠 생활용품');
+  } catch (e) {
+    document.getElementById('cat-groups').innerHTML =
+      '<div style="color:var(--text-muted);font-size:0.82rem">카테고리 로드 실패</div>';
+  }
+}
+
+function renderCategoryGroups(groups) {
+  const container = document.getElementById('cat-groups');
+  container.innerHTML = '';
+  for (const [groupName, cats] of Object.entries(groups)) {
+    const section = document.createElement('div');
+    section.className = 'cat-group-section';
+    section.innerHTML = `<div class="cat-group-title">${groupName}</div>`;
+    const chips = document.createElement('div');
+    chips.className = 'cat-chips';
+    cats.forEach(cat => {
+      const chip = document.createElement('span');
+      chip.className = 'cat-chip';
+      chip.id = `cat-${cat.id}`;
+      chip.textContent = `${cat.emoji} ${cat.name}`;
+      chip.onclick = () => selectCategory(cat.id, `${cat.emoji} ${cat.name}`);
+      chips.appendChild(chip);
+    });
+    section.appendChild(chips);
+    container.appendChild(section);
+  }
+}
+
+function selectCategory(id, label) {
+  selectedCategoryId = id;
+  document.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('active'));
+  const chip = document.getElementById(`cat-${id}`);
+  if (chip) chip.classList.add('active');
+  document.getElementById('cat-selected-label').textContent = label;
+  // 제품 그리드 초기화
+  document.getElementById('product-grid').innerHTML = '';
+  document.getElementById('selected-product').style.display = 'none';
+  document.getElementById('trending-source').textContent = '';
+}
+
 async function loadTrending() {
+  if (!selectedCategoryId) { showToast('카테고리를 먼저 선택해주세요.', 'error'); return; }
   setSpinner('trending-spinner', true);
   const grid = document.getElementById('product-grid');
   grid.innerHTML = '<div class="text-muted">불러오는 중...</div>';
 
   try {
-    const res = await fetch('/api/trending');
+    const res = await fetch(`/api/trending?category=${selectedCategoryId}`);
     const data = await res.json();
 
     document.getElementById('trending-source').textContent =
@@ -1007,7 +1085,7 @@ function resetPipeline() {
 
 // 초기 로드 시 제품 자동 로드
 window.addEventListener('DOMContentLoaded', () => {
-  loadTrending();
+  initCategories();
 });
 </script>
 </body>
