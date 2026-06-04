@@ -5,10 +5,11 @@
  */
 import readline from 'readline';
 import axios from 'axios';
+import fs from 'fs';
 import { mineKeywords } from '../src/agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
-import { monetizeAll } from '../src/agents/monetizer.js';
+import { monetizeAll, reloadCoupangLinks } from '../src/agents/monetizer.js';
 import { publishBlogPosts, editBlogPosts } from '../src/agents/blog_publisher.js';
 import { runBlogAnalytics, identifyUnderperformers } from '../src/agents/blog_analytics.js';
 import { runBlogQA } from '../src/agents/qa_editor.js';
@@ -71,8 +72,10 @@ async function expandKeywordsToAngles(keywords) {
                 `- 각 주제는 단독 포스트로 충분한 분량과 깊이가 가능해야 함\n` +
                 `- title: 검색에 잘 걸리는 구체적인 문장형 제목 (40자 이내)\n` +
                 `- desc: 이 글에서 독자가 얻는 핵심 가치 한 줄 (30자 이내)\n` +
-                `- points: 글에서 다룰 핵심 소제목 2개 (각 15자 이내)\n\n` +
-                `JSON만 반환: {"angles":[{"title":"...","desc":"...","points":["...","..."]}]}`
+                `- points: 글에서 다룰 핵심 소제목 2개 (각 15자 이내)\n` +
+                `- products: 이 글에서 독자에게 추천할 구체적인 소비재 제품 카테고리 1~2개\n` +
+                `  (예: ["선스틱","수분크림"] / 금융·부동산 정보글이면 ["재테크 서적"] / 순수 정보글이면 [])\n\n` +
+                `JSON만 반환: {"angles":[{"title":"...","desc":"...","points":["...","..."],"products":["..."]}]}`
             }],
             temperature: 0.4,
             max_tokens: 400,
@@ -116,14 +119,15 @@ async function expandKeywordsToAngles(keywords) {
     const { parentKeyword, category, score, forced, angles } = r.value;
     for (const a of angles) {
       expanded.push({
-        keyword:      a.title ?? parentKeyword,
+        keyword:       a.title ?? parentKeyword,
         parentKeyword,
         category,
         score,
         forced,
-        blog_draft:   null,
-        angleDesc:    a.desc ?? '',
-        anglePoints:  Array.isArray(a.points) ? a.points : [],
+        blog_draft:    null,
+        angleDesc:     a.desc ?? '',
+        anglePoints:   Array.isArray(a.points) ? a.points : [],
+        angleProducts: Array.isArray(a.products) ? a.products : [],
       });
     }
   });
@@ -147,6 +151,9 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
 
   const catEmoji = { finance: '📈', economy: '💹', realestate: '🏠', health: '💊', beauty: '✨', social: '📰', entertainment: '🎬' };
   const SEP = '─'.repeat(66);
+
+  // 현재 links.json 상태 로드 (선택 화면에서 ✅/❌ 표시용)
+  const currentLinks = loadLinksJson().entries ?? [];
 
   // 부모 키워드 기준 그룹핑 (순서 유지)
   const groups = [];
@@ -183,6 +190,12 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
       }
       if (item.anglePoints?.length) {
         console.log(`           • ${item.anglePoints.join('  •  ')}`);
+      }
+      if (item.angleProducts?.length) {
+        const productStatus = item.angleProducts.map((p) =>
+          hasLinkForProduct(p, currentLinks) ? `${p} ✅` : `${p} ❌`
+        ).join('  ');
+        console.log(`        🛒 추천 제품: ${productStatus}`);
       }
     }
   }
@@ -231,6 +244,163 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
       done(unique.map((i) => flatList[i]), '→ 선택 완료');
     });
   });
+}
+
+// ── 쿠팡 링크 관리 헬퍼 ──────────────────────────────────────────────────
+
+const COUPANG_LINKS_PATH = path.resolve(__dirname, '../data/coupang/links.json');
+
+function loadLinksJson() {
+  try { return JSON.parse(fs.readFileSync(COUPANG_LINKS_PATH, 'utf8')); }
+  catch { return { entries: [] }; }
+}
+
+function hasLinkForProduct(product, entries) {
+  const p = product.replace(/\s/g, '').toLowerCase();
+  return entries.some((e) =>
+    (e.keywords ?? []).some((kw) => {
+      const k = kw.replace(/\s/g, '').toLowerCase();
+      return k.includes(p) || p.includes(k);
+    })
+  );
+}
+
+function parseCoupangHtml(html) {
+  const urlMatch = html.match(/href=["']([^"']*(?:coupang|link\.coupang)[^"']+)["']/i);
+  const imgMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return { url: urlMatch?.[1] ?? null, imageUrl: imgMatch?.[1] ?? null };
+}
+
+function buildCoupangCard(url, imageUrl, name, category) {
+  const THEME = {
+    beauty:     { border: '#fde68a', bg: '#fffbeb', text: '#78350f', tag: '✨ 뷰티 제품 추천' },
+    health:     { border: '#bbf7d0', bg: '#f0fdf4', text: '#14532d', tag: '💊 건강 제품 추천' },
+    finance:    { border: '#bfdbfe', bg: '#eff6ff', text: '#1e3a8a', tag: '📈 재테크 추천' },
+    economy:    { border: '#bfdbfe', bg: '#eff6ff', text: '#1e3a8a', tag: '💹 추천 도서' },
+    realestate: { border: '#bbf7d0', bg: '#f0fdf4', text: '#14532d', tag: '🏠 부동산 추천' },
+  };
+  const c = THEME[category] ?? THEME.economy;
+  return (
+    `<div style="border:1px solid ${c.border};border-radius:12px;padding:14px 16px;margin:20px 0;background:${c.bg};">\n` +
+    `<p style="font-size:12px;font-weight:700;color:${c.text};margin:0 0 10px;">${c.tag}</p>\n` +
+    `<a href="${url}" target="_blank" rel="nofollow sponsored" referrerpolicy="unsafe-url"\n` +
+    `   style="display:flex;align-items:center;gap:14px;text-decoration:none;color:#1e293b;">\n` +
+    (imageUrl ? `<img src="${imageUrl}" alt="${name}" style="width:64px;height:auto;border-radius:8px;flex-shrink:0;object-fit:cover;" referrerpolicy="unsafe-url">\n` : '') +
+    `<div><strong style="font-size:14px;line-height:1.5;display:block;">${name}</strong>\n` +
+    `<span style="font-size:12px;color:#64748b;">쿠팡에서 최저가 확인 →</span></div>\n` +
+    `</a>\n` +
+    `<p style="font-size:10px;color:#94a3b8;margin:8px 0 0;">이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>\n` +
+    `</div>`
+  );
+}
+
+/**
+ * 여러 줄로 붙여넣을 수 있는 입력을 읽는다.
+ * 빈 줄(Enter)이 오거나 timeoutSec 초 경과 시 종료.
+ */
+async function readPastedInput(timeoutSec = 90) {
+  return new Promise((resolve) => {
+    const lines = [];
+    let answered = false;
+
+    const finish = (result) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      process.stdin.removeListener('data', onData);
+      process.stdin.pause();
+      resolve(result.trim());
+    };
+
+    const timer = setTimeout(() => finish(''), timeoutSec * 1000);
+
+    const onData = (chunk) => {
+      const text = chunk.toString();
+      for (const line of text.split('\n')) {
+        if (line.trim() === '' && lines.length > 0) { finish(lines.join('\n')); return; }
+        if (line.trim() === '' && lines.length === 0) { finish(''); return; }
+        lines.push(line.trimEnd());
+      }
+    };
+
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', onData);
+    process.stdin.resume();
+  });
+}
+
+/**
+ * 선택된 글 중 쿠팡 링크가 없는 제품을 목록으로 보여주고,
+ * 사용자가 쿠팡 파트너스 블로그 태그를 붙여넣으면 links.json에 저장한다.
+ * --auto 모드에서는 건너뜀.
+ */
+async function checkAndPromptMissingLinks(selectedItems) {
+  if (autoMode) return;
+
+  const linksData = loadLinksJson();
+  const entries   = linksData.entries ?? [];
+
+  // 선택된 글들의 추천 제품 중 링크 없는 것 수집 (중복 제거)
+  const missing = [];
+  const seen    = new Set();
+  for (const item of selectedItems) {
+    for (const product of item.angleProducts ?? []) {
+      const key = product.replace(/\s/g, '').toLowerCase();
+      if (!seen.has(key) && !hasLinkForProduct(product, entries)) {
+        seen.add(key);
+        missing.push({ product, item });
+      }
+    }
+  }
+
+  if (missing.length === 0) return;
+
+  const SEP = '─'.repeat(66);
+  console.log('\n' + SEP);
+  console.log('🛒 선택한 글에 쿠팡 링크가 없는 추천 제품이 있습니다');
+  console.log(SEP);
+  for (const { product, item } of missing) {
+    console.log(`  ❌ ${product}  ← "${item.keyword}"`);
+  }
+  console.log('\n쿠팡 파트너스 블로그 태그를 붙여넣으면 자동으로 저장됩니다.');
+  console.log('(건너뛰려면 바로 Enter / 태그 붙여넣기 후 빈 줄 입력으로 완료)\n');
+
+  let anyAdded = false;
+
+  for (const { product, item } of missing) {
+    process.stdout.write(`▶ [${product}] 태그 붙여넣기 (Enter = 건너뜀):\n`);
+    const html = await readPastedInput(90);
+
+    if (!html) { console.log('  → 건너뜀\n'); continue; }
+
+    // URL만 붙여넣은 경우도 처리
+    const isUrl = /^https?:\/\//.test(html) && !html.includes('<');
+    const url      = isUrl ? html : parseCoupangHtml(html).url;
+    const imageUrl = isUrl ? null  : parseCoupangHtml(html).imageUrl;
+
+    if (!url) { console.log('  ⚠️  URL을 찾지 못했습니다. 건너뜁니다.\n'); continue; }
+
+    const id      = `${product}_${Date.now()}`.replace(/[\s/\\]/g, '_');
+    const blogHtml = buildCoupangCard(url, imageUrl, product, item.category);
+
+    entries.push({
+      id,
+      name:      product,
+      url,
+      image:     imageUrl ?? '',
+      keywords:  [product, ...(item.anglePoints ?? []).slice(0, 2)],
+      blog_html: blogHtml,
+    });
+
+    console.log(`  ✅ 저장됨: ${product} → ${url.slice(0, 60)}...\n`);
+    anyAdded = true;
+  }
+
+  if (anyAdded) {
+    linksData.entries = entries;
+    await fs.promises.writeFile(COUPANG_LINKS_PATH, JSON.stringify(linksData, null, 2));
+    console.log('💾 links.json 업데이트 완료 — 이번 발행에 바로 적용됩니다.\n');
+  }
 }
 
 async function main() {
@@ -460,6 +630,10 @@ async function main() {
   const userSelectedKws = await askUserKeywordSelection(expandedItems);
   contentData.contents  = userSelectedKws;
   logger.info(`[blog:pipeline] 선택된 글 주제 ${contentData.contents.length}개로 진행`);
+
+  // 선택된 글에 필요한 쿠팡 링크 없으면 입력 요청 → links.json 저장 → 인메모리 캐시 갱신
+  await checkAndPromptMissingLinks(contentData.contents);
+  reloadCoupangLinks();
 
   if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] 선택된 키워드 없음. 종료.');

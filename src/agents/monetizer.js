@@ -232,7 +232,13 @@ function loadManualCoupangLinks() {
   return result;
 }
 
-const MANUAL_COUPANG_ENTRIES = loadManualCoupangLinks();
+let MANUAL_COUPANG_ENTRIES = loadManualCoupangLinks();
+
+/** 파이프라인 중 links.json이 갱신됐을 때 인메모리 캐시를 새로 로드한다. */
+export function reloadCoupangLinks() {
+  MANUAL_COUPANG_ENTRIES = loadManualCoupangLinks();
+  logger.info(`[monetizer] 쿠팡 링크 재로드: ${MANUAL_COUPANG_ENTRIES.length}개`);
+}
 
 /**
  * 키워드와 가장 잘 매칭되는 수동 딥링크를 반환한다.
