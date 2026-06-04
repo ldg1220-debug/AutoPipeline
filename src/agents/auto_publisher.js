@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
@@ -9,10 +11,53 @@ import db from '../db/db.js';
 import { generateYouTubeDescription, generateYouTubeTags, generateYouTubeTitle } from '../utils/youtubeSEO.js';
 import { getManualCoupangLink } from './monetizer.js';
 
+const execFileAsync = promisify(execFile);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ffmpeg-static 바이너리 경로 (lazy import)
+let _ffmpegPath = null;
+async function getFfmpegPath() {
+  if (!_ffmpegPath) {
+    const mod = await import('ffmpeg-static');
+    _ffmpegPath = mod.default ?? mod;
+  }
+  return _ffmpegPath;
+}
+
 /**
+ * ffmpeg -i 로 영상 길이(초)를 읽는다. 파일 없거나 실패 시 null 반환.
+ */
+async function getVideoDurationSec(videoPath) {
+  try {
+    await fs.access(videoPath);
+    const ffmpeg = await getFfmpegPath();
+    // ffmpeg -i 는 stderr에 Duration 출력, stdout은 비어있음
+    const { stderr } = await execFileAsync(ffmpeg, ['-i', videoPath], { timeout: 10000 })
+      .catch((e) => ({ stderr: e.stderr ?? '' }));  // -i 단독 실행은 exit 1이 정상
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+    if (!m) return null;
+    return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ffmpeg으로 영상 특정 시점 프레임을 JPG로 추출한다.
+ */
+async function extractFrameFromVideo(videoPath, outputJpg, seekSec = 0.5) {
+  const ffmpeg = await getFfmpegPath();
+  await execFileAsync(ffmpeg, [
+    '-ss', String(seekSec),
+    '-i', videoPath,
+    '-vframes', '1',
+    '-q:v', '2',
+    '-y', outputJpg,
+  ], { timeout: 15000 });
+}
+
  * 카테고리에 맞는 YouTube 채널 설정을 반환한다.
  * 카테고리별 전용 채널 credentials가 설정된 경우 그것을, 없으면 기본 채널을 사용한다.
  */
@@ -195,13 +240,23 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
     logger.info(`[auto_publisher] Shorts uploaded (public now): https://youtube.com/shorts/${videoId}`);
   }
 
-  // Shorts 썸네일: thumbnails.set API 시도 → 실패 시 영상 인트로 프레임으로 폴백
+  // Shorts 썸네일: 파일 없으면 영상 첫 프레임으로 자동 생성
   const thumbShortsPath = path.resolve(mediaDir, `${safeKeyword}_thumb_shorts.jpg`);
   let thumbnailUploaded = false;
-  const thumbShortsExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
+  let thumbShortsExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
+
   if (!thumbShortsExists) {
-    logger.warn(`[auto_publisher] Shorts 썸네일 파일 없음: ${thumbShortsPath}`);
-  } else {
+    logger.warn(`[auto_publisher] Shorts 썸네일 파일 없음 → 영상 첫 프레임으로 생성 시도: ${thumbShortsPath}`);
+    try {
+      await extractFrameFromVideo(videoPath, thumbShortsPath, 0.5);
+      thumbShortsExists = await fs.access(thumbShortsPath).then(() => true).catch(() => false);
+      if (thumbShortsExists) logger.info(`[auto_publisher] Shorts 썸네일 첫 프레임 생성 완료`);
+    } catch (frameErr) {
+      logger.warn(`[auto_publisher] Shorts 썸네일 첫 프레임 생성 실패: ${frameErr.message}`);
+    }
+  }
+
+  if (thumbShortsExists) {
     // YouTube 처리 대기 후 최대 3회 재시도
     await new Promise((r) => setTimeout(r, 5000));
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -570,16 +625,30 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // 쇼츠 업로드 — PUBLISH_SHORTS=false 시 건너뜀
+    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 2분 미만 시 건너뜀
     if (config.runtime.publishShorts) {
-      await new Promise((r) => setTimeout(r, 8000));
-      try {
-        const longFormUrl = result.youtube?.url ?? null;
-        result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl, scheduleForTomorrow);
-        logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
-      } catch (err) {
-        logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
-        result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
+      // 롱폼 영상 길이 확인 — 2분(120초) 미만이면 영상 자체가 쇼츠급이므로 별도 쇼츠 불필요
+      const safeKw      = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+      const mediaDir_   = path.resolve(__dirname, '../../output/media');
+      const longVidPath = path.resolve(mediaDir_, `${safeKw}_long.mp4`);
+      const legacyPath_ = path.resolve(mediaDir_, `${safeKw}.mp4`);
+      const longExists_ = await fs.access(longVidPath).then(() => true).catch(() => false);
+      const vidPathForDur = longExists_ ? longVidPath : legacyPath_;
+      const longDurSec  = await getVideoDurationSec(vidPathForDur);
+
+      if (longDurSec !== null && longDurSec < 120) {
+        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 2분 → 별도 쇼츠 업로드 건너뜀: ${content.keyword}`);
+        result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped_short_longform' };
+      } else {
+        await new Promise((r) => setTimeout(r, 8000));
+        try {
+          const longFormUrl = result.youtube?.url ?? null;
+          result.youtube_shorts = await publishShortsToYouTube(content, accessToken, longFormUrl, scheduleForTomorrow);
+          logger.info(`[auto_publisher] Shorts upload: ${result.youtube_shorts.url ?? result.youtube_shorts.status}`);
+        } catch (err) {
+          logger.error(`[auto_publisher] Shorts upload failed: ${content.keyword}`, { message: err.message });
+          result.youtube_shorts = { platform: 'youtube_shorts', status: 'failed', error: err.message };
+        }
       }
     } else {
       logger.info(`[auto_publisher] Shorts 업로드 건너뜀 (PUBLISH_SHORTS=false): ${content.keyword}`);
