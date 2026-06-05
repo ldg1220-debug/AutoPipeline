@@ -448,10 +448,26 @@
       <div id="taobao-login-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:0.78rem">
         <span id="taobao-login-dot" style="width:8px;height:8px;border-radius:50%;background:#4a5568;flex-shrink:0"></span>
         <span id="taobao-login-label" style="color:var(--text-muted)">타오바오 로그인 상태 확인 중...</span>
-        <button id="taobao-login-btn" onclick="startTaobaoLogin()" class="btn btn-secondary btn-sm" style="margin-left:auto;padding:3px 10px;font-size:0.72rem">🔑 로그인</button>
+        <button id="taobao-login-btn" onclick="startTaobaoLogin()" class="btn btn-secondary btn-sm" style="margin-left:auto;padding:3px 10px;font-size:0.72rem">🔑 브라우저 로그인</button>
+        <button onclick="showCookieImport()" class="btn btn-secondary btn-sm" style="padding:3px 10px;font-size:0.72rem">📋 쿠키 입력</button>
         <button id="taobao-logout-btn" onclick="clearTaobaoSession()" class="btn btn-secondary btn-sm" style="display:none;padding:3px 10px;font-size:0.72rem;color:var(--danger)">로그아웃</button>
       </div>
       <div id="taobao-login-progress" style="display:none;font-size:0.78rem;padding:8px 12px;border-radius:8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);margin-bottom:8px"></div>
+
+      <!-- 쿠키 직접 입력 패널 (보안 정책으로 팝업 차단 시) -->
+      <div id="cookie-import-panel" style="display:none;margin-bottom:8px;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1)">
+        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">
+          <strong style="color:var(--text-primary)">쿠키 직접 입력</strong>
+          — 타오바오가 로그인된 Chrome에서 F12 → Application → Cookies → www.taobao.com<br>
+          → 오른쪽 클릭 → Copy all as curl 또는 쿠키 값만 복사해서 붙여넣기
+        </div>
+        <textarea id="cookie-import-input" placeholder="_tb_token_=xxxx; cookie2=yyyy; uc3=id=zzz; ..."
+          style="width:100%;box-sizing:border-box;height:70px;background:#0d0d1a;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text-primary);font-family:monospace;font-size:0.72rem;padding:6px 8px;resize:vertical"></textarea>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button onclick="importCookies()" class="btn btn-primary btn-sm" style="font-size:0.75rem">저장</button>
+          <button onclick="document.getElementById('cookie-import-panel').style.display='none'" class="btn btn-secondary btn-sm" style="font-size:0.75rem">취소</button>
+        </div>
+      </div>
 
       <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px" id="video-source-label">
         한국어 입력 → 중국어 자동 번역 → 타오바오/빌리빌리 검색
@@ -872,14 +888,14 @@ async function startTaobaoLogin() {
       evtSource.close();
       await checkTaobaoLogin();
       loginBtn.disabled    = false;
-      loginBtn.textContent = '🔑 로그인';
+      loginBtn.textContent = '🔑 브라우저 로그인';
     } else if (data.status === 'error') {
       progress.style.background  = 'rgba(239,68,68,0.1)';
       progress.style.borderColor = 'rgba(239,68,68,0.3)';
       progress.style.color       = '#ef4444';
       evtSource.close();
       loginBtn.disabled    = false;
-      loginBtn.textContent = '🔑 로그인';
+      loginBtn.textContent = '🔑 브라우저 로그인';
     }
   };
   evtSource.onerror = () => {
@@ -896,6 +912,34 @@ async function clearTaobaoSession() {
   await fetch('/api/taobao/clear-session', { method: 'POST' });
   document.getElementById('taobao-login-progress').style.display = 'none';
   await checkTaobaoLogin();
+}
+
+function showCookieImport() {
+  const panel = document.getElementById('cookie-import-panel');
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+async function importCookies() {
+  const cookieString = document.getElementById('cookie-import-input').value.trim();
+  if (!cookieString) { showToast('쿠키를 입력해주세요.', 'error'); return; }
+  try {
+    const res  = await fetch('/api/taobao/import-cookies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookieString }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`타오바오 쿠키 ${data.cookieCount}개 저장 완료!`, 'success');
+      document.getElementById('cookie-import-panel').style.display = 'none';
+      document.getElementById('cookie-import-input').value = '';
+      await checkTaobaoLogin();
+    } else {
+      showToast(data.error || '저장 실패', 'error');
+    }
+  } catch (err) {
+    showToast('오류: ' + err.message, 'error');
+  }
 }
 
 checkTaobaoLogin();

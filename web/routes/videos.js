@@ -11,54 +11,74 @@ import { SESSION_FILE } from './taobao.js';
 
 const router = Router();
 
+// 한자 포함 여부 체크
+const hasChinese = (t) => /[一-鿿]/.test(t);
+
 // ─── 한국어 → 중국어 번역 ────────────────────────────────────────────────────
 async function translateToChinese(text) {
-  const prompt = `다음 한국어 제품명을 중국 쇼핑몰(타오바오/빌리빌리) 검색에 최적화된 중국어로 번역해.
+  // 1차: 한국어 프롬프트
+  const prompt1 = `한국어 제품명을 중국 타오바오/빌리빌리 검색에 최적화된 중국어로 번역해.
 규칙:
-1. 브랜드명(영어/외래어)은 그대로 유지 (예: MISSHA, Dr.Jart+, Innisfree)
-2. 한국 고유 브랜드명도 영어 표기가 있으면 영어 사용
-3. 제품 카테고리는 일반적인 중국 쇼핑 검색어로 번역
-4. 정치적/감정적으로 해석될 수 있는 단어는 피해서 번역
-5. 결과만 출력 (설명 없이)
+1. 브랜드명은 영어를 유지하되, 제품 카테고리명은 반드시 중국어로 번역
+2. 예: "닥터지 레드 크림" → "Dr.G 红色面霜", "선스틱" → "防晒棒", "에센스" → "精华液", "무기자차 선스틱" → "无机防晒棒"
+3. 결과는 반드시 중국어(한자) 포함, 결과만 출력
 제품명: ${text}`;
 
-  // 1. Gemini 시도
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-        const res = await axios.post(url, {
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 60, temperature: 0.1 },
-        }, { timeout: 8000 });
-        const t = (res.data.candidates?.[0]?.content?.parts ?? [])
-          .filter(p => p.text && !p.thought).map(p => p.text).join('').trim();
-        if (t) { logger.info(`[videos] 번역(${model}): "${text}" → "${t}"`); return t; }
-      } catch (err) {
-        if (err.response?.status === 429) break; // rate limit → OpenAI로 이동
-        logger.warn(`[videos] Gemini 번역 실패(${model}): ${err.message}`);
+  // 2차: 중국어 프롬프트 (AI가 중국어로 생각하도록 유도)
+  const prompt2 = `请将以下韩国护肤品名称翻译成适合在淘宝/哔哩哔哩搜索的中文。必须包含汉字，仅输出翻译结果。\n产品名: ${text}`;
+
+  async function tryTranslate(prompt) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
+      for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+          const res = await axios.post(url, {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: 60, temperature: 0.1 },
+          }, { timeout: 8000 });
+          const t = (res.data.candidates?.[0]?.content?.parts ?? [])
+            .filter(p => p.text && !p.thought).map(p => p.text).join('').trim();
+          if (t && hasChinese(t)) return t;
+          if (t) logger.warn(`[videos] Gemini 번역에 한자 없음(${model}): "${t}"`);
+        } catch (err) {
+          if (err.response?.status === 429) break;
+          logger.warn(`[videos] Gemini 번역 실패(${model}): ${err.message}`);
+        }
       }
     }
-  }
 
-  // 2. OpenAI 폴백
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    try {
-      const res = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 60, temperature: 0.1,
-      }, { headers: { Authorization: `Bearer ${openaiKey}` }, timeout: 8000 });
-      const t = res.data.choices?.[0]?.message?.content?.trim();
-      if (t) { logger.info(`[videos] 번역(openai): "${text}" → "${t}"`); return t; }
-    } catch (err) {
-      logger.warn(`[videos] OpenAI 번역 실패: ${err.message}`);
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey) {
+      try {
+        const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 60, temperature: 0.1,
+        }, { headers: { Authorization: `Bearer ${openaiKey}` }, timeout: 8000 });
+        const t = res.data.choices?.[0]?.message?.content?.trim();
+        if (t && hasChinese(t)) return t;
+        if (t) logger.warn(`[videos] OpenAI 번역에 한자 없음: "${t}"`);
+      } catch (err) {
+        logger.warn(`[videos] OpenAI 번역 실패: ${err.message}`);
+      }
     }
+    return null;
   }
 
-  logger.warn(`[videos] 번역 실패 — 원본 사용: "${text}"`);
+  let result = await tryTranslate(prompt1);
+  if (!result) {
+    logger.warn(`[videos] 1차 번역 한자 없음 → 중국어 프롬프트로 재시도`);
+    result = await tryTranslate(prompt2);
+  }
+
+  if (result) {
+    logger.info(`[videos] 번역: "${text}" → "${result}"`);
+    return result;
+  }
+
+  // 번역 실패 시 영어 대신 원본 한국어 사용 (영어는 Bilibili에서 더 나쁜 결과)
+  logger.warn(`[videos] 번역 실패 — 원본 한국어로 검색: "${text}"`);
   return text;
 }
 
@@ -446,58 +466,56 @@ router.get('/search', async (req, res) => {
     logger.warn(`[videos] 번역 실패: ${e.message}`);
   }
 
+  // 빌리빌리 검색 시 제품 리뷰 키워드 추가 (한자 포함 시 더 정확한 결과)
+  const bilibiliQuery = hasChinese(chinese) ? `${chinese} 评测` : chinese;
+
   // Bilibili 강제
   if (source === 'bilibili') {
     try {
-      const videos = await searchBilibili(chinese);
+      const videos = await searchBilibili(bilibiliQuery);
       if (videos.length > 0) {
-        return res.json({ videos, source: 'bilibili', query: q, chinese_query: chinese });
+        return res.json({ videos, source: 'bilibili', query: q, chinese_query: bilibiliQuery });
       }
     } catch (err) {
-      logger.warn(`[videos] Bilibili 실패: ${err.message} → Pexels`);
+      logger.warn(`[videos] Bilibili 실패: ${err.message}`);
     }
-    const pexResult = await searchPexels(q);
-    return res.json({ ...pexResult, query: q, fallback_reason: '빌리빌리 접근 불가 (한국 IP 차단) → Pexels로 대체' });
+    return res.json({ videos: [], source: 'bilibili', query: q, error: '빌리빌리에서 관련 영상을 찾을 수 없습니다.' });
   }
 
-  // Taobao 우선 시도
+  // Taobao 우선 시도 (로그인 세션 있을 때만)
   if (!source || source === 'taobao') {
-    let taobaoErr = null;
-    try {
-      const videos = await scrapeTaobao(chinese);
-      if (videos.length > 0) {
-        return res.json({ videos, source: 'taobao', query: q, chinese_query: chinese });
+    const hasSession = await fs.access(SESSION_FILE).then(() => true).catch(() => false);
+    if (hasSession) {
+      try {
+        const videos = await scrapeTaobao(chinese);
+        if (videos.length > 0) {
+          return res.json({ videos, source: 'taobao', query: q, chinese_query: chinese });
+        }
+        logger.warn('[videos] 타오바오 결과 0개 → Bilibili로 이동');
+      } catch (err) {
+        logger.warn(`[videos] 타오바오 실패: ${err.message} → Bilibili로 이동`);
       }
-      taobaoErr = '타오바오 결과 0개';
-    } catch (err) {
-      taobaoErr = err.message;
-      logger.warn(`[videos] 타오바오 실패: ${err.message}`);
+    } else {
+      logger.info('[videos] 타오바오 세션 없음 → Bilibili로 바로 이동');
     }
 
     // Bilibili fallback
     try {
-      const videos = await searchBilibili(chinese);
+      const videos = await searchBilibili(bilibiliQuery);
       if (videos.length > 0) {
         return res.json({
-          videos, source: 'bilibili', query: q, chinese_query: chinese,
-          fallback_reason: `타오바오 접근 불가 → 빌리빌리로 대체 (${taobaoErr})`,
+          videos, source: 'bilibili', query: q, chinese_query: bilibiliQuery,
+          fallback_reason: hasSession ? '타오바오 결과 없음 → 빌리빌리로 대체' : null,
         });
       }
     } catch (err) {
-      logger.warn(`[videos] Bilibili fallback도 실패: ${err.message} → Pexels`);
+      logger.warn(`[videos] Bilibili fallback도 실패: ${err.message}`);
     }
 
-    // 최후 Pexels fallback (API 키 있으면 실제 검색)
-    const pexResult = await searchPexels(q);
-    const reason = taobaoErr?.includes('Playwright')
-      ? 'Playwright 미설치 (npx playwright install chromium) + 빌리빌리 차단 → Pexels로 대체'
-      : '중국 서비스 접근 불가 (한국 IP 차단) → Pexels로 대체';
-    return res.json({ ...pexResult, query: q, fallback_reason: reason });
+    return res.json({ videos: [], source: 'bilibili', query: q, chinese_query: bilibiliQuery, error: '영상을 찾을 수 없습니다. 검색어를 바꿔보세요.' });
   }
 
-  // Bilibili 강제 선택 후 실패 시 Pexels
-  const pexResult = await searchPexels(q);
-  return res.json({ ...pexResult, query: q });
+  return res.json({ videos: [], query: q, error: '지원하지 않는 source입니다.' });
 });
 
 // GET /api/videos/fetch-video?url=URL&bvid=BVID

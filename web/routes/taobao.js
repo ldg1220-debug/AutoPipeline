@@ -165,4 +165,45 @@ router.post('/clear-session', async (req, res) => {
   }
 });
 
+// POST /api/taobao/import-cookies
+// Body: { cookieString: "_tb_token_=xxx; cookie2=yyy; ..." }
+// 브라우저 팝업이 차단되는 환경에서 쿠키를 직접 붙여넣기로 세션 생성
+router.post('/import-cookies', async (req, res) => {
+  try {
+    const { cookieString } = req.body;
+    if (!cookieString?.trim()) return res.status(400).json({ error: 'cookieString이 필요합니다.' });
+
+    const cookies = cookieString.split(';')
+      .map(part => {
+        const eqIdx = part.indexOf('=');
+        if (eqIdx < 0) return null;
+        return {
+          name: part.slice(0, eqIdx).trim(),
+          value: part.slice(eqIdx + 1).trim(),
+          domain: '.taobao.com',
+          path: '/',
+          expires: -1,
+          httpOnly: false,
+          secure: false,
+          sameSite: 'Lax',
+        };
+      })
+      .filter(c => c && c.name && c.value);
+
+    if (cookies.length === 0) return res.status(400).json({ error: '파싱된 쿠키가 없습니다. 형식: name=value; name2=value2' });
+
+    await fs.writeFile(SESSION_FILE, JSON.stringify({
+      cookies,
+      savedAt: Date.now(),
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    }, null, 2));
+
+    logger.info(`[taobao] 쿠키 직접 입력으로 세션 저장: ${cookies.length}개`);
+    res.json({ success: true, message: `${cookies.length}개 쿠키 저장 완료`, cookieCount: cookies.length });
+  } catch (err) {
+    logger.error(`[taobao/import-cookies] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
