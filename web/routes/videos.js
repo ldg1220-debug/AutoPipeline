@@ -248,89 +248,67 @@ async function scrapeTaobao(chineseQuery) {
     const page = await ctx.newPage();
     const results = [];
 
-    const searchUrl = `https://s.taobao.com/search?q=${encodeURIComponent(chineseQuery)}&type=video`;
+    // 일반 검색 URL (video 필터 없이 — 현재 타오바오 구조에서 더 신뢰성 높음)
+    const searchUrl = `https://s.taobao.com/search?q=${encodeURIComponent(chineseQuery)}&imgfile=&js=1&style=grid`;
     logger.info(`[videos/taobao] 검색: ${searchUrl}`);
-    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await page.waitForTimeout(3500);
+    await page.goto(searchUrl, { waitUntil: 'load', timeout: 30000 });
 
-    // 로그인 요구 페이지 감지
+    // 상품 링크가 나타날 때까지 대기 (최대 8초)
+    await page.waitForSelector(
+      'a[href*="item.taobao.com"], a[href*="detail.tmall.com"], a[href*="taobao.com/item"]',
+      { timeout: 8000 }
+    ).catch(() => {});
+
+    const pageTitle = await page.title();
     const currentUrl = page.url();
+    logger.info(`[videos/taobao] 페이지: ${pageTitle} | URL: ${currentUrl.slice(0, 80)}`);
+
     if (currentUrl.includes('login') || currentUrl.includes('passport')) {
       throw new Error('타오바오 로그인 필요 (봇 감지)');
     }
 
+    // 링크 기반 셀렉터 — React 동적 클래스명과 무관하게 상품 링크로 탐색
     const videoItems = await page.evaluate(() => {
-      const SELECTORS = [
-        '.m-itemlist .item', '[data-item-id]', '.tile-item',
-        '.J_MouserOnverReq', 'li[class*="item"]', 'div[class*="item"]', '[class*="Card"]',
-      ];
-      let cards = [];
-      for (const sel of SELECTORS) {
-        const found = Array.from(document.querySelectorAll(sel));
-        if (found.length > 0) { cards = found; break; }
-      }
-      return cards.slice(0, 20).map((card, idx) => {
-        const imgEl = card.querySelector('img[src], img[data-src], img[data-ks-lazyload]');
-        let thumb = imgEl?.src || imgEl?.dataset?.src || imgEl?.dataset?.ksLazyload || '';
+      const seen = new Set();
+      const items = [];
+
+      const links = Array.from(document.querySelectorAll(
+        'a[href*="item.taobao.com"], a[href*="detail.tmall.com"], a[href*="taobao.com/item"]'
+      ));
+
+      for (const link of links) {
+        const href = link.href;
+        if (!href || seen.has(href) || href.includes('javascript') || href.includes('login')) continue;
+        seen.add(href);
+
+        // 가장 가까운 컨테이너에서 이미지 탐색
+        const container = link.closest('li') || link.closest('div[class]') || link.parentElement;
+        const imgEl = container?.querySelector('img') || link.querySelector('img');
+        let thumb = imgEl?.src || imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-ks-lazyload') || '';
         if (thumb.startsWith('//')) thumb = 'https:' + thumb;
-        const titleEl = card.querySelector('[class*="title"], [class*="name"], .title, h3, h4');
-        const title = titleEl?.innerText?.trim()?.slice(0, 60) || `상품 ${idx + 1}`;
-        const linkEl = card.querySelector('a[href*="item.taobao"], a[href*="detail.tmall"], a[href]');
-        let href = linkEl?.href || '';
-        if (href.startsWith('//')) href = 'https:' + href;
-        if (href.startsWith('/')) href = 'https://www.taobao.com' + href;
-        const videoEl = card.querySelector('video source[src], video[src]');
-        let videoUrl = videoEl?.src || null;
-        if (videoUrl?.startsWith('//')) videoUrl = 'https:' + videoUrl;
-        const hasPlay = !!card.querySelector('[class*="play"], [class*="video"], .play-icon, .video-icon');
-        return { id: `tb-${idx + 1}`, thumb, title, href, videoUrl, hasPlay };
-      }).filter(i => i.thumb || i.href);
+        if (thumb.startsWith('data:')) thumb = '';
+
+        const titleEl = container?.querySelector('[class*="title"], [class*="name"], h3, h4')
+          || link.querySelector('[class*="title"]');
+        const title = (titleEl?.innerText || link.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60)
+          || `상품 ${items.length + 1}`;
+
+        const hasPlay = !!(container?.querySelector('[class*="play"], [class*="video"]'));
+
+        items.push({ id: `tb-${items.length}`, thumb, title, href, videoUrl: null, hasPlay });
+        if (items.length >= 20) break;
+      }
+      return items;
     });
 
     logger.info(`[videos/taobao] 검색 결과: ${videoItems.length}개`);
     results.push(...videoItems);
 
-    if (results.length < 8) {
-      logger.info('[videos/taobao] 일반 검색으로 보충');
-      await page.goto(
-        `https://s.taobao.com/search?q=${encodeURIComponent(chineseQuery)}&imgfile=&js=1&style=grid`,
-        { waitUntil: 'domcontentloaded', timeout: 20000 }
-      );
-      await page.waitForTimeout(3000);
-
-      const generalItems = await page.evaluate(() => {
-        const SELECTORS = [
-          '.m-itemlist .item', '[data-item-id]', '.tile-item',
-          'li[class*="item"]', 'div[class*="card"]',
-        ];
-        let cards = [];
-        for (const sel of SELECTORS) {
-          const found = Array.from(document.querySelectorAll(sel));
-          if (found.length > 2) { cards = found; break; }
-        }
-        return cards.slice(0, 24).map((card, idx) => {
-          const imgEl = card.querySelector('img[src], img[data-src], img[data-ks-lazyload]');
-          let thumb = imgEl?.src || imgEl?.dataset?.src || imgEl?.dataset?.ksLazyload || '';
-          if (thumb.startsWith('//')) thumb = 'https:' + thumb;
-          const titleEl = card.querySelector('[class*="title"], [class*="name"], .title, h3');
-          const title = titleEl?.innerText?.trim()?.slice(0, 60) || `상품 ${idx + 1}`;
-          const linkEl = card.querySelector('a[href*="item.taobao"], a[href*="detail.tmall"], a[href]');
-          let href = linkEl?.href || '';
-          if (href.startsWith('//')) href = 'https:' + href;
-          return { id: `tb2-${idx + 1}`, thumb, title, href, videoUrl: null, hasPlay: false };
-        }).filter(i => (i.thumb || i.href) && !i.thumb.includes('data:'));
-      });
-
-      const seen = new Set(results.map(r => r.href));
-      const fresh = generalItems.filter(i => !seen.has(i.href));
-      results.push(...fresh);
-    }
-
     return results.slice(0, 20).map(item => ({
       id: item.id,
       thumbnail: item.thumb
         ? item.thumb.replace(/_\d+x\d+.*\.(jpg|png|webp)/i, '_400x400.$1').replace(/!.*$/, '')
-        : `https://via.placeholder.com/400x400/1a1a35/00d4ff?text=${encodeURIComponent(item.title.slice(0, 8))}`,
+        : null,
       title: item.title,
       page_url: item.href,
       video_url: item.videoUrl,
