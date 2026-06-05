@@ -46,6 +46,10 @@ router.get('/login', async (req, res) => {
     if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`);
   };
 
+  // 클라이언트가 SSE 연결을 끊어도 브라우저 프로세스는 계속 실행
+  req.socket.setKeepAlive(true);
+  req.socket.setTimeout(0);
+
   let browser = null;
   try {
     send({ status: 'starting', message: '브라우저 실행 중...' });
@@ -59,10 +63,18 @@ router.get('/login', async (req, res) => {
     }
 
     // 사용자가 볼 수 있도록 headless: false
-    browser = await chromium.launch({
+    // Windows에서 Playwright Chromium이 즉시 닫히는 문제 방지 → 시스템 Chrome 우선
+    const launchOpts = {
       headless: false,
-      args: ['--window-size=1280,800', '--disable-blink-features=AutomationControlled'],
-    });
+      args: ['--window-size=1280,800', '--disable-blink-features=AutomationControlled', '--no-sandbox'],
+    };
+    try {
+      browser = await chromium.launch({ ...launchOpts, channel: 'chrome' });
+      send({ status: 'navigating', message: '시스템 Chrome으로 브라우저 실행...' });
+    } catch {
+      browser = await chromium.launch(launchOpts);
+      send({ status: 'navigating', message: 'Playwright Chromium으로 브라우저 실행...' });
+    }
 
     const ctx = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
