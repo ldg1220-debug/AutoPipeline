@@ -62,9 +62,43 @@ async function translateToChinese(text) {
   return text;
 }
 
+// ─── 한국어 → 영어 번역 (Pexels용) ──────────────────────────────────────────
+async function translateToEnglish(text) {
+  const prompt = `Translate this Korean product name to English keywords optimized for stock video search. Output only the English keywords, no explanation.\nProduct: ${text}`;
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const res = await axios.post(url, {
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 30, temperature: 0.1 },
+        }, { timeout: 6000 });
+        const t = (res.data.candidates?.[0]?.content?.parts ?? [])
+          .filter(p => p.text && !p.thought).map(p => p.text).join('').trim();
+        if (t) { logger.info(`[videos] EN번역: "${text}" → "${t}"`); return t; }
+      } catch (err) {
+        if (err.response?.status === 429) break;
+      }
+    }
+  }
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 30, temperature: 0.1,
+      }, { headers: { Authorization: `Bearer ${openaiKey}` }, timeout: 6000 });
+      const t = res.data.choices?.[0]?.message?.content?.trim();
+      if (t) { logger.info(`[videos] EN번역(openai): "${text}" → "${t}"`); return t; }
+    } catch {}
+  }
+  return text; // 번역 실패 시 원본 그대로
+}
+
 // ─── Bilibili 검색 (공개 API, 로그인 불필요) ────────────────────────────────
 async function searchBilibili(keyword) {
-  // Bilibili 검색 API (웹 공개 엔드포인트)
   const url = 'https://api.bilibili.com/x/web-interface/search/type';
   const params = {
     search_type: 'video',
@@ -74,11 +108,17 @@ async function searchBilibili(keyword) {
     order: 'totalrank',
   };
 
+  // buvid3 쿠키 추가 — 없으면 412 반환
+  const { randomUUID } = await import('crypto');
+  const buvid3 = `${randomUUID()}-${Date.now()}infoc`;
+
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Referer': 'https://www.bilibili.com/',
     'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'zh-CN,zh;q=0.9,ko;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+    'Cookie': `buvid3=${buvid3}; buvid4=${randomUUID()}`,
+    'Origin': 'https://www.bilibili.com',
   };
 
   const res = await axios.get(url, { params, headers, timeout: 12000 });
@@ -362,9 +402,12 @@ async function searchPexels(q) {
   const key = process.env.PEXELS_API_KEY;
   if (!key) return { videos: PEXELS_MOCK, source: 'mock' };
   try {
+    // Pexels는 영어 검색에 최적화 — 한국어 제품명을 영어로 번역
+    const engQ = await translateToEnglish(q);
+    logger.info(`[videos/pexels] 검색: "${q}" → "${engQ}"`);
     const r = await axios.get('https://api.pexels.com/videos/search', {
       headers: { Authorization: key },
-      params: { query: q, per_page: 9, orientation: 'portrait' },
+      params: { query: engQ, per_page: 9, orientation: 'portrait' },
       timeout: 10000,
     });
     const videos = r.data.videos.map((v, i) => ({
