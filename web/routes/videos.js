@@ -11,29 +11,45 @@ const router = Router();
 
 // ─── 한국어 → 중국어 번역 ────────────────────────────────────────────────────
 async function translateToChinese(text) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    logger.warn('[videos] GEMINI_API_KEY 없음 — 번역 생략');
-    return text;
-  }
-  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-  for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const body = {
-        contents: [{ role: 'user', parts: [{ text:
-          `중국 타오바오/빌리빌리 쇼핑 검색에 최적화된 중국어로만 번역해. 결과만 출력 (설명 없이).\n${text}`
-        }] }],
-        generationConfig: { maxOutputTokens: 60, temperature: 0.1 },
-      };
-      const res = await axios.post(url, body, { timeout: 8000 });
-      const t = (res.data.candidates?.[0]?.content?.parts ?? [])
-        .filter(p => p.text && !p.thought).map(p => p.text).join('').trim();
-      if (t) { logger.info(`[videos] 번역(${model}): "${text}" → "${t}"`); return t; }
-    } catch (err) {
-      logger.warn(`[videos] 번역 실패 (${model}): ${err.message}`);
+  const prompt = `중국 타오바오/빌리빌리 쇼핑 검색에 최적화된 중국어로만 번역해. 결과만 출력 (설명 없이).\n${text}`;
+
+  // 1. Gemini 시도
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const res = await axios.post(url, {
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 60, temperature: 0.1 },
+        }, { timeout: 8000 });
+        const t = (res.data.candidates?.[0]?.content?.parts ?? [])
+          .filter(p => p.text && !p.thought).map(p => p.text).join('').trim();
+        if (t) { logger.info(`[videos] 번역(${model}): "${text}" → "${t}"`); return t; }
+      } catch (err) {
+        if (err.response?.status === 429) break; // rate limit → OpenAI로 이동
+        logger.warn(`[videos] Gemini 번역 실패(${model}): ${err.message}`);
+      }
     }
   }
+
+  // 2. OpenAI 폴백
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 60, temperature: 0.1,
+      }, { headers: { Authorization: `Bearer ${openaiKey}` }, timeout: 8000 });
+      const t = res.data.choices?.[0]?.message?.content?.trim();
+      if (t) { logger.info(`[videos] 번역(openai): "${text}" → "${t}"`); return t; }
+    } catch (err) {
+      logger.warn(`[videos] OpenAI 번역 실패: ${err.message}`);
+    }
+  }
+
+  logger.warn(`[videos] 번역 실패 — 원본 사용: "${text}"`);
   return text;
 }
 
@@ -81,9 +97,13 @@ async function searchBilibili(keyword) {
     const bvid = item.bvid || '';
     const pageUrl = bvid ? `https://www.bilibili.com/video/${bvid}` : '';
 
+    // Bilibili CDN 이미지는 Referer 없으면 차단 → 서버 프록시로 우회
+    const proxyThumb = thumb
+      ? `/api/proxy-image?url=${encodeURIComponent(thumb)}`
+      : null;
     return {
       id: `bl-${bvid || idx}`,
-      thumbnail: thumb || `https://via.placeholder.com/320x180/1a1a35/00d4ff?text=${encodeURIComponent(title.slice(0, 6))}`,
+      thumbnail: proxyThumb,
       title,
       page_url: pageUrl,
       video_url: null,

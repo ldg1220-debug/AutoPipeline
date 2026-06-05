@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import multer from 'multer';
+import axios from 'axios';
 
 import trendingRouter from './routes/trending.js';
 import videosRouter from './routes/videos.js';
@@ -110,6 +111,47 @@ export function updateJob(jobId, updates) {
     jobStore.set(jobId, job);
   }
 }
+
+/**
+ * 이미지 프록시 — Bilibili/외부 이미지 핫링크 차단 우회
+ * GET /api/proxy-image?url=https://...
+ */
+const ALLOWED_IMAGE_HOSTS = [
+  'i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com',  // Bilibili CDN
+  'images.pexels.com',
+  'img.alicdn.com', 'gw.alicdn.com',                 // Taobao
+  'via.placeholder.com',
+];
+app.get('/api/proxy-image', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send('url 파라미터 필요');
+  try {
+    const parsed = new URL(url);
+    const allowed = ALLOWED_IMAGE_HOSTS.some(h => parsed.hostname.endsWith(h));
+    if (!allowed) return res.status(403).send('허용되지 않은 이미지 호스트');
+
+    const referer = parsed.hostname.includes('hdslb') ? 'https://www.bilibili.com/' : undefined;
+    const imgRes = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 8000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...(referer && { Referer: referer }),
+      },
+    });
+    const ct = imgRes.headers['content-type'] || 'image/jpeg';
+    res.set('Content-Type', ct);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(imgRes.data));
+  } catch {
+    // 실패 시 SVG placeholder 반환
+    res.set('Content-Type', 'image/svg+xml');
+    res.send(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180">
+      <rect width="320" height="180" fill="#1a1a35"/>
+      <text x="160" y="98" font-family="sans-serif" font-size="14" fill="#4a5568" text-anchor="middle">이미지 없음</text>
+    </svg>`);
+  }
+});
 
 // SPA fallback — 모든 미매칭 GET 요청은 index.html 반환
 app.get('*', (req, res) => {

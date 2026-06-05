@@ -141,6 +141,26 @@ const MOCK_BY_CATEGORY = {
 // 기본 mock (카테고리 없을 때)
 const MOCK_DEFAULT = MOCK_BY_CATEGORY['393760'];
 
+// via.placeholder.com → 서버 내부 SVG 데이터 URI로 변환
+function fixMockImage(url) {
+  if (!url || !url.includes('via.placeholder.com')) return url;
+  // URL 패턴: /200x200/BG/FG?text=LABEL
+  const m = url.match(/\/(\w+)\/(\w+)\?text=(.+)$/);
+  const fg  = m ? m[2] : 'cccccc';
+  const label = m ? decodeURIComponent(m[3]).slice(0, 5) : '상품';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+    <rect width="200" height="200" fill="#1a1a2e"/>
+    <rect x="60" y="60" width="80" height="80" rx="12" fill="#${fg}" fill-opacity="0.25"/>
+    <text x="100" y="107" font-size="22" font-weight="bold" fill="#${fg}"
+          text-anchor="middle" font-family="sans-serif,Arial">${label}</text>
+  </svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+}
+
+function withFixedImages(products) {
+  return products.map(p => ({ ...p, image: fixMockImage(p.image) }));
+}
+
 /**
  * Playwright로 쿠팡 카테고리 인기상품 스크래핑
  */
@@ -210,7 +230,7 @@ router.get('/', async (req, res) => {
     const products = await scrapeCoupangCategory(categoryId);
 
     if (products.length === 0) {
-      const mock = MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT;
+      const mock = withFixedImages(MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT);
       logger.warn(`[trending] 스크래핑 결과 없음 → mock (${catName})`);
       return res.json({ products: mock, source: 'mock', category: catName });
     }
@@ -218,7 +238,7 @@ router.get('/', async (req, res) => {
     logger.info(`[trending] 완료: ${products.length}개 (${catName})`);
     res.json({ products, source: 'coupang', category: catName });
   } catch (err) {
-    const mock = MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT;
+    const mock = withFixedImages(MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT);
     logger.warn(`[trending] 실패 → mock (${catName}): ${err.message}`);
     res.json({ products: mock, source: 'mock', category: catName });
   }
