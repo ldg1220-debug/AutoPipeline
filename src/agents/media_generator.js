@@ -890,22 +890,21 @@ async function generateThumbnailTitle(keyword, hook) {
 // ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
 /**
  * YouTube Shorts 세로 포맷 썸네일.
- * - 상단: 채널명
- * - 중앙 하단: hook 문장 (내용 노출용)
- * - 하단: 키워드 강조 2줄 + 구독 CTA
+ * renderFirstFramePngBuffer와 동일한 스타일:
+ * - 배경: 캐릭터/씬 이미지 (없으면 단색)
+ * - 상단 그라데이션 오버레이
+ * - "▶ 오늘의 핵심" 노란 배지
+ * - 키워드를 노란 큰 텍스트로 중앙 배치
+ * - 시리즈명 하단
  */
 async function generateShortsThumbnail(content, charImageUrl, outputPath) {
   const W = 1080, H = 1920;
-  const hook     = content.shortform_script?.hook ?? '';
-  const keyword  = content.keyword ?? '';
-  const { line1, line2 } = await generateThumbnailTitle(keyword, hook);
+  const keyword    = content.keyword ?? '';
+  const seriesName = content.series_name ?? '매일읽어주는남자';
   const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
 
-  // hook 문장을 16자씩 줄바꿈 (폰트 크게 → 줄당 글자 수 줄임)
-  const hookLines = wrapTextKorean(hook.slice(0, 40), 16).slice(0, 2);
-
-  // 배경 이미지 처리 (없으면 어두운 그라데이션 배경 폴백)
+  // 배경 이미지 처리 (없으면 어두운 단색 폴백)
   let charBuf;
   if (charImageUrl) {
     const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
@@ -922,57 +921,52 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
     logger.info(`[media_generator] Shorts thumbnail: 이미지 없음 → 단색 배경 사용`);
   }
 
-  const hookFontSize = 72;  // 하단 타이틀(76~88)과 같은 크기감으로 통일
-  const hookLineH    = Math.ceil(hookFontSize * 1.45);
-  const hookBlockH   = hookLines.length * hookLineH + 48;
-  const hookBlockY   = Math.round(H * 0.55);
+  // 키워드 줄바꿈 (12자/줄, 최대 3줄)
+  const lines     = wrapTextKorean(keyword, 12).slice(0, 3);
+  const titleSize = 96;
+  const lineH     = Math.ceil(titleSize * 1.3);
+  const blockH    = lines.length * lineH + 60;
+  const blockY    = Math.round(H * 0.36);
 
-  const hookElems = hookLines.map((line, i) =>
-    `<text x="${W / 2}" y="${hookBlockY + 36 + (i + 0.85) * hookLineH}"
-      font-family="${FONT}" font-size="${hookFontSize}" font-weight="bold" fill="#FFFFFF"
-      text-anchor="middle">${esc(line)}</text>`
+  const shadowElems = lines.map((line, i) =>
+    `<text x="${W / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}"
+      font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
+      fill="#000000" fill-opacity="0.55" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+  const titleElems = lines.map((line, i) =>
+    `<text x="${W / 2}" y="${blockY + 48 + (i + 0.85) * lineH}"
+      font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
+      fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
   ).join('\n');
 
   const overlay = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
       <defs>
-        <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stop-color="#000000" stop-opacity="0.75"/>
-          <stop offset="25%"  stop-color="#000000" stop-opacity="0.0"/>
-        </linearGradient>
-        <linearGradient id="bot" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stop-color="#000000" stop-opacity="0.0"/>
-          <stop offset="45%"  stop-color="#000000" stop-opacity="0.80"/>
-          <stop offset="100%" stop-color="#000000" stop-opacity="0.95"/>
+        <linearGradient id="grad" x1="0" y1="0.25" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#000000" stop-opacity="0"/>
+          <stop offset="42%"  stop-color="#000000" stop-opacity="0.68"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.88"/>
         </linearGradient>
       </defs>
-      <rect width="${W}" height="${H}" fill="url(#top)"/>
-      <rect y="${Math.round(H * 0.50)}" width="${W}" height="${Math.round(H * 0.50)}" fill="url(#bot)"/>
-
-      <!-- 채널명 상단 -->
-      <text x="${W / 2}" y="110"
-        font-family="${FONT}" font-size="52" font-weight="bold" fill="white"
-        text-anchor="middle">📺 매일읽어주는남자</text>
-
-      <!-- hook 문장 (내용 노출) — 중앙 하단 박스 -->
-      <rect x="60" y="${hookBlockY}" width="${W - 120}" height="${hookBlockH}" rx="16"
-        fill="#000000" fill-opacity="0.60"/>
-      <rect x="60" y="${hookBlockY}" width="8" height="${hookBlockH}" rx="4" fill="#FCD34D"/>
-      ${hookElems}
-
-      <!-- 키워드 강조 2줄 -->
-      <text x="${W / 2}" y="${H - 280}"
-        font-family="${FONT}" font-size="88" font-weight="bold" fill="#FCD34D"
-        text-anchor="middle">${esc(line1)}</text>
-      ${line2 ? `<text x="${W / 2}" y="${H - 175}"
-        font-family="${FONT}" font-size="76" font-weight="bold" fill="white"
-        text-anchor="middle">${esc(line2)}</text>` : ''}
-
-      <!-- 구독 CTA -->
-      <rect x="${W / 2 - 200}" y="${H - 110}" width="400" height="72" rx="36" fill="#FF0000"/>
-      <text x="${W / 2}" y="${H - 62}"
-        font-family="${FONT}" font-size="40" font-weight="bold" fill="white"
-        text-anchor="middle">구독 &amp; 좋아요 👍</text>
+      <!-- 하단 그라데이션 -->
+      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#grad)"/>
+      <!-- 키워드 배경 박스 -->
+      <rect x="60" y="${blockY}" width="${W - 120}" height="${blockH}" rx="20"
+        fill="#000000" fill-opacity="0.52"/>
+      <!-- 좌측 노란 강조 바 -->
+      <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
+      <!-- ▶ 오늘의 핵심 배지 -->
+      <rect x="${W / 2 - 140}" y="${blockY - 62}" width="280" height="50" rx="25" fill="#FACC15"/>
+      <text x="${W / 2}" y="${blockY - 24}"
+        font-family="${FONT}" font-size="28" font-weight="bold"
+        fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>
+      <!-- 키워드 그림자 + 텍스트 -->
+      ${shadowElems}
+      ${titleElems}
+      <!-- 시리즈명 하단 -->
+      <text x="${W / 2}" y="${blockY + blockH + 58}"
+        font-family="${FONT}" font-size="36"
+        fill="#94a3b8" text-anchor="middle">${esc(seriesName)}</text>
     </svg>`
   );
 
@@ -997,66 +991,79 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
  * 텍스트는 SVG composite로 합성 → librsvg가 처리 (Sharp 번들 포함)
  */
 async function generateThumbnail(content, charImageUrl, outputPath) {
-  const hook = content.shortform_script?.hook ?? content.keyword;
-  const { line1, line2 } = await generateThumbnailTitle(content.keyword, hook);
+  const hook       = content.shortform_script?.hook ?? content.keyword;
+  const keyword    = content.keyword ?? '';
+  const seriesName = content.series_name ?? '매일읽어주는남자';
+  const { line1, line2 } = await generateThumbnailTitle(keyword, hook);
   logger.info(`[media_generator] Thumbnail title: "${line1} / ${line2}"`);
 
-  const W = 1280, H = 720, LEFT = 660, RIGHT = 620;
-
-  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
+  const W = 1280, H = 720;
+  const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
 
-  // 텍스트 너비에 맞게 폰트 크기 자동 산출 (한글 1.0, 영숫자 0.6 비례)
-  const charWidth = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
-  const maxTextW  = LEFT - 88; // 44px 좌우 여백
-  const maxChars  = Math.max(charWidth(line1), charWidth(line2 ?? ''));
-  const fontSize  = Math.min(88, Math.floor(maxTextW / Math.max(maxChars, 1)));
-  const lineGap   = Math.round(fontSize * 1.25);
-
-  // SVG: 좌측 텍스트 레이어
-  const textSvg = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${LEFT}" height="${H}">
-      <rect width="${LEFT}" height="${H}" fill="#0a1228"/>
-      <text x="44" y="${H / 2 - lineGap * 0.2}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF">${esc(line1)}</text>
-      ${line2 ? `<text x="44" y="${H / 2 - lineGap * 0.2 + lineGap}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#93c5fd">${esc(line2)}</text>` : ''}
-      <text x="44" y="${H - 88}" font-family="${FONT}" font-size="32" fill="#94a3b8">📺 매일읽어주는남자</text>
-      <rect x="44" y="${H - 54}" width="120" height="5" rx="3" fill="#3b82f6"/>
-    </svg>`
-  );
-
-  // 캐릭터 이미지 다운로드 & 우측 크롭 (없으면 단색 배경 폴백)
-  let charBuf;
+  // 배경: 캐릭터 이미지 전체 (없으면 단색)
+  let baseBuf;
   if (charImageUrl) {
     const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
       ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
       : await fs.readFile(charImageUrl);
-    charBuf = await sharp(charRaw)
-      .resize(RIGHT, H, { fit: 'cover', position: 'centre' })
+    baseBuf = await sharp(charRaw)
+      .resize(W, H, { fit: 'cover', position: 'centre' })
       .png()
       .toBuffer();
   } else {
-    charBuf = await sharp({
-      create: { width: RIGHT, height: H, channels: 4, background: { r: 15, g: 25, b: 55, alpha: 1 } },
+    baseBuf = await sharp({
+      create: { width: W, height: H, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
     }).png().toBuffer();
     logger.info(`[media_generator] Thumbnail: 이미지 없음 → 단색 배경 사용`);
   }
 
-  // 하단 액센트 바
-  const accentBar = await sharp({
-    create: { width: W, height: 8, channels: 4, background: { r: 59, g: 130, b: 246, alpha: 1 } },
-  }).png().toBuffer();
+  // 폰트 크기 자동 산출
+  const charWidth = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
+  const LEFT_W    = 580;
+  const maxChars  = Math.max(charWidth(line1), charWidth(line2 ?? ''));
+  const fontSize  = Math.min(96, Math.floor((LEFT_W - 80) / Math.max(maxChars, 1)));
+  const lineGap   = Math.round(fontSize * 1.3);
+  const midY      = Math.round(H * 0.46);
+
+  // 좌측 반투명 다크 오버레이 + 노란 텍스트
+  const overlaySvg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <defs>
+        <linearGradient id="lgrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stop-color="#000000" stop-opacity="0.85"/>
+          <stop offset="55%"  stop-color="#000000" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.0"/>
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#lgrad)"/>
+      <!-- 좌측 노란 강조 바 -->
+      <rect x="44" y="${midY - lineGap * 0.8}" width="8" height="${lineGap * (line2 ? 2.2 : 1.4)}" rx="4" fill="#FACC15"/>
+      <!-- 제목 그림자 + 텍스트 -->
+      <text x="${44 + 22}" y="${midY + 5}"
+        font-family="${FONT}" font-size="${fontSize}" font-weight="bold"
+        fill="#000000" fill-opacity="0.5">${esc(line1)}</text>
+      <text x="${44 + 20}" y="${midY}"
+        font-family="${FONT}" font-size="${fontSize}" font-weight="bold"
+        fill="#FACC15">${esc(line1)}</text>
+      ${line2 ? `
+      <text x="${44 + 22}" y="${midY + lineGap + 5}"
+        font-family="${FONT}" font-size="${Math.round(fontSize * 0.9)}" font-weight="bold"
+        fill="#000000" fill-opacity="0.5">${esc(line2)}</text>
+      <text x="${44 + 20}" y="${midY + lineGap}"
+        font-family="${FONT}" font-size="${Math.round(fontSize * 0.9)}" font-weight="bold"
+        fill="#FFFFFF">${esc(line2)}</text>` : ''}
+      <!-- 채널명 + 하단 배지 -->
+      <rect x="44" y="${H - 78}" width="300" height="44" rx="22" fill="#FACC15"/>
+      <text x="194" y="${H - 47}"
+        font-family="${FONT}" font-size="24" font-weight="bold"
+        fill="#0a1228" text-anchor="middle">📺 ${esc(seriesName)}</text>
+    </svg>`
+  );
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-
-  await sharp({
-    create: { width: W, height: H, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
-  })
-    .composite([
-      { input: textSvg,   left: 0,    top: 0 },
-      { input: charBuf,   left: LEFT, top: 0 },
-      { input: accentBar, left: 0,    top: H - 8 },
-    ])
+  await sharp(baseBuf)
+    .composite([{ input: overlaySvg }])
     .jpeg({ quality: 95 })
     .toFile(outputPath);
 

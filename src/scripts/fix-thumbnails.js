@@ -72,62 +72,8 @@ async function loadContentMap(date) {
 }
 
 // ── 썸네일 생성 (media_generator 내부 함수 직접 호출) ────────────────────────
-async function generateThumbs(keyword, content) {
-  // media_generator의 generateThumbnail/generateShortsThumbnail을 직접 import
-  const { generateLongFormMedia } = await import('../agents/media_generator.js');
-
-  // media_generator 내부 함수는 export되지 않으므로 generateMedia를 통해
-  // 썸네일만 생성하는 미니 콘텐츠 객체를 넘김
-  const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-  const mediaDir = path.resolve(__dirname, '../../output/media');
-  await fs.mkdir(mediaDir, { recursive: true });
-
-  const thumbPath       = path.resolve(mediaDir, `${safeKw}_thumb.jpg`);
-  const thumbShortsPath = path.resolve(mediaDir, `${safeKw}_thumb_shorts.jpg`);
-
-  // 이미 파일이 있으면 재사용
-  const [longExists, shortsExists] = await Promise.all([
-    fs.access(thumbPath).then(() => true).catch(() => false),
-    fs.access(thumbShortsPath).then(() => true).catch(() => false),
-  ]);
-
-  if (longExists && shortsExists) {
-    logger.info(`[fix-thumbnails] 기존 썸네일 파일 재사용: ${safeKw}`);
-    return { thumbPath, thumbShortsPath };
-  }
-
-  // 없으면 media_generator의 내부 함수를 직접 사용해야 하므로
-  // 동적으로 모듈 내부 함수를 호출하는 대신 generateLongFormMedia를 트리거하여
-  // 썸네일 보완 단계(5.5)를 실행
-  // → 단, sections가 없으면 바로 return하므로 dummy section 필요
-  const dummyContent = {
-    keyword,
-    category: content?.category ?? 'economy',
-    series_name: content?.series_name ?? '매일읽어주는남자',
-    shortform_script: content?.shortform_script ?? {
-      hook: `${keyword}, 지금 바로 확인!`,
-      context: '',
-      insight: '',
-      summary: '',
-      cta: '구독 부탁드립니다.',
-    },
-    long_video: {
-      youtube_title: keyword,
-      sections: [{ name: keyword, key_point: keyword, script: keyword, duration_seconds: 10 }],
-    },
-  };
-
-  // generateLongFormMedia는 TTS + 이미지 + 영상까지 다 만들어서 느림.
-  // 썸네일만 빠르게 만들기 위해 media_generator 내부 generateThumbnail을
-  // 직접 호출할 수 있도록 별도 방식 사용
-  await generateThumbsDirectly(keyword, content, thumbPath, thumbShortsPath);
-
-  return { thumbPath, thumbShortsPath };
-}
-
-// ── 썸네일만 직접 생성 (Sharp + GPT 제목 생성) ───────────────────────────────
+// ── 썸네일만 직접 생성 (항상 강제 재생성) ────────────────────────────────────
 async function generateThumbsDirectly(keyword, content, thumbPath, thumbShortsPath) {
-  // media_generator를 통하지 않고 Sharp로 직접 생성
   const { default: axios } = await import('axios');
   const { createRequire }  = await import('module');
   const require = createRequire(import.meta.url);
@@ -136,153 +82,138 @@ async function generateThumbsDirectly(keyword, content, thumbPath, thumbShortsPa
   const W_LONG = 1280, H_LONG = 720;
   const W_SH = 1080, H_SH = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const seriesName = content?.series_name ?? '매일읽어주는남자';
 
-  const hook = content?.shortform_script?.hook ?? keyword;
-
-  // GPT-4o-mini로 썸네일 제목 생성
-  let line1 = keyword.slice(0, 7);
-  let line2 = '지금 확인!';
-  if (config.openai?.apiKey) {
-    try {
-      const res = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content:
-            `YouTube 썸네일용 강렬한 한국어 제목을 만들어줘.\n키워드: ${keyword}\n훅: ${(hook ?? '').slice(0, 80)}\n\n` +
-            `조건: 2줄, 한 줄 최대 7자(공백 포함), 숫자/감탄/질문 활용, 클릭 욕구 자극\n7자 초과 금지\n` +
-            `JSON만 반환: {"line1":"...","line2":"..."}`
-          }],
-          response_format: { type: 'json_object' },
-          temperature: 0.95,
-        },
-        { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 15000 }
-      );
-      const r = JSON.parse(res.data.choices[0].message.content);
-      line1 = [...(r.line1 ?? '')].slice(0, 7).join('');
-      line2 = [...(r.line2 ?? '')].slice(0, 7).join('');
-    } catch (err) {
-      logger.warn(`[fix-thumbnails] GPT 제목 생성 실패: ${err.message}`);
-    }
-  }
-  logger.info(`[fix-thumbnails] 썸네일 제목: "${line1}" / "${line2}"`);
-
-  // 씬 이미지 탐색 (이미 생성된 scene0.png 재사용)
-  const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  // 씬/캐릭터 이미지 탐색
+  const safeKw   = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const mediaDir = path.resolve(__dirname, '../../output/media');
   let sceneImgPath = null;
-  for (const candidate of [`${safeKw}_scene0.png`, `${safeKw}_long_img0.png`]) {
-    const p = path.resolve(mediaDir, candidate);
-    if (await fs.access(p).then(() => true).catch(() => false)) {
-      sceneImgPath = p;
-      break;
-    }
+  for (const c of [`${safeKw}_scene0.png`, `${safeKw}_long_img0.png`, `${safeKw}_scene1.png`, `${safeKw}_long_img1.png`]) {
+    const p = path.resolve(mediaDir, c);
+    if (await fs.access(p).then(() => true).catch(() => false)) { sceneImgPath = p; break; }
   }
+  if (sceneImgPath) logger.info(`[fix-thumbnails] 씬 이미지 발견: ${path.basename(sceneImgPath)}`);
+  else              logger.info(`[fix-thumbnails] 씬 이미지 없음 → 단색 배경 사용`);
 
-  // ── 롱폼 썸네일 (1280×720) ────────────────────────────────────────────────
-  if (!await fs.access(thumbPath).then(() => true).catch(() => false)) {
-    const LEFT = 660, RIGHT = 620;
+  await fs.mkdir(path.dirname(thumbPath), { recursive: true });
+
+  // ── 롱폼 썸네일 (1280×720) — 캐릭터 전체 배경 + 좌측 노란 오버레이 ──────
+  {
+    // GPT 제목 생성
+    const hook = content?.shortform_script?.hook ?? keyword;
+    let line1 = keyword.slice(0, 7), line2 = '지금 확인!';
+    if (config.openai?.apiKey) {
+      try {
+        const res = await axios.post(
+          'https://api.openai.com/v1/chat/completions',
+          { model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content:
+              `YouTube 썸네일용 강렬한 한국어 제목.\n키워드: ${keyword}\n훅: ${(hook ?? '').slice(0, 80)}\n` +
+              `조건: 2줄, 한 줄 최대 7자, 숫자/감탄/질문 활용\n7자 초과 금지\nJSON만: {"line1":"...","line2":"..."}`
+            }],
+            response_format: { type: 'json_object' }, temperature: 0.95 },
+          { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+        );
+        const r = JSON.parse(res.data.choices[0].message.content);
+        line1 = [...(r.line1 ?? '')].slice(0, 7).join('');
+        line2 = [...(r.line2 ?? '')].slice(0, 7).join('');
+      } catch (err) { logger.warn(`[fix-thumbnails] GPT 제목(롱폼) 실패: ${err.message}`); }
+    }
+    logger.info(`[fix-thumbnails] 롱폼 제목: "${line1}" / "${line2}"`);
+
+    // 배경
+    let baseBuf;
+    if (sceneImgPath) {
+      baseBuf = await sharp(await fs.readFile(sceneImgPath))
+        .resize(W_LONG, H_LONG, { fit: 'cover', position: 'centre' }).png().toBuffer();
+    } else {
+      baseBuf = await sharp({ create: { width: W_LONG, height: H_LONG, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } } }).png().toBuffer();
+    }
+
     const charWidth = (str) => [...(str ?? '')].reduce((w, c) => w + (/[가-힣]/.test(c) ? 1.0 : 0.6), 0);
+    const LEFT_W    = 580;
     const maxChars  = Math.max(charWidth(line1), charWidth(line2 ?? ''));
-    const fontSize  = Math.min(88, Math.floor((LEFT - 88) / Math.max(maxChars, 1)));
-    const lineGap   = Math.round(fontSize * 1.25);
+    const fontSize  = Math.min(96, Math.floor((LEFT_W - 80) / Math.max(maxChars, 1)));
+    const lineGap   = Math.round(fontSize * 1.3);
+    const midY      = Math.round(H_LONG * 0.46);
 
-    const textSvg = Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${LEFT}" height="${H_LONG}">
-        <rect width="${LEFT}" height="${H_LONG}" fill="#0a1228"/>
-        <text x="44" y="${H_LONG / 2 - lineGap * 0.2}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF">${esc(line1)}</text>
-        ${line2 ? `<text x="44" y="${H_LONG / 2 - lineGap * 0.2 + lineGap}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#93c5fd">${esc(line2)}</text>` : ''}
-        <text x="44" y="${H_LONG - 88}" font-family="${FONT}" font-size="32" fill="#94a3b8">📺 매일읽어주는남자</text>
-        <rect x="44" y="${H_LONG - 54}" width="120" height="5" rx="3" fill="#3b82f6"/>
+    const overlaySvg = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W_LONG}" height="${H_LONG}">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#000000" stop-opacity="0.85"/>
+            <stop offset="52%"  stop-color="#000000" stop-opacity="0.52"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.0"/>
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="${W_LONG}" height="${H_LONG}" fill="url(#lg)"/>
+        <rect x="44" y="${midY - lineGap * 0.8}" width="8" height="${lineGap * (line2 ? 2.2 : 1.4)}" rx="4" fill="#FACC15"/>
+        <text x="70" y="${midY + 5}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.45">${esc(line1)}</text>
+        <text x="68" y="${midY}"     font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FACC15">${esc(line1)}</text>
+        ${line2 ? `
+        <text x="70" y="${midY + lineGap + 5}" font-family="${FONT}" font-size="${Math.round(fontSize * 0.88)}" font-weight="bold" fill="#000000" fill-opacity="0.45">${esc(line2)}</text>
+        <text x="68" y="${midY + lineGap}"     font-family="${FONT}" font-size="${Math.round(fontSize * 0.88)}" font-weight="bold" fill="#FFFFFF">${esc(line2)}</text>` : ''}
+        <rect x="44" y="${H_LONG - 78}" width="300" height="44" rx="22" fill="#FACC15"/>
+        <text x="194" y="${H_LONG - 47}" font-family="${FONT}" font-size="22" font-weight="bold" fill="#0a1228" text-anchor="middle">📺 ${esc(seriesName)}</text>
       </svg>`
     );
 
-    let charBuf;
-    if (sceneImgPath) {
-      const raw = await fs.readFile(sceneImgPath);
-      charBuf = await sharp(raw).resize(RIGHT, H_LONG, { fit: 'cover', position: 'centre' }).png().toBuffer();
-    } else {
-      charBuf = await sharp({ create: { width: RIGHT, height: H_LONG, channels: 4, background: { r: 15, g: 25, b: 55, alpha: 1 } } }).png().toBuffer();
-      logger.info(`[fix-thumbnails] 롱폼 썸네일: 씬 이미지 없음 → 단색 배경 사용`);
-    }
-
-    const accentBar = await sharp({ create: { width: W_LONG, height: 8, channels: 4, background: { r: 59, g: 130, b: 246, alpha: 1 } } }).png().toBuffer();
-
-    await fs.mkdir(path.dirname(thumbPath), { recursive: true });
-    await sharp({ create: { width: W_LONG, height: H_LONG, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } } })
-      .composite([
-        { input: textSvg, left: 0,    top: 0 },
-        { input: charBuf, left: LEFT, top: 0 },
-        { input: accentBar, left: 0,  top: H_LONG - 8 },
-      ])
-      .jpeg({ quality: 95 })
-      .toFile(thumbPath);
+    await sharp(baseBuf).composite([{ input: overlaySvg }]).jpeg({ quality: 95 }).toFile(thumbPath);
     logger.info(`[fix-thumbnails] ✅ 롱폼 썸네일 저장: ${thumbPath}`);
   }
 
-  // ── 쇼츠 썸네일 (1080×1920) ─────────────────────────────────────────────
-  if (!await fs.access(thumbShortsPath).then(() => true).catch(() => false)) {
-    const hookLines = [];
-    const maxPerLine = 16;
-    let rem = (hook ?? '').slice(0, 40);
-    while (rem.length > 0) {
-      hookLines.push(rem.slice(0, maxPerLine));
-      rem = rem.slice(maxPerLine);
-      if (hookLines.length >= 2) break;
-    }
+  // ── 쇼츠 썸네일 (1080×1920) — renderFirstFramePngBuffer 동일 스타일 ────────
+  {
+    const lines     = [];
+    let rem = keyword;
+    while (rem.length > 0) { lines.push(rem.slice(0, 12)); rem = rem.slice(12); if (lines.length >= 3) break; }
 
-    const hookFontSize = 72;
-    const hookLineH    = Math.ceil(hookFontSize * 1.45);
-    const hookBlockH   = hookLines.length * hookLineH + 48;
-    const hookBlockY   = Math.round(H_SH * 0.55);
+    const titleSize = 96;
+    const lineH     = Math.ceil(titleSize * 1.3);
+    const blockH    = lines.length * lineH + 60;
+    const blockY    = Math.round(H_SH * 0.36);
 
-    const hookElems = hookLines.map((line, i) =>
-      `<text x="${W_SH / 2}" y="${hookBlockY + 36 + (i + 0.85) * hookLineH}"
-        font-family="${FONT}" font-size="${hookFontSize}" font-weight="bold" fill="#FFFFFF"
-        text-anchor="middle">${esc(line)}</text>`
+    const shadowElems = lines.map((line, i) =>
+      `<text x="${W_SH / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}"
+        font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
+        fill="#000000" fill-opacity="0.55" text-anchor="middle">${esc(line)}</text>`
+    ).join('\n');
+    const titleElems = lines.map((line, i) =>
+      `<text x="${W_SH / 2}" y="${blockY + 48 + (i + 0.85) * lineH}"
+        font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
+        fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
     ).join('\n');
 
     const overlay = Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg" width="${W_SH}" height="${H_SH}">
         <defs>
-          <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stop-color="#000000" stop-opacity="0.75"/>
-            <stop offset="25%"  stop-color="#000000" stop-opacity="0.0"/>
-          </linearGradient>
-          <linearGradient id="bot" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stop-color="#000000" stop-opacity="0.0"/>
-            <stop offset="45%"  stop-color="#000000" stop-opacity="0.80"/>
-            <stop offset="100%" stop-color="#000000" stop-opacity="0.95"/>
+          <linearGradient id="grad" x1="0" y1="0.25" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#000000" stop-opacity="0"/>
+            <stop offset="42%"  stop-color="#000000" stop-opacity="0.68"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.88"/>
           </linearGradient>
         </defs>
-        <rect width="${W_SH}" height="${H_SH}" fill="url(#top)"/>
-        <rect y="${Math.round(H_SH * 0.50)}" width="${W_SH}" height="${Math.round(H_SH * 0.50)}" fill="url(#bot)"/>
-        <text x="${W_SH / 2}" y="110" font-family="${FONT}" font-size="52" font-weight="bold" fill="white" text-anchor="middle">📺 매일읽어주는남자</text>
-        <rect x="60" y="${hookBlockY}" width="${W_SH - 120}" height="${hookBlockH}" rx="16" fill="#000000" fill-opacity="0.60"/>
-        <rect x="60" y="${hookBlockY}" width="8" height="${hookBlockH}" rx="4" fill="#FCD34D"/>
-        ${hookElems}
-        <text x="${W_SH / 2}" y="${H_SH - 280}" font-family="${FONT}" font-size="88" font-weight="bold" fill="#FCD34D" text-anchor="middle">${esc(line1)}</text>
-        ${line2 ? `<text x="${W_SH / 2}" y="${H_SH - 175}" font-family="${FONT}" font-size="76" font-weight="bold" fill="white" text-anchor="middle">${esc(line2)}</text>` : ''}
-        <rect x="${W_SH / 2 - 200}" y="${H_SH - 110}" width="400" height="72" rx="36" fill="#FF0000"/>
-        <text x="${W_SH / 2}" y="${H_SH - 62}" font-family="${FONT}" font-size="40" font-weight="bold" fill="white" text-anchor="middle">구독 &amp; 좋아요 👍</text>
+        <rect x="0" y="0" width="${W_SH}" height="${H_SH}" fill="url(#grad)"/>
+        <rect x="60" y="${blockY}" width="${W_SH - 120}" height="${blockH}" rx="20" fill="#000000" fill-opacity="0.52"/>
+        <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
+        <rect x="${W_SH / 2 - 140}" y="${blockY - 62}" width="280" height="50" rx="25" fill="#FACC15"/>
+        <text x="${W_SH / 2}" y="${blockY - 24}" font-family="${FONT}" font-size="28" font-weight="bold" fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>
+        ${shadowElems}
+        ${titleElems}
+        <text x="${W_SH / 2}" y="${blockY + blockH + 58}" font-family="${FONT}" font-size="36" fill="#94a3b8" text-anchor="middle">${esc(seriesName)}</text>
       </svg>`
     );
 
     let charBuf;
     if (sceneImgPath) {
-      const raw = await fs.readFile(sceneImgPath);
-      charBuf = await sharp(raw).resize(W_SH, H_SH, { fit: 'cover', position: 'centre' }).png().toBuffer();
+      charBuf = await sharp(await fs.readFile(sceneImgPath))
+        .resize(W_SH, H_SH, { fit: 'cover', position: 'centre' }).png().toBuffer();
     } else {
       charBuf = await sharp({ create: { width: W_SH, height: H_SH, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } } }).png().toBuffer();
-      logger.info(`[fix-thumbnails] 쇼츠 썸네일: 씬 이미지 없음 → 단색 배경 사용`);
     }
 
-    await fs.mkdir(path.dirname(thumbShortsPath), { recursive: true });
-    await sharp(charBuf)
-      .composite([{ input: overlay }])
-      .jpeg({ quality: 95 })
-      .toFile(thumbShortsPath);
+    await sharp(charBuf).composite([{ input: overlay }]).jpeg({ quality: 95 }).toFile(thumbShortsPath);
     logger.info(`[fix-thumbnails] ✅ 쇼츠 썸네일 저장: ${thumbShortsPath}`);
   }
 }
