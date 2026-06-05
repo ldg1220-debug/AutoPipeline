@@ -777,7 +777,9 @@ async function loadTrending() {
     const data = await res.json();
 
     document.getElementById('trending-source').textContent =
-      data.source === 'mock' ? '(mock 데이터)' : '(쿠팡 실시간)';
+      data.source === 'mock'        ? '(mock 데이터)' :
+      data.source === 'coupang-api' ? '(쿠팡 파트너스 API ✅)' :
+                                      '(쿠팡 실시간)';
 
     grid.innerHTML = '';
     data.products.forEach(p => {

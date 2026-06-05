@@ -4,6 +4,8 @@
  * GET /api/trending?category=id → 해당 카테고리 인기상품
  */
 import { Router } from 'express';
+import crypto from 'crypto';
+import axios from 'axios';
 import logger from '../../src/utils/logger.js';
 
 const router = Router();
@@ -161,6 +163,68 @@ function withFixedImages(products) {
   return products.map(p => ({ ...p, image: fixMockImage(p.image) }));
 }
 
+// ─── 카테고리 → 쿠팡 검색 키워드 매핑 ──────────────────────────────────────
+const CATEGORY_KEYWORDS = {
+  '393390': '뷰티', '393392': '스킨케어', '393394': '선크림',
+  '393395': '헤어케어', '393396': '바디로션', '393389': '여성의류',
+  '393400': '운동화', '393401': '여성가방', '393403': '손목시계',
+  '393760': '생활용품', '393407': '주방용품', '393410': '욕실용품',
+  '393412': '세탁세제', '393411': '수납정리', '393415': '이불',
+  '393414': '인테리어소품', '393385': '가전제품', '393386': '스마트폰케이스',
+  '393387': 'TV', '393388': '게이밍PC', '393406': '전기밥솥',
+  '393408': '로봇청소기', '393409': '공기청정기', '393404': '카메라',
+  '393405': '블루투스이어폰', '393477': '건강식품', '393478': '신선식품',
+  '393479': '간편식', '393480': '커피', '393391': '비타민',
+  '393393': '다이어트식품', '393413': '스포츠용품', '393418': '등산용품',
+  '393419': '캠핑용품', '393420': '자전거', '393421': '수영복',
+  '393422': '홈트레이닝', '393423': '골프용품', '393471': '유아용품',
+  '393472': '아동의류', '393473': '장난감', '393460': '반려동물용품',
+  '393461': '강아지용품', '393462': '고양이용품', '393459': '차량용품',
+  '393416': '문구용품', '393417': '취미용품', '393433': '도서',
+};
+
+// ─── 쿠팡 파트너스 API — 키워드로 제품 검색 ──────────────────────────────
+function buildCoupangSignature(method, url, secretKey) {
+  const datetime = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const path_ = new URL(url).pathname + new URL(url).search;
+  const message = datetime + method + path_;
+  const signature = crypto.createHmac('sha256', secretKey).update(message).digest('hex');
+  return { datetime, signature };
+}
+
+async function fetchCoupangProducts(keyword, limit = 16) {
+  const accessKey  = process.env.COUPANG_ACCESS_KEY;
+  const secretKey  = process.env.COUPANG_SECRET_KEY;
+  if (!accessKey || !secretKey) return null; // API 키 없으면 null → mock 사용
+
+  const url = `https://api-gateway.coupang.com/v2/providers/affiliate_open_api/apis/openapi/v1/products/search?keyword=${encodeURIComponent(keyword)}&limit=${limit}`;
+  const { datetime, signature } = buildCoupangSignature('GET', url, secretKey);
+
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        Authorization: `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`,
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+      timeout: 10000,
+    });
+    const items = res.data?.data?.productData ?? [];
+    logger.info(`[trending] 쿠팡 API "${keyword}": ${items.length}개`);
+    return items.map((p, i) => ({
+      id:          `cp-${p.productId ?? i}`,
+      name:        p.productName?.slice(0, 40) ?? '상품',
+      category:    keyword,
+      image:       p.productImage || '',
+      price:       p.productPrice ? `${Number(p.productPrice).toLocaleString()}원` : '',
+      coupang_url: p.productUrl ?? '',
+      rating:      p.productRating ?? null,
+    }));
+  } catch (err) {
+    logger.warn(`[trending] 쿠팡 API 실패: ${err.message}`);
+    return null;
+  }
+}
+
 /**
  * Playwright로 쿠팡 카테고리 인기상품 스크래핑
  */
@@ -224,24 +288,33 @@ router.get('/categories', (req, res) => {
 router.get('/', async (req, res) => {
   const categoryId = req.query.category || '393760';
   const catName    = CATEGORY_MAP[categoryId] ?? '상품';
+  const keyword    = CATEGORY_KEYWORDS[categoryId] ?? catName;
 
+  // 1순위: 쿠팡 파트너스 API (실제 이미지 + 가격)
   try {
-    logger.info(`[trending] 쿠팡 스크래핑 시작: ${catName} (${categoryId})`);
-    const products = await scrapeCoupangCategory(categoryId);
-
-    if (products.length === 0) {
-      const mock = withFixedImages(MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT);
-      logger.warn(`[trending] 스크래핑 결과 없음 → mock (${catName})`);
-      return res.json({ products: mock, source: 'mock', category: catName });
+    const apiProducts = await fetchCoupangProducts(keyword);
+    if (apiProducts && apiProducts.length > 0) {
+      return res.json({ products: apiProducts, source: 'coupang-api', category: catName });
     }
-
-    logger.info(`[trending] 완료: ${products.length}개 (${catName})`);
-    res.json({ products, source: 'coupang', category: catName });
   } catch (err) {
-    const mock = withFixedImages(MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT);
-    logger.warn(`[trending] 실패 → mock (${catName}): ${err.message}`);
-    res.json({ products: mock, source: 'mock', category: catName });
+    logger.warn(`[trending] 쿠팡 API 오류: ${err.message}`);
   }
+
+  // 2순위: Playwright 스크래핑
+  try {
+    logger.info(`[trending] Playwright 스크래핑 시작: ${catName}`);
+    const products = await scrapeCoupangCategory(categoryId);
+    if (products.length > 0) {
+      return res.json({ products, source: 'coupang', category: catName });
+    }
+  } catch (err) {
+    logger.warn(`[trending] Playwright 실패: ${err.message}`);
+  }
+
+  // 3순위: mock
+  const mock = withFixedImages(MOCK_BY_CATEGORY[categoryId] ?? MOCK_DEFAULT);
+  logger.warn(`[trending] mock 사용 (${catName})`);
+  res.json({ products: mock, source: 'mock', category: catName });
 });
 
 export default router;

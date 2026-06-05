@@ -13,7 +13,14 @@ const router = Router();
 
 // ─── 한국어 → 중국어 번역 ────────────────────────────────────────────────────
 async function translateToChinese(text) {
-  const prompt = `중국 타오바오/빌리빌리 쇼핑 검색에 최적화된 중국어로만 번역해. 결과만 출력 (설명 없이).\n${text}`;
+  const prompt = `다음 한국어 제품명을 중국 쇼핑몰(타오바오/빌리빌리) 검색에 최적화된 중국어로 번역해.
+규칙:
+1. 브랜드명(영어/외래어)은 그대로 유지 (예: MISSHA, Dr.Jart+, Innisfree)
+2. 한국 고유 브랜드명도 영어 표기가 있으면 영어 사용
+3. 제품 카테고리는 일반적인 중국 쇼핑 검색어로 번역
+4. 정치적/감정적으로 해석될 수 있는 단어는 피해서 번역
+5. 결과만 출력 (설명 없이)
+제품명: ${text}`;
 
   // 1. Gemini 시도
   const geminiKey = process.env.GEMINI_API_KEY;
