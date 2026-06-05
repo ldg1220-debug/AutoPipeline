@@ -58,6 +58,7 @@ async function extractFrameFromVideo(videoPath, outputJpg, seekSec = 0.5) {
   ], { timeout: 15000 });
 }
 
+/**
  * 카테고리에 맞는 YouTube 채널 설정을 반환한다.
  * 카테고리별 전용 채널 credentials가 설정된 경우 그것을, 없으면 기본 채널을 사용한다.
  */
