@@ -253,11 +253,14 @@ async function scrapeTaobao(chineseQuery) {
     const searchUrl = `https://s.taobao.com/search?q=${encodeURIComponent(chineseQuery)}&imgfile=&js=1&style=grid`;
     logger.info(`[videos/taobao] 검색: ${searchUrl}`);
 
-    // domcontentloaded로 빠르게 로드 후 alicdn 이미지 대기 (load는 30초 타임아웃 위험)
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
-    // 상품 이미지(alicdn CDN) 렌더링 대기
-    await page.waitForSelector('img[src*="alicdn.com"]', { timeout: 10000 }).catch(() => {});
+    // 상품 이미지 6개 이상 로드될 때까지 대기 (React lazy-render 고려)
+    // waitForSelector는 1개 생기면 즉시 통과 → product grid 미완성 위험
+    await page.waitForFunction(
+      () => document.querySelectorAll('img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]').length >= 6,
+      { timeout: 12000 }
+    ).catch(() => {});
 
     const pageTitle = await page.title();
     const currentUrl = page.url();
@@ -267,91 +270,69 @@ async function scrapeTaobao(chineseQuery) {
       throw new Error('타오바오 로그인 필요 (봇 감지)');
     }
 
-    // 스크롤로 레이지로드 트리거
-    await page.evaluate(() => window.scrollTo(0, 600));
-    await page.waitForTimeout(1500);
+    // 스크롤로 레이지로드 트리거 후 추가 렌더 대기
+    await page.evaluate(() => window.scrollTo(0, 1200));
+    await page.waitForTimeout(2000);
 
-    // 상품 탐색: alicdn 이미지 기반 (React 동적 클래스명에 독립적)
     const videoItems = await page.evaluate(() => {
       const seen = new Set();
       const items = [];
 
-      // 1순위: alicdn.com 상품 이미지 기반 탐색
-      const imgs = Array.from(document.querySelectorAll('img[src*="alicdn.com"]'))
-        .filter(img => img.width > 50 && img.height > 50); // 아이콘 제외
+      // img.alicdn.com / gw.alicdn.com 상품 이미지 기반
+      // React 이미지는 width/height 속성이 0 → naturalWidth로 판별
+      const imgs = Array.from(document.querySelectorAll(
+        'img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]'
+      )).filter(img => {
+        const src = img.src || '';
+        return !src.includes('logo') && !src.includes('icon') && !src.includes('favicon') && !src.includes('banner');
+      });
 
       for (const img of imgs) {
-        let thumb = img.src || img.getAttribute('data-src') || '';
+        let thumb = img.src || img.getAttribute('src') || '';
         if (thumb.startsWith('//')) thumb = 'https:' + thumb;
         if (!thumb || thumb.startsWith('data:')) continue;
 
-        // 가장 가까운 링크 탐색 (상위 6단계)
+        // 상위 DOM 순회해서 가장 가까운 링크 탐색
         let href = '';
         let el = img;
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < 8; i++) {
           el = el.parentElement;
           if (!el) break;
           if (el.tagName === 'A' && el.href && !el.href.includes('javascript')) {
             href = el.href; break;
           }
-          const a = el.querySelector(':scope > a[href], a[href*="taobao"], a[href*="tmall"]');
-          if (a && !a.href.includes('javascript')) { href = a.href; break; }
+          const a = el.querySelector(':scope > a[href]');
+          if (a && a.href && !a.href.includes('javascript')) { href = a.href; break; }
         }
         if (!href || seen.has(href)) continue;
         seen.add(href);
 
         const container = img.closest('li') || img.closest('[class]');
-        const titleEl = container?.querySelector('[class*="title"], [class*="name"], h3, h4, span');
-        const title = (titleEl?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60)
+        const titleEl = container?.querySelector('[class*="title"], [class*="name"], h3, h4');
+        const title = (titleEl?.textContent || titleEl?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60)
           || `상품 ${items.length + 1}`;
 
-        items.push({ id: `tb-${items.length}`, thumb, title, href, videoUrl: null, hasPlay: false });
+        items.push({ id: `tb-${items.length}`, thumb, title, href });
         if (items.length >= 20) break;
-      }
-
-      // 2순위: 직접 링크 탐색 (fallback)
-      if (items.length === 0) {
-        const links = Array.from(document.querySelectorAll(
-          'a[href*="item.taobao.com"], a[href*="detail.tmall.com"]'
-        ));
-        for (const link of links) {
-          if (!link.href || seen.has(link.href)) continue;
-          seen.add(link.href);
-          const imgEl = link.querySelector('img');
-          let thumb = imgEl?.src || '';
-          if (thumb.startsWith('//')) thumb = 'https:' + thumb;
-          const title = (link.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60) || `상품 ${items.length + 1}`;
-          items.push({ id: `tb2-${items.length}`, thumb, title, href: link.href, videoUrl: null, hasPlay: false });
-          if (items.length >= 20) break;
-        }
       }
 
       return items;
     });
 
-    // 진단 로그
-    if (videoItems.length === 0) {
-      const diag = await page.evaluate(() => ({
-        totalLinks: document.querySelectorAll('a').length,
-        alicdinImgs: document.querySelectorAll('img[src*="alicdn.com"]').length,
-        bodyLen: document.body.innerHTML.length,
-        sampleLink: document.querySelector('a')?.href || '',
-      }));
-      logger.warn(`[videos/taobao] 0개 진단: links=${diag.totalLinks} alicdnImgs=${diag.alicdinImgs} bodyLen=${diag.bodyLen} sampleLink=${diag.sampleLink}`);
-    }
-
-    logger.info(`[videos/taobao] 검색 결과: ${videoItems.length}개`);
+    const imgCount = await page.evaluate(() =>
+      document.querySelectorAll('img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]').length
+    );
+    logger.info(`[videos/taobao] 검색 결과: ${videoItems.length}개 (alicdn imgs: ${imgCount})`);
     results.push(...videoItems);
 
     return results.slice(0, 20).map(item => ({
       id: item.id,
-      thumbnail: item.thumb
-        ? item.thumb.replace(/_\d+x\d+.*\.(jpg|png|webp)/i, '_400x400.$1').replace(/!.*$/, '')
-        : null,
+      // alicdn 이미지도 프록시 경유 (Referer 없으면 차단됨)
+      thumbnail: item.thumb ? `/api/proxy-image?url=${encodeURIComponent(item.thumb)}` : null,
       title: item.title,
       page_url: item.href,
-      video_url: item.videoUrl,
-      has_video: item.hasPlay || !!item.videoUrl,
+      video_url: null,
+      has_video: false,
       source: 'taobao',
       duration: null,
     }));

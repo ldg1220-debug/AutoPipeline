@@ -132,7 +132,9 @@ app.get('/api/proxy-image', async (req, res) => {
     const allowed = ALLOWED_IMAGE_HOSTS.some(h => parsed.hostname.endsWith(h));
     if (!allowed) return res.status(403).send('허용되지 않은 이미지 호스트');
 
-    const referer = parsed.hostname.includes('hdslb') ? 'https://www.bilibili.com/' : undefined;
+    const referer = parsed.hostname.includes('hdslb') ? 'https://www.bilibili.com/'
+      : parsed.hostname.includes('alicdn') ? 'https://www.taobao.com/'
+      : undefined;
     const imgRes = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 8000,
