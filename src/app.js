@@ -25,8 +25,161 @@ import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
 import { runProjectManagerReview } from './agents/project_manager.js';
+import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── 블로그 주제 확장 (키워드 1개 → 독립 글 주제 2~3개) ───────────────────────
+async function expandKeywordsToAngles(keywords) {
+  if (!process.stdout.isTTY || !config.openai?.apiKey) return keywords;
+
+  console.log('\n⏳ 키워드별 독립 글 주제 생성 중...');
+
+  const results = await Promise.allSettled(
+    keywords.map(async (kw) => {
+      const keyword  = kw.keyword ?? kw;
+      const category = kw.category ?? 'economy';
+      try {
+        const res = await axios.post(
+          'https://api.openai.com/v1/chat/completions',
+          {
+            model: 'gpt-4o-mini',
+            messages: [{
+              role: 'user',
+              content:
+                `한국 블로그 키워드 "${keyword}" (${category})\n\n` +
+                `이 키워드를 기반으로 각각 완전히 독립된 블로그 포스트가 될 수 있는 구체적인 주제 2~3개를 만들어줘.\n\n` +
+                `조건:\n` +
+                `- 주제끼리 내용이 겹치면 안 됨 (독자가 둘 다 읽을 이유가 있어야 함)\n` +
+                `- 각 주제는 단독 포스트로 충분한 분량과 깊이가 가능해야 함\n` +
+                `- title: 검색에 잘 걸리는 구체적인 문장형 제목 (40자 이내)\n` +
+                `- desc: 이 글에서 독자가 얻는 핵심 가치 한 줄 (30자 이내)\n` +
+                `- points: 글에서 다룰 핵심 소제목 2개 (각 15자 이내)\n` +
+                `JSON만 반환: {"angles":[{"title":"...","desc":"...","points":["...","..."]}]}`,
+            }],
+            temperature: 0.4,
+            max_tokens: 400,
+          },
+          {
+            headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+            timeout: 15000,
+          }
+        );
+        const parsed = JSON.parse(res.data.choices[0].message.content);
+        return {
+          parentKeyword: keyword, category, score: kw.score ?? 0,
+          angles: Array.isArray(parsed.angles) ? parsed.angles : [],
+        };
+      } catch {
+        return { parentKeyword: keyword, category, score: kw.score ?? 0, angles: [{ title: keyword, desc: '', points: [] }] };
+      }
+    })
+  );
+
+  const expanded = [];
+  results.forEach((r, i) => {
+    if (r.status !== 'fulfilled') {
+      expanded.push({ ...keywords[i], parentKeyword: keywords[i].keyword ?? keywords[i], keyword: keywords[i].keyword ?? keywords[i] });
+      return;
+    }
+    const { parentKeyword, category, score, angles } = r.value;
+    if (!angles.length) {
+      expanded.push({ ...keywords[i], parentKeyword, keyword: parentKeyword });
+      return;
+    }
+    for (const angle of angles) {
+      expanded.push({
+        ...keywords[i],
+        parentKeyword,
+        keyword:      angle.title || parentKeyword,
+        angleDesc:    angle.desc  || '',
+        anglePoints:  angle.points || [],
+        category,
+        score,
+      });
+    }
+  });
+  return expanded;
+}
+
+// ── 블로그 주제 인터랙티브 선택 (120초 타임아웃) ──────────────────────────────
+async function askBlogTopicSelection(items, timeoutSec = 120) {
+  if (!process.stdout.isTTY) return items;
+
+  const catEmoji = { finance: '📈', economy: '💹', realestate: '🏠', health: '💊', beauty: '✨', social: '📰', entertainment: '🎬' };
+  const SEP = '─'.repeat(66);
+
+  const groups = [];
+  const groupMap = new Map();
+  for (const item of items) {
+    const pk = item.parentKeyword ?? item.keyword;
+    if (!groupMap.has(pk)) {
+      const g = { parentKeyword: pk, category: item.category, items: [] };
+      groups.push(g);
+      groupMap.set(pk, g);
+    }
+    groupMap.get(pk).items.push(item);
+  }
+
+  let num = 0;
+  const flatList = [];
+  console.log('\n' + SEP);
+  console.log('📋 오늘 작성할 블로그 주제 후보');
+  console.log(SEP);
+
+  for (const group of groups) {
+    const emoji = catEmoji[group.category] ?? '📌';
+    console.log(`\n  [${emoji} ${group.parentKeyword}]`);
+    for (const item of group.items) {
+      num++;
+      flatList.push(item);
+      console.log(`  ${String(num).padStart(3)}. ${item.keyword}`);
+      if (item.angleDesc)   console.log(`        → ${item.angleDesc}`);
+      if (item.anglePoints?.length) console.log(`           • ${item.anglePoints.join('  •  ')}`);
+    }
+  }
+
+  console.log('\n' + SEP);
+  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  Enter = 전체 자동 선택)');
+  console.log(`⏱  ${timeoutSec}초 내 입력 없으면 자동 선택됩니다.\n`);
+
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+    let answered = false;
+
+    const done = (selected, reason) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      rl.close();
+      console.log(`\n✅ ${reason} (${selected.length}개):`);
+      selected.forEach((k) => console.log(`   - ${k.keyword}`));
+      console.log();
+      resolve(selected);
+    };
+
+    const timer = setTimeout(() => done(items, `⏱ ${timeoutSec}초 초과 — 자동 선택`), timeoutSec * 1000);
+
+    rl.once('line', (line) => {
+      const input = line.trim();
+      if (!input) return done(items, '→ 전체 자동 선택');
+
+      const rangeExpanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
+        const from = parseInt(a, 10), to = parseInt(b, 10);
+        return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
+      });
+
+      const indices = rangeExpanded
+        .split(',')
+        .map((s) => parseInt(s.trim(), 10) - 1)
+        .filter((i) => i >= 0 && i < flatList.length);
+
+      if (indices.length === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
+      const unique = [...new Set(indices)].sort((a, b) => a - b);
+      done(unique.map((i) => flatList[i]), '→ 선택 완료');
+    });
+  });
+}
 
 // ── CLI 인자 파싱 (node src/app.js --force-keyword "키워드" --force-category realestate) ──
 const _cliArgs = process.argv.slice(2);
@@ -512,6 +665,22 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.warn('[app] Topic grouping failed. Continuing with original keywords.', {
       message: err.message,
     });
+  }
+
+  // ── 주제 확장 + 사용자 선택 ─────────────────────────────────────────────
+  // 각 키워드를 2~3개 독립 글 주제로 확장한 뒤 사용자가 선택 (TTY 환경에서만)
+  try {
+    const expandedItems = await expandKeywordsToAngles(keywordData.contents);
+    const selectedItems = await askBlogTopicSelection(expandedItems);
+    keywordData.contents = selectedItems;
+    logger.info(`[app] Blog 주제 선택 완료: ${selectedItems.length}개`);
+  } catch (err) {
+    logger.warn(`[app] 주제 확장/선택 실패 (원본 키워드로 계속): ${err.message}`);
+  }
+
+  if (!keywordData.contents?.length) {
+    logger.warn('[app] Blog: 선택된 키워드 없음. Blog Pipeline 종료.');
+    return;
   }
 
   // ── 경쟁 채널 분석 (주 1회 — 인사이트 7일 캐시) ─────────────────────────
