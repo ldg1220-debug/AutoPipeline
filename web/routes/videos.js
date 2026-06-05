@@ -19,9 +19,11 @@ async function translateToChinese(text) {
   // 1차: 한국어 프롬프트
   const prompt1 = `한국어 제품명을 중국 타오바오/빌리빌리 검색에 최적화된 중국어로 번역해.
 규칙:
-1. 브랜드명은 영어를 유지하되, 제품 카테고리명은 반드시 중국어로 번역
-2. 예: "닥터지 레드 크림" → "Dr.G 红色面霜", "선스틱" → "防晒棒", "에센스" → "精华液", "무기자차 선스틱" → "无机防晒棒"
-3. 결과는 반드시 중국어(한자) 포함, 결과만 출력
+1. 입력에 브랜드명이 있으면 영어로 유지, 없으면 절대 추가하지 마
+2. 제품 카테고리명은 중국어(한자)로 번역
+3. 예시 (브랜드 있는 경우): "닥터지 레드 크림" → "Dr.G 红色面霜", "세타필 로션" → "Cetaphil 保湿乳液"
+4. 예시 (브랜드 없는 경우): "무기자차 선스틱" → "无机防晒棒", "에센스" → "精华液", "수분크림" → "保湿霜"
+5. 결과는 반드시 중국어(한자) 포함, 결과만 출력
 제품명: ${text}`;
 
   // 2차: 중국어 프롬프트 (AI가 중국어로 생각하도록 유도)
@@ -248,16 +250,14 @@ async function scrapeTaobao(chineseQuery) {
     const page = await ctx.newPage();
     const results = [];
 
-    // 일반 검색 URL (video 필터 없이 — 현재 타오바오 구조에서 더 신뢰성 높음)
     const searchUrl = `https://s.taobao.com/search?q=${encodeURIComponent(chineseQuery)}&imgfile=&js=1&style=grid`;
     logger.info(`[videos/taobao] 검색: ${searchUrl}`);
-    await page.goto(searchUrl, { waitUntil: 'load', timeout: 30000 });
 
-    // 상품 링크가 나타날 때까지 대기 (최대 8초)
-    await page.waitForSelector(
-      'a[href*="item.taobao.com"], a[href*="detail.tmall.com"], a[href*="taobao.com/item"]',
-      { timeout: 8000 }
-    ).catch(() => {});
+    // domcontentloaded로 빠르게 로드 후 alicdn 이미지 대기 (load는 30초 타임아웃 위험)
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+
+    // 상품 이미지(alicdn CDN) 렌더링 대기
+    await page.waitForSelector('img[src*="alicdn.com"]', { timeout: 10000 }).catch(() => {});
 
     const pageTitle = await page.title();
     const currentUrl = page.url();
@@ -267,39 +267,78 @@ async function scrapeTaobao(chineseQuery) {
       throw new Error('타오바오 로그인 필요 (봇 감지)');
     }
 
-    // 링크 기반 셀렉터 — React 동적 클래스명과 무관하게 상품 링크로 탐색
+    // 스크롤로 레이지로드 트리거
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(1500);
+
+    // 상품 탐색: alicdn 이미지 기반 (React 동적 클래스명에 독립적)
     const videoItems = await page.evaluate(() => {
       const seen = new Set();
       const items = [];
 
-      const links = Array.from(document.querySelectorAll(
-        'a[href*="item.taobao.com"], a[href*="detail.tmall.com"], a[href*="taobao.com/item"]'
-      ));
+      // 1순위: alicdn.com 상품 이미지 기반 탐색
+      const imgs = Array.from(document.querySelectorAll('img[src*="alicdn.com"]'))
+        .filter(img => img.width > 50 && img.height > 50); // 아이콘 제외
 
-      for (const link of links) {
-        const href = link.href;
-        if (!href || seen.has(href) || href.includes('javascript') || href.includes('login')) continue;
+      for (const img of imgs) {
+        let thumb = img.src || img.getAttribute('data-src') || '';
+        if (thumb.startsWith('//')) thumb = 'https:' + thumb;
+        if (!thumb || thumb.startsWith('data:')) continue;
+
+        // 가장 가까운 링크 탐색 (상위 6단계)
+        let href = '';
+        let el = img;
+        for (let i = 0; i < 6; i++) {
+          el = el.parentElement;
+          if (!el) break;
+          if (el.tagName === 'A' && el.href && !el.href.includes('javascript')) {
+            href = el.href; break;
+          }
+          const a = el.querySelector(':scope > a[href], a[href*="taobao"], a[href*="tmall"]');
+          if (a && !a.href.includes('javascript')) { href = a.href; break; }
+        }
+        if (!href || seen.has(href)) continue;
         seen.add(href);
 
-        // 가장 가까운 컨테이너에서 이미지 탐색
-        const container = link.closest('li') || link.closest('div[class]') || link.parentElement;
-        const imgEl = container?.querySelector('img') || link.querySelector('img');
-        let thumb = imgEl?.src || imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-ks-lazyload') || '';
-        if (thumb.startsWith('//')) thumb = 'https:' + thumb;
-        if (thumb.startsWith('data:')) thumb = '';
-
-        const titleEl = container?.querySelector('[class*="title"], [class*="name"], h3, h4')
-          || link.querySelector('[class*="title"]');
-        const title = (titleEl?.innerText || link.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60)
+        const container = img.closest('li') || img.closest('[class]');
+        const titleEl = container?.querySelector('[class*="title"], [class*="name"], h3, h4, span');
+        const title = (titleEl?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60)
           || `상품 ${items.length + 1}`;
 
-        const hasPlay = !!(container?.querySelector('[class*="play"], [class*="video"]'));
-
-        items.push({ id: `tb-${items.length}`, thumb, title, href, videoUrl: null, hasPlay });
+        items.push({ id: `tb-${items.length}`, thumb, title, href, videoUrl: null, hasPlay: false });
         if (items.length >= 20) break;
       }
+
+      // 2순위: 직접 링크 탐색 (fallback)
+      if (items.length === 0) {
+        const links = Array.from(document.querySelectorAll(
+          'a[href*="item.taobao.com"], a[href*="detail.tmall.com"]'
+        ));
+        for (const link of links) {
+          if (!link.href || seen.has(link.href)) continue;
+          seen.add(link.href);
+          const imgEl = link.querySelector('img');
+          let thumb = imgEl?.src || '';
+          if (thumb.startsWith('//')) thumb = 'https:' + thumb;
+          const title = (link.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60) || `상품 ${items.length + 1}`;
+          items.push({ id: `tb2-${items.length}`, thumb, title, href: link.href, videoUrl: null, hasPlay: false });
+          if (items.length >= 20) break;
+        }
+      }
+
       return items;
     });
+
+    // 진단 로그
+    if (videoItems.length === 0) {
+      const diag = await page.evaluate(() => ({
+        totalLinks: document.querySelectorAll('a').length,
+        alicdinImgs: document.querySelectorAll('img[src*="alicdn.com"]').length,
+        bodyLen: document.body.innerHTML.length,
+        sampleLink: document.querySelector('a')?.href || '',
+      }));
+      logger.warn(`[videos/taobao] 0개 진단: links=${diag.totalLinks} alicdnImgs=${diag.alicdinImgs} bodyLen=${diag.bodyLen} sampleLink=${diag.sampleLink}`);
+    }
 
     logger.info(`[videos/taobao] 검색 결과: ${videoItems.length}개`);
     results.push(...videoItems);
