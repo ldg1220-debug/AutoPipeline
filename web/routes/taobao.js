@@ -166,31 +166,57 @@ router.post('/clear-session', async (req, res) => {
 });
 
 // POST /api/taobao/import-cookies
-// Body: { cookieString: "_tb_token_=xxx; cookie2=yyy; ..." }
-// 브라우저 팝업이 차단되는 환경에서 쿠키를 직접 붙여넣기로 세션 생성
+// 두 가지 형식 지원:
+//   1. Chrome DevTools Application→Cookies 탭에서 전체 선택 후 Ctrl+C (탭 구분 테이블)
+//   2. 기존 name=value; name2=value2 형식
 router.post('/import-cookies', async (req, res) => {
   try {
     const { cookieString } = req.body;
     if (!cookieString?.trim()) return res.status(400).json({ error: 'cookieString이 필요합니다.' });
 
-    const cookies = cookieString.split(';')
-      .map(part => {
-        const eqIdx = part.indexOf('=');
-        if (eqIdx < 0) return null;
-        return {
-          name: part.slice(0, eqIdx).trim(),
-          value: part.slice(eqIdx + 1).trim(),
-          domain: '.taobao.com',
-          path: '/',
-          expires: -1,
-          httpOnly: false,
-          secure: false,
-          sameSite: 'Lax',
-        };
-      })
-      .filter(c => c && c.name && c.value);
+    let cookies;
 
-    if (cookies.length === 0) return res.status(400).json({ error: '파싱된 쿠키가 없습니다. 형식: name=value; name2=value2' });
+    if (cookieString.includes('\t')) {
+      // Chrome DevTools 탭 구분 형식
+      // 컬럼: Name | Value | Domain | Path | Expires | Size | HttpOnly | Secure | SameSite | ...
+      const SAMESITE_MAP = { 'Strict': 'Strict', 'Lax': 'Lax', 'None': 'None' };
+      cookies = cookieString.split('\n')
+        .map(line => line.trim())
+        .filter(line => line && line.includes('\t'))
+        .map(line => {
+          const cols = line.split('\t');
+          const name  = cols[0]?.trim();
+          const value = cols[1]?.trim();
+          if (!name || value === undefined) return null;
+          const domain   = cols[2]?.trim() || '.taobao.com';
+          const path     = cols[3]?.trim() || '/';
+          const httpOnly = cols[6]?.trim() === '✓';
+          const secure   = cols[7]?.trim() === '✓';
+          const sameSite = SAMESITE_MAP[cols[8]?.trim()] ?? 'Lax';
+          return { name, value, domain, path, expires: -1, httpOnly, secure, sameSite };
+        })
+        .filter(c => c && c.name);
+    } else {
+      // name=value; 형식
+      cookies = cookieString.split(';')
+        .map(part => {
+          const eqIdx = part.indexOf('=');
+          if (eqIdx < 0) return null;
+          return {
+            name: part.slice(0, eqIdx).trim(),
+            value: part.slice(eqIdx + 1).trim(),
+            domain: '.taobao.com',
+            path: '/',
+            expires: -1,
+            httpOnly: false,
+            secure: false,
+            sameSite: 'Lax',
+          };
+        })
+        .filter(c => c && c.name && c.value);
+    }
+
+    if (cookies.length === 0) return res.status(400).json({ error: '파싱된 쿠키가 없습니다.' });
 
     await fs.writeFile(SESSION_FILE, JSON.stringify({
       cookies,

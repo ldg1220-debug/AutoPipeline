@@ -458,10 +458,10 @@
       <div id="cookie-import-panel" style="display:none;margin-bottom:8px;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1)">
         <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">
           <strong style="color:var(--text-primary)">쿠키 직접 입력</strong>
-          — 타오바오가 로그인된 Chrome에서 F12 → Application → Cookies → www.taobao.com<br>
-          → 오른쪽 클릭 → Copy all as curl 또는 쿠키 값만 복사해서 붙여넣기
+          — 타오바오가 로그인된 Chrome에서 F12 → Application → Cookies → taobao.com 선택<br>
+          → 쿠키 목록 클릭 후 <strong style="color:var(--text-primary)">Ctrl+A → Ctrl+C</strong> 로 전체 복사 후 아래에 붙여넣기
         </div>
-        <textarea id="cookie-import-input" placeholder="_tb_token_=xxxx; cookie2=yyyy; uc3=id=zzz; ..."
+        <textarea id="cookie-import-input" placeholder="여기에 붙여넣기 (Ctrl+V)&#10;Name&#9;Value&#9;Domain&#9;... 형식 또는 name=value; 형식 모두 지원"
           style="width:100%;box-sizing:border-box;height:70px;background:#0d0d1a;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text-primary);font-family:monospace;font-size:0.72rem;padding:6px 8px;resize:vertical"></textarea>
         <div style="display:flex;gap:6px;margin-top:6px">
           <button onclick="importCookies()" class="btn btn-primary btn-sm" style="font-size:0.75rem">저장</button>
