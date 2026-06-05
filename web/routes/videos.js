@@ -269,7 +269,7 @@ async function scrapeTaobao(chineseQuery) {
         }
         return false;
       });
-    }, { timeout: 15000 }).catch(() => {});
+    }, { timeout: 8000 }).catch(() => {});
 
     const pageTitle = await page.title();
     const currentUrl = page.url();
@@ -302,7 +302,14 @@ async function scrapeTaobao(chineseQuery) {
           el = el.parentElement;
           if (!el) break;
           const h = (el.tagName === 'A' ? el.href : '') || el.querySelector('a[href]')?.href || '';
-          if (h && (h.includes('item.taobao.com') || h.includes('detail.tmall.com'))) {
+          // item.taobao.com, detail.tmall.com, detail.taobao.com, 또는 id= 포함 타오바오 URL
+          if (h && (
+            h.includes('item.taobao.com') ||
+            h.includes('detail.tmall.com') ||
+            h.includes('detail.taobao.com') ||
+            (h.includes('taobao.com') && h.includes('id=')) ||
+            (h.includes('tmall.com') && h.includes('id='))
+          )) {
             href = h; break;
           }
         }
@@ -321,6 +328,21 @@ async function scrapeTaobao(chineseQuery) {
 
       return items;
     });
+
+    // 0개일 때 페이지의 실제 링크 패턴 진단
+    if (videoItems.length === 0) {
+      const diag = await page.evaluate(() => {
+        const allHrefs = Array.from(document.querySelectorAll('a[href]'))
+          .map(a => a.href)
+          .filter(h => h.includes('taobao') || h.includes('tmall'));
+        return {
+          alicdinImgs: document.querySelectorAll('img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]').length,
+          taobaoLinks: allHrefs.length,
+          sampleLinks: allHrefs.slice(0, 5),
+        };
+      });
+      logger.warn(`[videos/taobao] 0개 진단: alicdn=${diag.alicdinImgs} taobaoLinks=${diag.taobaoLinks} samples=${JSON.stringify(diag.sampleLinks)}`);
+    }
 
     const imgCount = await page.evaluate(() =>
       document.querySelectorAll('img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]').length
