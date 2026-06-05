@@ -905,14 +905,22 @@ async function generateShortsThumbnail(content, charImageUrl, outputPath) {
   // hook 문장을 16자씩 줄바꿈 (폰트 크게 → 줄당 글자 수 줄임)
   const hookLines = wrapTextKorean(hook.slice(0, 40), 16).slice(0, 2);
 
-  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
-    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
-    : await fs.readFile(charImageUrl);
-
-  const charBuf = await sharp(charRaw)
-    .resize(W, H, { fit: 'cover', position: 'centre' })
-    .png()
-    .toBuffer();
+  // 배경 이미지 처리 (없으면 어두운 그라데이션 배경 폴백)
+  let charBuf;
+  if (charImageUrl) {
+    const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
+      ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
+      : await fs.readFile(charImageUrl);
+    charBuf = await sharp(charRaw)
+      .resize(W, H, { fit: 'cover', position: 'centre' })
+      .png()
+      .toBuffer();
+  } else {
+    charBuf = await sharp({
+      create: { width: W, height: H, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
+    }).png().toBuffer();
+    logger.info(`[media_generator] Shorts thumbnail: 이미지 없음 → 단색 배경 사용`);
+  }
 
   const hookFontSize = 72;  // 하단 타이틀(76~88)과 같은 크기감으로 통일
   const hookLineH    = Math.ceil(hookFontSize * 1.45);
@@ -1017,14 +1025,22 @@ async function generateThumbnail(content, charImageUrl, outputPath) {
     </svg>`
   );
 
-  // 캐릭터 이미지 다운로드 & 우측 크롭 (로컬 파일 또는 URL 모두 지원)
-  const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
-    ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
-    : await fs.readFile(charImageUrl);
-  const charBuf = await sharp(charRaw)
-    .resize(RIGHT, H, { fit: 'cover', position: 'centre' })
-    .png()
-    .toBuffer();
+  // 캐릭터 이미지 다운로드 & 우측 크롭 (없으면 단색 배경 폴백)
+  let charBuf;
+  if (charImageUrl) {
+    const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
+      ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
+      : await fs.readFile(charImageUrl);
+    charBuf = await sharp(charRaw)
+      .resize(RIGHT, H, { fit: 'cover', position: 'centre' })
+      .png()
+      .toBuffer();
+  } else {
+    charBuf = await sharp({
+      create: { width: RIGHT, height: H, channels: 4, background: { r: 15, g: 25, b: 55, alpha: 1 } },
+    }).png().toBuffer();
+    logger.info(`[media_generator] Thumbnail: 이미지 없음 → 단색 배경 사용`);
+  }
 
   // 하단 액센트 바
   const accentBar = await sharp({
@@ -1461,27 +1477,27 @@ async function generateMedia(content) {
     sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형)
-  const thumbSceneUrl = sceneUrls[0];
+  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형) — 씬 이미지 없으면 단색 배경으로 생성
+  const thumbSceneUrl = sceneUrls[0] ?? null;
   if (!thumbSceneUrl) {
-    logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 썸네일 생성 건너뜀: ${content.keyword}`);
+    logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 단색 배경으로 썸네일 생성: ${content.keyword}`);
   } else {
     logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
-    try {
-      await generateThumbnail(content, thumbSceneUrl, thumbPath);
-      result.thumbnail = thumbPath;
-      logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 저장: ${thumbPath}`);
-    } catch (err) {
-      logger.error(`[media_generator] ❌ 롱폼 썸네일(16:9) 실패: ${err.message}`);
-    }
+  }
+  try {
+    await generateThumbnail(content, thumbSceneUrl, thumbPath);
+    result.thumbnail = thumbPath;
+    logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 저장: ${thumbPath}`);
+  } catch (err) {
+    logger.error(`[media_generator] ❌ 롱폼 썸네일(16:9) 실패: ${err.message}`);
+  }
 
-    try {
-      await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
-      result.thumbnail_shorts = thumbShortsPath;
-      logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 저장: ${thumbShortsPath}`);
-    } catch (err) {
-      logger.error(`[media_generator] ❌ 쇼츠 썸네일(9:16) 실패: ${err.message}`);
-    }
+  try {
+    await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
+    result.thumbnail_shorts = thumbShortsPath;
+    logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 저장: ${thumbShortsPath}`);
+  } catch (err) {
+    logger.error(`[media_generator] ❌ 쇼츠 썸네일(9:16) 실패: ${err.message}`);
   }
 
   // 5. ffmpeg 영상 렌더링
@@ -1664,10 +1680,35 @@ async function generateLongFormMedia(content) {
     logger.error(`[media_generator] Long-form ffmpeg render failed: ${err.message}`);
   }
 
-  // ── 5.5. 롱폼 영상에 썸네일 인트로 2초 삽입 ─────────────────────────────
+  // ── 5.5. 썸네일 생성 (generateMedia에서 생성 안 됐을 경우 보완) ────────────
+  const thumbPath_      = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
+  const thumbShortsPath_= path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
+  const firstImgUrl     = sectionImageUrls[0] ?? null;
+  const [thumbExists_, thumbShortsExists_] = await Promise.all([
+    fs.access(thumbPath_).then(() => true).catch(() => false),
+    fs.access(thumbShortsPath_).then(() => true).catch(() => false),
+  ]);
+  if (!thumbExists_) {
+    try {
+      await generateThumbnail(content, firstImgUrl, thumbPath_);
+      logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 생성(보완): ${thumbPath_}`);
+    } catch (err) {
+      logger.warn(`[media_generator] 롱폼 썸네일(16:9) 생성 실패: ${err.message}`);
+    }
+  }
+  if (!thumbShortsExists_) {
+    try {
+      await generateShortsThumbnail(content, firstImgUrl, thumbShortsPath_);
+      logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 생성(보완): ${thumbShortsPath_}`);
+    } catch (err) {
+      logger.warn(`[media_generator] 쇼츠 썸네일(9:16) 생성 실패: ${err.message}`);
+    }
+  }
+
+  // ── 5.6. 롱폼 영상에 썸네일 인트로 2초 삽입 ─────────────────────────────
   // thumbnails.set API 실패(채널 미인증) 대비 — YouTube 자동 커버 후보 프레임에 포함되도록 함
   if (result.video) {
-    const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
+    const thumbShortsPath = thumbShortsPath_;
     try {
       await fs.access(thumbShortsPath);
       const tmpThumbClip  = videoPath.replace(/\.mp4$/, '_lthumbclip.mp4');
