@@ -255,12 +255,21 @@ async function scrapeTaobao(chineseQuery) {
 
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
 
-    // 상품 이미지 6개 이상 로드될 때까지 대기 (React lazy-render 고려)
-    // waitForSelector는 1개 생기면 즉시 통과 → product grid 미완성 위험
-    await page.waitForFunction(
-      () => document.querySelectorAll('img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]').length >= 6,
-      { timeout: 12000 }
-    ).catch(() => {});
+    // 상품 링크가 달린 alicdn 이미지가 1개 이상 나타날 때까지 대기
+    // (단순 alicdn 6개 대기는 로고/컴플라이언스 배너만 6개 잡는 문제 있음)
+    await page.waitForFunction(() => {
+      const imgs = document.querySelectorAll('img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]');
+      return Array.from(imgs).some(img => {
+        let el = img;
+        for (let i = 0; i < 8; i++) {
+          el = el.parentElement;
+          if (!el) break;
+          const h = (el.tagName === 'A' ? el.href : '') || el.querySelector('a')?.href || '';
+          if (h.includes('item.taobao.com') || h.includes('detail.tmall.com')) return true;
+        }
+        return false;
+      });
+    }, { timeout: 15000 }).catch(() => {});
 
     const pageTitle = await page.title();
     const currentUrl = page.url();
@@ -270,7 +279,6 @@ async function scrapeTaobao(chineseQuery) {
       throw new Error('타오바오 로그인 필요 (봇 감지)');
     }
 
-    // 스크롤로 레이지로드 트리거 후 추가 렌더 대기
     await page.evaluate(() => window.scrollTo(0, 1200));
     await page.waitForTimeout(2000);
 
@@ -278,38 +286,33 @@ async function scrapeTaobao(chineseQuery) {
       const seen = new Set();
       const items = [];
 
-      // img.alicdn.com / gw.alicdn.com 상품 이미지 기반
-      // React 이미지는 width/height 속성이 0 → naturalWidth로 판별
       const imgs = Array.from(document.querySelectorAll(
         'img[src*="img.alicdn.com"], img[src*="gw.alicdn.com"]'
-      )).filter(img => {
-        const src = img.src || '';
-        return !src.includes('logo') && !src.includes('icon') && !src.includes('favicon') && !src.includes('banner');
-      });
+      ));
 
       for (const img of imgs) {
         let thumb = img.src || img.getAttribute('src') || '';
         if (thumb.startsWith('//')) thumb = 'https:' + thumb;
         if (!thumb || thumb.startsWith('data:')) continue;
 
-        // 상위 DOM 순회해서 가장 가까운 링크 탐색
+        // 상위 DOM 순회해서 상품 페이지 링크 탐색
         let href = '';
         let el = img;
         for (let i = 0; i < 8; i++) {
           el = el.parentElement;
           if (!el) break;
-          if (el.tagName === 'A' && el.href && !el.href.includes('javascript')) {
-            href = el.href; break;
+          const h = (el.tagName === 'A' ? el.href : '') || el.querySelector('a[href]')?.href || '';
+          if (h && (h.includes('item.taobao.com') || h.includes('detail.tmall.com'))) {
+            href = h; break;
           }
-          const a = el.querySelector(':scope > a[href]');
-          if (a && a.href && !a.href.includes('javascript')) { href = a.href; break; }
         }
+        // 상품 페이지 링크 없는 이미지 = 배너/로고/컴플라이언스 → 제외
         if (!href || seen.has(href)) continue;
         seen.add(href);
 
         const container = img.closest('li') || img.closest('[class]');
         const titleEl = container?.querySelector('[class*="title"], [class*="name"], h3, h4');
-        const title = (titleEl?.textContent || titleEl?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60)
+        const title = (titleEl?.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60)
           || `상품 ${items.length + 1}`;
 
         items.push({ id: `tb-${items.length}`, thumb, title, href });
