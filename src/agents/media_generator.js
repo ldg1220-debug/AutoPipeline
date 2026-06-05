@@ -845,6 +845,64 @@ function buildTextImageClips(scenes, subtitleUrls, labelUrl, totalDuration) {
   return clips;
 }
 
+// ── 절대 실패하지 않는 초간단 썸네일 (Sharp만 사용, 외부 의존성 없음) ──────────
+/**
+ * API 키, 이미지, 네트워크가 모두 없어도 동작하는 최후 폴백 썸네일.
+ * 어두운 그라데이션 배경 + 노란 키워드 텍스트 + ▶ 오늘의 핵심 배지.
+ * 이 함수가 실패하면 인트로 삽입도 불가능하므로 try/catch 없이 throw.
+ */
+async function generateFallbackThumbnail(keyword, outputPath, isShorts = false) {
+  const W = isShorts ? 1080 : 1280;
+  const H = isShorts ? 1920 : 720;
+  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
+  const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const maxCpl   = isShorts ? 12 : 16;
+  const lines    = wrapTextKorean(keyword, maxCpl).slice(0, isShorts ? 3 : 2);
+  const fontSize = isShorts ? 96 : 72;
+  const lineH    = Math.ceil(fontSize * 1.3);
+  const blockH   = lines.length * lineH + 60;
+  const blockY   = isShorts ? Math.round(H * 0.36) : Math.round(H * 0.28);
+
+  const shadowElems = lines.map((line, i) =>
+    `<text x="${W / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}"
+      font-family="${FONT}" font-size="${fontSize}" font-weight="bold"
+      fill="#000000" fill-opacity="0.5" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+  const titleElems = lines.map((line, i) =>
+    `<text x="${W / 2}" y="${blockY + 48 + (i + 0.85) * lineH}"
+      font-family="${FONT}" font-size="${fontSize}" font-weight="bold"
+      fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
+  ).join('\n');
+
+  const badge = isShorts
+    ? `<rect x="${W / 2 - 140}" y="${blockY - 62}" width="280" height="50" rx="25" fill="#FACC15"/>
+       <text x="${W / 2}" y="${blockY - 24}" font-family="${FONT}" font-size="28" font-weight="bold" fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>`
+    : `<rect x="${W / 2 - 140}" y="${blockY - 58}" width="280" height="46" rx="23" fill="#FACC15"/>
+       <text x="${W / 2}" y="${blockY - 22}" font-family="${FONT}" font-size="26" font-weight="bold" fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>`;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#0a1228"/>
+        <stop offset="100%" stop-color="#1a2a4a"/>
+      </linearGradient>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#bg)"/>
+    <rect x="60" y="${blockY}" width="${W - 120}" height="${blockH}" rx="20" fill="#000000" fill-opacity="0.45"/>
+    <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
+    ${badge}
+    ${shadowElems}
+    ${titleElems}
+    <text x="${W / 2}" y="${blockY + blockH + 58}" font-family="${FONT}" font-size="32" fill="#94a3b8" text-anchor="middle">매일읽어주는남자</text>
+  </svg>`;
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await sharp(Buffer.from(svg)).jpeg({ quality: 92 }).toFile(outputPath);
+  logger.info(`[media_generator] 폴백 썸네일 저장: ${outputPath}`);
+  return outputPath;
+}
+
 // ── 썸네일 제목 생성 ──────────────────────────────────────────────────────
 /**
  * GPT-4o-mini로 클릭을 유도하는 썸네일 2줄 제목을 만든다.
@@ -1484,13 +1542,12 @@ async function generateMedia(content) {
     sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형) — 씬 이미지 없으면 단색 배경으로 생성
+  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형) — 반드시 생성 보장
   const thumbSceneUrl = sceneUrls[0] ?? null;
-  if (!thumbSceneUrl) {
-    logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 단색 배경으로 썸네일 생성: ${content.keyword}`);
-  } else {
-    logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
-  }
+  if (!thumbSceneUrl) logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 단색 배경으로 썸네일 생성: ${content.keyword}`);
+  else                 logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
+
+  // 롱폼 썸네일 (16:9)
   try {
     await generateThumbnail(content, thumbSceneUrl, thumbPath);
     result.thumbnail = thumbPath;
@@ -1498,13 +1555,26 @@ async function generateMedia(content) {
   } catch (err) {
     logger.error(`[media_generator] ❌ 롱폼 썸네일(16:9) 실패: ${err.message}`);
   }
+  if (!result.thumbnail) {
+    try {
+      await generateFallbackThumbnail(content.keyword, thumbPath, false);
+      result.thumbnail = thumbPath;
+    } catch (err) { logger.error(`[media_generator] 롱폼 폴백 썸네일도 실패: ${err.message}`); }
+  }
 
+  // 쇼츠 썸네일 (9:16) — 인트로 삽입에 반드시 필요하므로 폴백까지 보장
   try {
     await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
     result.thumbnail_shorts = thumbShortsPath;
     logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 저장: ${thumbShortsPath}`);
   } catch (err) {
     logger.error(`[media_generator] ❌ 쇼츠 썸네일(9:16) 실패: ${err.message}`);
+  }
+  if (!result.thumbnail_shorts) {
+    try {
+      await generateFallbackThumbnail(content.keyword, thumbShortsPath, true);
+      result.thumbnail_shorts = thumbShortsPath;
+    } catch (err) { logger.error(`[media_generator] 쇼츠 폴백 썸네일도 실패: ${err.message}`); }
   }
 
   // 5. ffmpeg 영상 렌더링
@@ -1700,17 +1770,27 @@ async function generateLongFormMedia(content) {
       await generateThumbnail(content, firstImgUrl, thumbPath_);
       logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 생성(보완): ${thumbPath_}`);
     } catch (err) {
-      logger.warn(`[media_generator] 롱폼 썸네일(16:9) 생성 실패: ${err.message}`);
+      logger.warn(`[media_generator] 롱폼 썸네일(16:9) 생성 실패, 폴백 시도: ${err.message}`);
+      await generateFallbackThumbnail(content.keyword, thumbPath_, false).catch(() => {});
     }
   }
+  // 쇼츠 썸네일은 인트로 삽입에 반드시 필요 — 폴백까지 보장
   if (!thumbShortsExists_) {
     try {
       await generateShortsThumbnail(content, firstImgUrl, thumbShortsPath_);
       logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 생성(보완): ${thumbShortsPath_}`);
     } catch (err) {
-      logger.warn(`[media_generator] 쇼츠 썸네일(9:16) 생성 실패: ${err.message}`);
+      logger.warn(`[media_generator] 쇼츠 썸네일(9:16) 생성 실패, 폴백 시도: ${err.message}`);
+      await generateFallbackThumbnail(content.keyword, thumbShortsPath_, true).catch(() => {});
     }
   }
+  // 최후 보루: 위 모두 실패해도 파일이 없으면 단순 폴백 강제 실행
+  const [finalThumbOk, finalShortsOk] = await Promise.all([
+    fs.access(thumbPath_).then(() => true).catch(() => false),
+    fs.access(thumbShortsPath_).then(() => true).catch(() => false),
+  ]);
+  if (!finalThumbOk)   await generateFallbackThumbnail(content.keyword, thumbPath_,       false).catch(() => {});
+  if (!finalShortsOk)  await generateFallbackThumbnail(content.keyword, thumbShortsPath_,  true).catch(() => {});
 
   // ── 5.6. 롱폼 영상에 썸네일 인트로 2초 삽입 ─────────────────────────────
   // thumbnails.set API 실패(채널 미인증) 대비 — YouTube 자동 커버 후보 프레임에 포함되도록 함
