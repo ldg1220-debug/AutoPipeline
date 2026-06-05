@@ -440,9 +440,6 @@
         <button class="btn btn-secondary" onclick="searchVideos('bilibili')" title="빌리빌리(중국 유튜브)에서 제품 영상 검색">
           📺 빌리빌리
         </button>
-        <button class="btn btn-secondary btn-sm" onclick="searchVideos('pexels')" title="Pexels 스톡 영상으로 검색">
-          📸 Pexels
-        </button>
       </div>
       <!-- 타오바오 로그인 상태 -->
       <div id="taobao-login-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:0.78rem">
@@ -957,9 +954,8 @@ async function searchVideos(source = 'taobao') {
   errBanner.style.display = 'none';
 
   const sourceMessages = {
-    taobao:   '🔍 타오바오 시도 중... (실패 시 Pexels로 자동 전환)',
-    bilibili:  '🔍 빌리빌리 검색 중... (실패 시 Pexels로 자동 전환)',
-    pexels:   '🔍 Pexels 스톡 영상 검색 중...',
+    taobao:   '🔍 타오바오 시도 중... (세션 없으면 빌리빌리로 자동 전환)',
+    bilibili:  '🔍 빌리빌리 검색 중...',
   };
   grid.innerHTML = `<div class="text-muted">${sourceMessages[source] || '검색 중...'}</div>`;
 
@@ -981,9 +977,6 @@ async function searchVideos(source = 'taobao') {
     // 폴백 이유 또는 오류 표시
     if (data.fallback_reason) {
       errBanner.textContent = `⚠️ ${data.fallback_reason}`;
-      errBanner.style.display = '';
-    } else if (data.source === 'mock') {
-      errBanner.textContent = '⚠️ Pexels API 키 없음 — .env에 PEXELS_API_KEY 설정 시 실제 영상 검색 가능';
       errBanner.style.display = '';
     }
 
