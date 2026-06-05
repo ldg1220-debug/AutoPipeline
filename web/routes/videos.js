@@ -12,8 +12,11 @@ const router = Router();
 // ─── 한국어 → 중국어 번역 ────────────────────────────────────────────────────
 async function translateToChinese(text) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return text;
-  const models = ['gemini-2.5-flash-lite', 'gemini-2.0-flash-lite', 'gemini-flash-latest'];
+  if (!apiKey) {
+    logger.warn('[videos] GEMINI_API_KEY 없음 — 번역 생략');
+    return text;
+  }
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -26,8 +29,10 @@ async function translateToChinese(text) {
       const res = await axios.post(url, body, { timeout: 8000 });
       const t = (res.data.candidates?.[0]?.content?.parts ?? [])
         .filter(p => p.text && !p.thought).map(p => p.text).join('').trim();
-      if (t) { logger.info(`[videos] 번역: "${text}" → "${t}"`); return t; }
-    } catch (_) {}
+      if (t) { logger.info(`[videos] 번역(${model}): "${text}" → "${t}"`); return t; }
+    } catch (err) {
+      logger.warn(`[videos] 번역 실패 (${model}): ${err.message}`);
+    }
   }
   return text;
 }
@@ -362,11 +367,14 @@ router.get('/search', async (req, res) => {
   if (source === 'bilibili') {
     try {
       const videos = await searchBilibili(chinese);
-      return res.json({ videos, source: 'bilibili', query: q, chinese_query: chinese });
+      if (videos.length > 0) {
+        return res.json({ videos, source: 'bilibili', query: q, chinese_query: chinese });
+      }
     } catch (err) {
-      logger.warn(`[videos] Bilibili 실패: ${err.message}`);
-      return res.json({ videos: PEXELS_MOCK, source: 'mock', query: q, error: err.message });
+      logger.warn(`[videos] Bilibili 실패: ${err.message} → Pexels`);
     }
+    const pexResult = await searchPexels(q);
+    return res.json({ ...pexResult, query: q, fallback_reason: '빌리빌리 접근 불가 (한국 IP 차단) → Pexels로 대체' });
   }
 
   // Taobao 우선 시도
