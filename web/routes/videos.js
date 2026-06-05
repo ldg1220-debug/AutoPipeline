@@ -306,12 +306,36 @@ async function fetchVideoFromTaobaoPage(pageUrl) {
   }
 }
 
-// ─── Pexels fallback ─────────────────────────────────────────────────────────
+// ─── Pexels 검색 (API 키 있으면 실제 검색, 없으면 mock) ──────────────────────
 const PEXELS_MOCK = [
   { id: 'px-1', thumbnail: 'https://images.pexels.com/videos/3195394/pictures/preview-0.jpg', page_url: 'https://www.pexels.com/video/3195394/', video_url: 'https://www.pexels.com/video/3195394/', source: 'pexels', title: 'Shopping lifestyle', has_video: true },
   { id: 'px-2', thumbnail: 'https://images.pexels.com/videos/4065347/pictures/preview-0.jpg', page_url: 'https://www.pexels.com/video/4065347/', video_url: 'https://www.pexels.com/video/4065347/', source: 'pexels', title: 'Consumer product', has_video: true },
   { id: 'px-3', thumbnail: 'https://images.pexels.com/videos/5309472/pictures/preview-0.jpg', page_url: 'https://www.pexels.com/video/5309472/', video_url: 'https://www.pexels.com/video/5309472/', source: 'pexels', title: 'Product demo', has_video: true },
 ];
+
+async function searchPexels(q) {
+  const key = process.env.PEXELS_API_KEY;
+  if (!key) return { videos: PEXELS_MOCK, source: 'mock' };
+  try {
+    const r = await axios.get('https://api.pexels.com/videos/search', {
+      headers: { Authorization: key },
+      params: { query: q, per_page: 9, orientation: 'portrait' },
+      timeout: 10000,
+    });
+    const videos = r.data.videos.map((v, i) => ({
+      id: `px-${v.id}`,
+      thumbnail: v.image,
+      page_url: v.url,
+      video_url: v.video_files?.find(f => f.quality === 'sd')?.link || v.url,
+      source: 'pexels',
+      title: `Pexels #${i + 1}`,
+      has_video: true,
+    }));
+    return { videos, source: 'pexels' };
+  } catch {
+    return { videos: PEXELS_MOCK, source: 'mock' };
+  }
+}
 
 // ─── 라우터 ──────────────────────────────────────────────────────────────────
 
@@ -322,23 +346,8 @@ router.get('/search', async (req, res) => {
 
   // Pexels 강제
   if (source === 'pexels') {
-    const key = process.env.PEXELS_API_KEY;
-    if (!key) return res.json({ videos: PEXELS_MOCK, source: 'mock', query: q });
-    try {
-      const r = await axios.get('https://api.pexels.com/videos/search', {
-        headers: { Authorization: key },
-        params: { query: q, per_page: 9, orientation: 'portrait' },
-        timeout: 10000,
-      });
-      const videos = r.data.videos.map((v, i) => ({
-        id: `px-${v.id}`, thumbnail: v.image, page_url: v.url,
-        video_url: v.video_files?.find(f => f.quality === 'sd')?.link || v.url,
-        source: 'pexels', title: `Pexels #${i + 1}`, has_video: true,
-      }));
-      return res.json({ videos, source: 'pexels', query: q });
-    } catch {
-      return res.json({ videos: PEXELS_MOCK, source: 'mock', query: q });
-    }
+    const result = await searchPexels(q);
+    return res.json({ ...result, query: q });
   }
 
   // 중국어 번역
@@ -362,14 +371,16 @@ router.get('/search', async (req, res) => {
 
   // Taobao 우선 시도
   if (!source || source === 'taobao') {
+    let taobaoErr = null;
     try {
       const videos = await scrapeTaobao(chinese);
       if (videos.length > 0) {
         return res.json({ videos, source: 'taobao', query: q, chinese_query: chinese });
       }
-      logger.warn('[videos] 타오바오 결과 0개 → Bilibili fallback');
+      taobaoErr = '타오바오 결과 0개';
     } catch (err) {
-      logger.warn(`[videos] 타오바오 실패: ${err.message} → Bilibili fallback`);
+      taobaoErr = err.message;
+      logger.warn(`[videos] 타오바오 실패: ${err.message}`);
     }
 
     // Bilibili fallback
@@ -378,15 +389,24 @@ router.get('/search', async (req, res) => {
       if (videos.length > 0) {
         return res.json({
           videos, source: 'bilibili', query: q, chinese_query: chinese,
-          fallback_reason: '타오바오 접근 불가 → 빌리빌리로 대체',
+          fallback_reason: `타오바오 접근 불가 → 빌리빌리로 대체 (${taobaoErr})`,
         });
       }
     } catch (err) {
-      logger.warn(`[videos] Bilibili fallback도 실패: ${err.message}`);
+      logger.warn(`[videos] Bilibili fallback도 실패: ${err.message} → Pexels`);
     }
+
+    // 최후 Pexels fallback (API 키 있으면 실제 검색)
+    const pexResult = await searchPexels(q);
+    const reason = taobaoErr?.includes('Playwright')
+      ? 'Playwright 미설치 (npx playwright install chromium) + 빌리빌리 차단 → Pexels로 대체'
+      : '중국 서비스 접근 불가 (한국 IP 차단) → Pexels로 대체';
+    return res.json({ ...pexResult, query: q, fallback_reason: reason });
   }
 
-  return res.json({ videos: PEXELS_MOCK, source: 'mock', query: q });
+  // Bilibili 강제 선택 후 실패 시 Pexels
+  const pexResult = await searchPexels(q);
+  return res.json({ ...pexResult, query: q });
 });
 
 // GET /api/videos/fetch-video?url=URL&bvid=BVID

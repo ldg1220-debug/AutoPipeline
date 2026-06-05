@@ -827,8 +827,8 @@ async function searchVideos(source = 'taobao') {
   errBanner.style.display = 'none';
 
   const sourceMessages = {
-    taobao:   '🔍 타오바오 검색 중... (한국어 → 중국어 번역 → 스크래핑, 약 30초 소요)',
-    bilibili:  '🔍 빌리빌리 검색 중... (한국어 → 중국어 번역)',
+    taobao:   '🔍 타오바오 시도 중... (실패 시 Pexels로 자동 전환)',
+    bilibili:  '🔍 빌리빌리 검색 중... (실패 시 Pexels로 자동 전환)',
     pexels:   '🔍 Pexels 스톡 영상 검색 중...',
   };
   grid.innerHTML = `<div class="text-muted">${sourceMessages[source] || '검색 중...'}</div>`;
@@ -853,7 +853,7 @@ async function searchVideos(source = 'taobao') {
       errBanner.textContent = `⚠️ ${data.fallback_reason}`;
       errBanner.style.display = '';
     } else if (data.source === 'mock') {
-      errBanner.textContent = '⚠️ 타오바오/빌리빌리 접근 실패 — 네트워크 상태를 확인하거나 Playwright가 설치되어 있는지 확인하세요 (npx playwright install chromium)';
+      errBanner.textContent = '⚠️ Pexels API 키 없음 — .env에 PEXELS_API_KEY 설정 시 실제 영상 검색 가능';
       errBanner.style.display = '';
     }
 

@@ -4,7 +4,6 @@
  * GET /api/trending?category=id → 해당 카테고리 인기상품
  */
 import { Router } from 'express';
-import { chromium } from 'playwright';
 import logger from '../../src/utils/logger.js';
 
 const router = Router();
@@ -146,6 +145,7 @@ const MOCK_DEFAULT = MOCK_BY_CATEGORY['393760'];
  * Playwright로 쿠팡 카테고리 인기상품 스크래핑
  */
 async function scrapeCoupangCategory(categoryId) {
+  const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
   const catName = CATEGORY_MAP[categoryId] ?? '상품';
   try {
