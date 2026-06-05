@@ -5,7 +5,9 @@
  */
 import { Router } from 'express';
 import axios from 'axios';
+import fs from 'fs/promises';
 import logger from '../../src/utils/logger.js';
+import { SESSION_FILE } from './taobao.js';
 
 const router = Router();
 
@@ -165,6 +167,17 @@ async function scrapeTaobao(chineseQuery) {
       locale: 'zh-CN',
       extraHTTPHeaders: { 'Accept-Language': 'zh-CN,zh;q=0.9' },
     });
+
+    // 저장된 타오바오 세션 로드
+    try {
+      const session = JSON.parse(await fs.readFile(SESSION_FILE, 'utf8'));
+      const age = Date.now() - (session.savedAt ?? 0);
+      if (session.cookies?.length && age < 7 * 24 * 60 * 60 * 1000) {
+        await ctx.addCookies(session.cookies);
+        logger.info(`[videos/taobao] 저장된 세션 사용 (쿠키 ${session.cookies.length}개)`);
+      }
+    } catch { /* 세션 파일 없음 — 비로그인 상태로 진행 */ }
+
     const page = await ctx.newPage();
     const results = [];
 

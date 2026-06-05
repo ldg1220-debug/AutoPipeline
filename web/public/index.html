@@ -444,6 +444,15 @@
           📸 Pexels
         </button>
       </div>
+      <!-- 타오바오 로그인 상태 -->
+      <div id="taobao-login-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:0.78rem">
+        <span id="taobao-login-dot" style="width:8px;height:8px;border-radius:50%;background:#4a5568;flex-shrink:0"></span>
+        <span id="taobao-login-label" style="color:var(--text-muted)">타오바오 로그인 상태 확인 중...</span>
+        <button id="taobao-login-btn" onclick="startTaobaoLogin()" class="btn btn-secondary btn-sm" style="margin-left:auto;padding:3px 10px;font-size:0.72rem">🔑 로그인</button>
+        <button id="taobao-logout-btn" onclick="clearTaobaoSession()" class="btn btn-secondary btn-sm" style="display:none;padding:3px 10px;font-size:0.72rem;color:var(--danger)">로그아웃</button>
+      </div>
+      <div id="taobao-login-progress" style="display:none;font-size:0.78rem;padding:8px 12px;border-radius:8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);margin-bottom:8px"></div>
+
       <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px" id="video-source-label">
         한국어 입력 → 중국어 자동 번역 → 타오바오/빌리빌리 검색
       </div>
@@ -813,6 +822,81 @@ function goToStep2() {
   markDone('step1');
   unlockStep('step2');
 }
+
+// ─── 타오바오 로그인 관리 ──────────────────────────────────────────────────
+async function checkTaobaoLogin() {
+  try {
+    const res  = await fetch('/api/taobao/status');
+    const data = await res.json();
+    const dot      = document.getElementById('taobao-login-dot');
+    const lbl      = document.getElementById('taobao-login-label');
+    const loginBtn  = document.getElementById('taobao-login-btn');
+    const logoutBtn = document.getElementById('taobao-logout-btn');
+    if (data.loggedIn) {
+      dot.style.background    = '#10b981';
+      lbl.textContent         = `타오바오 로그인됨 ✅  쿠키 ${data.cookieCount}개 · ${data.expiresIn} 후 만료`;
+      lbl.style.color         = '#10b981';
+      loginBtn.style.display  = 'none';
+      logoutBtn.style.display = '';
+    } else {
+      dot.style.background    = '#ef4444';
+      lbl.textContent         = '타오바오 미로그인 — 로그인 시 검색 품질 향상';
+      lbl.style.color         = 'var(--text-muted)';
+      loginBtn.style.display  = '';
+      logoutBtn.style.display = 'none';
+    }
+  } catch { /* 무시 */ }
+}
+
+async function startTaobaoLogin() {
+  const progress  = document.getElementById('taobao-login-progress');
+  const loginBtn  = document.getElementById('taobao-login-btn');
+  progress.style.display      = '';
+  progress.style.background   = 'rgba(0,212,255,0.08)';
+  progress.style.borderColor  = 'rgba(0,212,255,0.2)';
+  progress.style.color        = '';
+  progress.textContent        = '로그인 준비 중...';
+  loginBtn.disabled           = true;
+  loginBtn.textContent        = '⏳ 진행 중...';
+
+  const evtSource = new EventSource('/api/taobao/login');
+  evtSource.onmessage = async (e) => {
+    const data = JSON.parse(e.data);
+    progress.textContent = data.message;
+    if (data.status === 'success') {
+      progress.style.background  = 'rgba(16,185,129,0.1)';
+      progress.style.borderColor = 'rgba(16,185,129,0.3)';
+      progress.style.color       = '#10b981';
+      evtSource.close();
+      await checkTaobaoLogin();
+      loginBtn.disabled    = false;
+      loginBtn.textContent = '🔑 로그인';
+    } else if (data.status === 'error') {
+      progress.style.background  = 'rgba(239,68,68,0.1)';
+      progress.style.borderColor = 'rgba(239,68,68,0.3)';
+      progress.style.color       = '#ef4444';
+      evtSource.close();
+      loginBtn.disabled    = false;
+      loginBtn.textContent = '🔑 로그인';
+    }
+  };
+  evtSource.onerror = () => {
+    if (!progress.textContent.includes('완료')) {
+      progress.textContent = '연결 오류 — 서버 상태를 확인하세요.';
+    }
+    evtSource.close();
+    loginBtn.disabled    = false;
+    loginBtn.textContent = '🔑 로그인';
+  };
+}
+
+async function clearTaobaoSession() {
+  await fetch('/api/taobao/clear-session', { method: 'POST' });
+  document.getElementById('taobao-login-progress').style.display = 'none';
+  await checkTaobaoLogin();
+}
+
+checkTaobaoLogin();
 
 // =============================================
 // STEP 2 — 영상 소스 검색

@@ -15,6 +15,7 @@ import trendingRouter from './routes/trending.js';
 import videosRouter from './routes/videos.js';
 import scriptRouter from './routes/script.js';
 import publishRouter from './routes/publish.js';
+import taobaoRouter from './routes/taobao.js';
 import logger from '../src/utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,6 +59,7 @@ app.use('/api/trending', trendingRouter);
 app.use('/api/videos', videosRouter);
 app.use('/api/script', scriptRouter);
 app.use('/api/publish', publishRouter);
+app.use('/api/taobao', taobaoRouter);
 
 /**
  * 완성 영상 업로드
