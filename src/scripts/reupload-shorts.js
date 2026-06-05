@@ -34,7 +34,8 @@ async function ffmpegPath() {
 }
 
 // ── 재업로드 목록 ──────────────────────────────────────────────────────────────
-// keyword: content JSON의 정확한 keyword (또는 빈 문자열 → safeKw로 대체)
+// keyword: content JSON의 정확한 keyword — 부정확해도 search 필드로 파일 자동 탐색
+// search:  미디어 파일명에서 fuzzy 검색할 키워드 (keyword 불확실할 때 사용)
 // oldVideoId: 기존 업로드된 쇼츠 ID (참고용, 수동 삭제)
 // date: content JSON 날짜 (YYYYMMDD), 없으면 오늘
 const VIDEO_LIST = [
@@ -45,7 +46,8 @@ const VIDEO_LIST = [
   },
   {
     keyword:    '국제유가, 중동 무력공방 재개에 3일 연속 상승 WTI 96달러',
-    oldVideoId: null,          // 쇼츠 미업로드 상태
+    search:     '국제유가',    // 파일명 fuzzy 탐색 + content JSON keyword 자동 교정
+    oldVideoId: null,
     date:       '20260604',
   },
 ];
@@ -66,8 +68,20 @@ async function getAccessToken(channelConfig = config.youtube) {
   return res.data.access_token;
 }
 
+// ── 미디어 디렉토리에서 search 키워드로 _shorts.mp4 파일 자동 탐색 ─────────────
+async function findShortsFile(mediaDir, search) {
+  const entries = await fs.readdir(mediaDir).catch(() => []);
+  // search 문자열을 safeKw 패턴으로 변환 후 파일명에 포함 여부 확인
+  const safeSrch = search.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+  const match = entries.find(f => f.endsWith('_shorts.mp4') && f.includes(safeSrch));
+  if (!match) return null;
+  // safeKw 추출: _shorts.mp4 제거
+  const safeKw = match.slice(0, -'_shorts.mp4'.length);
+  return { safeKw, shortsPath: path.resolve(mediaDir, match) };
+}
+
 // ── content JSON에서 keyword로 콘텐츠 찾기 ────────────────────────────────────
-async function loadContent(keyword, date) {
+async function loadContent(keyword, date, search) {
   const d = date ?? new Date().toISOString().slice(0, 10).replace(/-/g, '');
   for (const candidate of [d, ...[1,2,3].map(i => {
     const dt = new Date(Date.now() - i * 86400000);
@@ -75,7 +89,15 @@ async function loadContent(keyword, date) {
   })]) {
     try {
       const data = await readJSON(path.resolve(__dirname, `../../output/scripts/content_${candidate}.json`));
-      const found = (data.contents ?? []).find(c => c.keyword === keyword);
+      // 정확한 keyword 먼저 시도
+      let found = (data.contents ?? []).find(c => c.keyword === keyword);
+      // 없으면 search 문자열 포함 여부로 재탐색
+      if (!found && search) {
+        found = (data.contents ?? []).find(c => c.keyword?.includes(search));
+        if (found) {
+          logger.info(`[reupload-shorts] keyword 자동 교정: "${keyword}" → "${found.keyword}"`);
+        }
+      }
       if (found) return found;
     } catch {}
   }
@@ -265,17 +287,29 @@ async function uploadShorts(videoPath, content, accessToken, thumbPath) {
     process.exit(1);
   }
 
-  for (const { keyword, oldVideoId, date } of VIDEO_LIST) {
+  for (const { keyword, search, oldVideoId, date } of VIDEO_LIST) {
     logger.info(`\n[reupload-shorts] ── 처리: ${keyword}`);
-    const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
 
-    const shortsPath = path.resolve(mediaDir, `${safeKw}_shorts.mp4`);
+    // safeKw / shortsPath 결정: search 필드 있으면 디렉토리 자동 탐색 우선
+    let safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    let shortsPath = path.resolve(mediaDir, `${safeKw}_shorts.mp4`);
+
+    const exactExists = await fs.access(shortsPath).then(() => true).catch(() => false);
+    if (!exactExists && search) {
+      const found = await findShortsFile(mediaDir, search);
+      if (found) {
+        logger.info(`[reupload-shorts] 파일 자동 탐색: ${path.basename(found.shortsPath)}`);
+        safeKw     = found.safeKw;
+        shortsPath = found.shortsPath;
+      }
+    }
+
     if (!await fs.access(shortsPath).then(() => true).catch(() => false)) {
       logger.error(`[reupload-shorts] 쇼츠 파일 없음: ${shortsPath}`);
       continue;
     }
 
-    const content = await loadContent(keyword, date);
+    const content = await loadContent(keyword, date, search);
 
     // 1. 썸네일 생성 (없으면)
     let thumbPath;
