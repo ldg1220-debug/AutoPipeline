@@ -25,11 +25,14 @@ const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 // ── 매읽남 캐릭터 공통 설명 ──────────────────────────────────────────────
 const MAEILNAMJA_BASE =
-  'Chibi kawaii anime-style white Persian cat professor character, ' +
+  'Flat vector 2D illustration, chibi kawaii style, pure white clean studio background, ' +
+  'white Persian cat professor character, ' +
   'wearing beige/tan blazer with dark navy necktie, small round gold-rim glasses, ' +
   'extremely fluffy white fur, adorable chubby proportions, full body visible, ' +
-  'expressive large eyes, Korean YouTube Shorts educational content style, ' +
-  'vibrant clean illustration, absolutely no text or letters anywhere in the image';
+  'expressive large eyes, bold clean outlines, solid flat colors, no shading gradients, ' +
+  'no photorealism, no 3D rendering, no real backgrounds, no textures, ' +
+  'Korean educational YouTube character illustration style, ' +
+  'absolutely no text or letters anywhere in the image';
 
 // act별 분위기 가이드
 const ACT_MOODS = [
@@ -255,24 +258,19 @@ async function generateSceneImages(keyword, scripts, category) {
       logger.info(`[media_generator] Cached file missing, regenerating act${i}: ${keyword}`);
     }
 
-    // 매읽남 캐릭터 + 씬별 포즈 + 씬별 배경 조합
-    const { bg, pose } = sceneList[i] ?? { bg: '', pose: '' };
+    // 매읽남 캐릭터 + 씬별 포즈 — 배경 지정 없이 스타일 고정 (Grok 혼용 금지)
+    const { pose } = sceneList[i] ?? { pose: '' };
     const imagePrompt =
       `${MAEILNAMJA_BASE}. ` +
       `Character action: ${pose}. ` +
-      `Background scene: ${bg}. ` +
-      `Full body character centered, 9:16 portrait composition, high quality, vibrant illustration.`;
+      `Full body character centered, 9:16 portrait composition, high quality.`;
 
     const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
     const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
 
-    // Grok Aurora 우선 → OpenAI gpt-image-1 폴백 → Pexels 최종 폴백
+    // gpt-image-1 단일 엔진 사용 — Grok Aurora와 혼용 시 스타일 불일치 발생
     let imageUrl = null;
-    if (config.grok?.apiKey) {
-      imageUrl = await generateImageGrokAurora(imagePrompt, imgPath);
-      if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, Grok Aurora): ${keyword}`);
-    }
-    if (!imageUrl && config.openai.apiKey) {
+    if (config.openai.apiKey) {
       try {
         const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
         const res = await axios.post(
@@ -950,99 +948,6 @@ async function generateThumbnailTitle(keyword, hook) {
 }
 
 
-// ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
-/**
- * YouTube Shorts 세로 포맷 썸네일.
- * renderFirstFramePngBuffer와 동일한 스타일:
- * - 배경: 캐릭터/씬 이미지 (없으면 단색)
- * - 상단 그라데이션 오버레이
- * - "▶ 오늘의 핵심" 노란 배지
- * - 키워드를 노란 큰 텍스트로 중앙 배치
- * - 시리즈명 하단
- */
-async function generateShortsThumbnail(content, charImageUrl, outputPath) {
-  const W = 1080, H = 1920;
-  const keyword    = content.keyword ?? '';
-  const seriesName = content.series_name ?? '매일읽어주는남자';
-  const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-
-  // 배경 이미지 처리 (없으면 어두운 단색 폴백)
-  let charBuf;
-  if (charImageUrl) {
-    const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
-      ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
-      : await fs.readFile(charImageUrl);
-    charBuf = await sharp(charRaw)
-      .resize(W, H, { fit: 'cover', position: 'centre' })
-      .png()
-      .toBuffer();
-  } else {
-    charBuf = await sharp({
-      create: { width: W, height: H, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
-    }).png().toBuffer();
-    logger.info(`[media_generator] Shorts thumbnail: 이미지 없음 → 단색 배경 사용`);
-  }
-
-  // 키워드 줄바꿈 (12자/줄, 최대 3줄)
-  const lines     = wrapTextKorean(keyword, 12).slice(0, 3);
-  const titleSize = 96;
-  const lineH     = Math.ceil(titleSize * 1.3);
-  const blockH    = lines.length * lineH + 60;
-  const blockY    = Math.round(H * 0.36);
-
-  const shadowElems = lines.map((line, i) =>
-    `<text x="${W / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}"
-      font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
-      fill="#000000" fill-opacity="0.55" text-anchor="middle">${esc(line)}</text>`
-  ).join('\n');
-  const titleElems = lines.map((line, i) =>
-    `<text x="${W / 2}" y="${blockY + 48 + (i + 0.85) * lineH}"
-      font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
-      fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
-  ).join('\n');
-
-  const overlay = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <defs>
-        <linearGradient id="grad" x1="0" y1="0.25" x2="0" y2="1">
-          <stop offset="0%"   stop-color="#000000" stop-opacity="0"/>
-          <stop offset="42%"  stop-color="#000000" stop-opacity="0.68"/>
-          <stop offset="100%" stop-color="#000000" stop-opacity="0.88"/>
-        </linearGradient>
-      </defs>
-      <!-- 하단 그라데이션 -->
-      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#grad)"/>
-      <!-- 키워드 배경 박스 -->
-      <rect x="60" y="${blockY}" width="${W - 120}" height="${blockH}" rx="20"
-        fill="#000000" fill-opacity="0.52"/>
-      <!-- 좌측 노란 강조 바 -->
-      <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
-      <!-- ▶ 오늘의 핵심 배지 -->
-      <rect x="${W / 2 - 140}" y="${blockY - 62}" width="280" height="50" rx="25" fill="#FACC15"/>
-      <text x="${W / 2}" y="${blockY - 24}"
-        font-family="${FONT}" font-size="28" font-weight="bold"
-        fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>
-      <!-- 키워드 그림자 + 텍스트 -->
-      ${shadowElems}
-      ${titleElems}
-      <!-- 시리즈명 하단 -->
-      <text x="${W / 2}" y="${blockY + blockH + 58}"
-        font-family="${FONT}" font-size="36"
-        fill="#94a3b8" text-anchor="middle">${esc(seriesName)}</text>
-    </svg>`
-  );
-
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await sharp(charBuf)
-    .composite([{ input: overlay }])
-    .jpeg({ quality: 95 })
-    .toFile(outputPath);
-
-  logger.info(`[media_generator] Shorts thumbnail saved: ${outputPath}`);
-  return outputPath;
-}
-
 // ── 썸네일 이미지 합성 (1280×720) ────────────────────────────────────────
 /**
  * 레이아웃:
@@ -1462,9 +1367,8 @@ async function generateMedia(content) {
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
   const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.srt`);
 
-  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
-  const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_shorts: null };
+  const thumbPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
+  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -1548,39 +1452,23 @@ async function generateMedia(content) {
     sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
   }
 
-  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형) — 반드시 생성 보장
+  // 4. 썸네일 생성 (16:9) — 반드시 생성 보장
   const thumbSceneUrl = sceneUrls[0] ?? null;
   if (!thumbSceneUrl) logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 단색 배경으로 썸네일 생성: ${content.keyword}`);
   else                 logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
 
-  // 롱폼 썸네일 (16:9)
   try {
     await generateThumbnail(content, thumbSceneUrl, thumbPath);
     result.thumbnail = thumbPath;
-    logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 저장: ${thumbPath}`);
+    logger.info(`[media_generator] ✅ 썸네일(16:9) 저장: ${thumbPath}`);
   } catch (err) {
-    logger.error(`[media_generator] ❌ 롱폼 썸네일(16:9) 실패: ${err.message}`);
+    logger.error(`[media_generator] ❌ 썸네일(16:9) 실패: ${err.message}`);
   }
   if (!result.thumbnail) {
     try {
       await generateFallbackThumbnail(content.keyword, thumbPath, false);
       result.thumbnail = thumbPath;
-    } catch (err) { logger.error(`[media_generator] 롱폼 폴백 썸네일도 실패: ${err.message}`); }
-  }
-
-  // 쇼츠 썸네일 (9:16) — 인트로 삽입에 반드시 필요하므로 폴백까지 보장
-  try {
-    await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
-    result.thumbnail_shorts = thumbShortsPath;
-    logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 저장: ${thumbShortsPath}`);
-  } catch (err) {
-    logger.error(`[media_generator] ❌ 쇼츠 썸네일(9:16) 실패: ${err.message}`);
-  }
-  if (!result.thumbnail_shorts) {
-    try {
-      await generateFallbackThumbnail(content.keyword, thumbShortsPath, true);
-      result.thumbnail_shorts = thumbShortsPath;
-    } catch (err) { logger.error(`[media_generator] 쇼츠 폴백 썸네일도 실패: ${err.message}`); }
+    } catch (err) { logger.error(`[media_generator] 폴백 썸네일도 실패: ${err.message}`); }
   }
 
   // 5. ffmpeg 영상 렌더링
@@ -1665,27 +1553,24 @@ async function generateLongFormMedia(content) {
   );
   logger.info(`[media_generator] Long-form total: ${sectionDurations.reduce((a, b) => a + b, 0)}s, sections: ${sections.length}`);
 
-  // ── 3. 섹션별 이미지 생성 (Grok Aurora → gpt-image-1 → Pexels) ──────────
-  const sectionImageUrls = [];
-  for (let i = 0; i < sections.length; i++) {
+  // ── 3. 이미지 3컷 생성 후 섹션 전체에 재사용 (스타일 일관성 보장) ──────────
+  // 롱폼 섹션 수에 상관없이 동일한 3개 이미지를 순환 사용해 아트 스타일 고정.
+  const BASE_POSES = [
+    'dramatic urgent expression, arms raised in surprise, eyes wide open',
+    'explaining confidently, pointing forward, professional teaching gesture',
+    'calm warm smile, thumbs up, slight bow, satisfied expression',
+  ];
+  const baseImgUrls = [];
+  for (let b = 0; b < 3; b++) {
     await throttle(300);
-    const keyPoint = sections[i].key_point ?? sections[i].name ?? content.keyword;
-    const pose = i === 0 ? 'dramatic urgent expression, arms raised in surprise'
-      : i === sections.length - 1 ? 'calm warm smile, thumbs up, slight bow'
-      : 'explaining confidently, pointing at invisible chart, professional gesture';
     const imagePrompt =
-      `${MAEILNAMJA_BASE}. Character action: ${pose}. ` +
-      `Background scene: professional environment relevant to "${keyPoint}". ` +
-      `Full body visible, 9:16 portrait, vibrant illustration.`;
-
-    const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_img${i}.png`);
+      `${MAEILNAMJA_BASE}. Character action: ${BASE_POSES[b]}. ` +
+      `Full body visible, 9:16 portrait.`;
+    const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_base${b}.png`);
     let imageUrl  = null;
 
-    if (config.grok?.apiKey) {
-      imageUrl = await generateImageGrokAurora(imagePrompt, imgPath);
-      if (imageUrl) logger.info(`[media_generator] Long-form image s${i} (Grok Aurora): ${content.keyword}`);
-    }
-    if (!imageUrl && config.openai?.apiKey) {
+    // gpt-image-1 만 사용 — Grok Aurora와 혼용 시 스타일이 달라지므로 단일 엔진 고정
+    if (config.openai?.apiKey) {
       try {
         const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'medium' };
         const res = await axios.post(
@@ -1697,23 +1582,29 @@ async function generateLongFormMedia(content) {
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         } else if (item.url) {
-          // 임시 URL 만료 전 즉시 다운로드
           const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
           await fs.mkdir(path.dirname(imgPath), { recursive: true });
           await fs.writeFile(imgPath, Buffer.from(imgRes.data));
           imageUrl = imgPath;
         }
+        if (imageUrl) logger.info(`[media_generator] Long-form base image ${b + 1}/3 (gpt-image-1): ${content.keyword}`);
       } catch (err) {
-        logger.warn(`[media_generator] Long-form gpt-image-1 s${i} failed: ${err.message}`);
+        logger.warn(`[media_generator] Long-form base image ${b} failed: ${err.message}`);
       }
     }
     if (!imageUrl) {
       const pexels = await searchPexelsImages(content.keyword, content.category, 1);
       imageUrl = pexels[0] || null;
     }
-    sectionImageUrls.push(imageUrl);
+    baseImgUrls.push(imageUrl);
   }
-  logger.info(`[media_generator] Long-form images: ${sectionImageUrls.filter(Boolean).length}/${sections.length}`);
+
+  // 섹션별로 3개 기본 이미지를 순환 배정 (도입→긴장, 중간→설명, 마무리→희망)
+  const sectionImageUrls = sections.map((_, i) => {
+    const act = i === 0 ? 0 : i === sections.length - 1 ? 2 : 1;
+    return baseImgUrls[act] ?? baseImgUrls.find(Boolean) ?? null;
+  });
+  logger.info(`[media_generator] Long-form images: 3 base images reused across ${sections.length} sections`);
 
   // ── 4. 섹션 오디오 ffmpeg로 병합 ────────────────────────────────────────
   const mergedAudioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_merged.mp3`);
@@ -1764,13 +1655,9 @@ async function generateLongFormMedia(content) {
   }
 
   // ── 5.5. 썸네일 생성 (generateMedia에서 생성 안 됐을 경우 보완) ────────────
-  const thumbPath_      = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
-  const thumbShortsPath_= path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-  const firstImgUrl     = sectionImageUrls[0] ?? null;
-  const [thumbExists_, thumbShortsExists_] = await Promise.all([
-    fs.access(thumbPath_).then(() => true).catch(() => false),
-    fs.access(thumbShortsPath_).then(() => true).catch(() => false),
-  ]);
+  const thumbPath_  = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
+  const firstImgUrl = sectionImageUrls[0] ?? null;
+  const thumbExists_ = await fs.access(thumbPath_).then(() => true).catch(() => false);
   if (!thumbExists_) {
     try {
       await generateThumbnail(content, firstImgUrl, thumbPath_);
@@ -1780,122 +1667,8 @@ async function generateLongFormMedia(content) {
       await generateFallbackThumbnail(content.keyword, thumbPath_, false).catch(() => {});
     }
   }
-  // 쇼츠 썸네일은 인트로 삽입에 반드시 필요 — 폴백까지 보장
-  if (!thumbShortsExists_) {
-    try {
-      await generateShortsThumbnail(content, firstImgUrl, thumbShortsPath_);
-      logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 생성(보완): ${thumbShortsPath_}`);
-    } catch (err) {
-      logger.warn(`[media_generator] 쇼츠 썸네일(9:16) 생성 실패, 폴백 시도: ${err.message}`);
-      await generateFallbackThumbnail(content.keyword, thumbShortsPath_, true).catch(() => {});
-    }
-  }
-  // 최후 보루: 위 모두 실패해도 파일이 없으면 단순 폴백 강제 실행
-  const [finalThumbOk, finalShortsOk] = await Promise.all([
-    fs.access(thumbPath_).then(() => true).catch(() => false),
-    fs.access(thumbShortsPath_).then(() => true).catch(() => false),
-  ]);
-  if (!finalThumbOk)   await generateFallbackThumbnail(content.keyword, thumbPath_,       false).catch(() => {});
-  if (!finalShortsOk)  await generateFallbackThumbnail(content.keyword, thumbShortsPath_,  true).catch(() => {});
-
-  // ── 5.6. 롱폼 영상에 썸네일 인트로 2초 삽입 ─────────────────────────────
-  // thumbnails.set API 실패(채널 미인증) 대비 — YouTube 자동 커버 후보 프레임에 포함되도록 함
-  if (result.video) {
-    const thumbShortsPath = thumbShortsPath_;
-    try {
-      await fs.access(thumbShortsPath);
-      const tmpThumbClip  = videoPath.replace(/\.mp4$/, '_lthumbclip.mp4');
-      const tmpMergedPath = videoPath.replace(/\.mp4$/, '_lmerged.mp4');
-
-      await execFileAsync(ffmpegPath, [
-        '-loop', '1', '-i', thumbShortsPath,
-        '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-        '-t', '2',
-        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
-        '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
-        '-preset', 'fast', '-shortest', '-y', tmpThumbClip,
-      ]);
-
-      await execFileAsync(ffmpegPath, [
-        '-i', tmpThumbClip,
-        '-i', videoPath,
-        '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
-        '-map', '[v]', '-map', '[a]',
-        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMergedPath,
-      ]);
-
-      await fs.unlink(videoPath);
-      await fs.rename(tmpMergedPath, videoPath);
-      await fs.unlink(tmpThumbClip);
-      logger.info(`[media_generator] Long-form thumbnail intro prepended (2s cover frame)`);
-    } catch (thumbErr) {
-      logger.warn(`[media_generator] Long-form thumbnail prepend skipped: ${thumbErr.message}`);
-    }
-  }
-
-  // ── 6. 숏폼 추출 — source_section 구간을 롱폼에서 잘라냄 ──────────────
-  if (result.video) {
-    try {
-      const sourceIdx = (content.shorts?.source_section ?? content.shortform_script?.source_section ?? 5) - 1;
-      const clampedIdx = Math.max(0, Math.min(sourceIdx, adjustedDurations.length - 1));
-
-      // 섹션 누적 시작 시간 계산 (조정된 길이 기준)
-      let sectionStart = 0;
-      for (let i = 0; i < clampedIdx; i++) sectionStart += adjustedDurations[i];
-      const sectionDur = Math.min(adjustedDurations[clampedIdx] ?? 60, 58); // 1초 인트로 붙인 후 총 59초 이내 유지
-
-      const shortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_shorts.mp4`);
-      const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')
-        .replace(/'/g, "\\'").replace(/:/g, '\\:');
-
-      // 구간 잘라내기 + 9:16 크롭 (설명란 URL로 YouTube가 롱폼 자동 연결)
-      await execFileAsync(ffmpegPath, [
-        '-ss', String(sectionStart),
-        '-t',  String(sectionDur),
-        '-i',  result.video,
-        '-vf', 'crop=ih*9/16:ih:(iw-ih*9/16)/2:0',
-        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', shortsPath,
-      ]);
-
-      result.shorts_video = shortsPath;
-      result.shorts_section_idx = clampedIdx;
-      result.shorts_start_sec   = sectionStart;
-      logger.info(`[media_generator] Shorts extracted from section ${clampedIdx + 1} (${sectionStart}s~${sectionStart + sectionDur}s): ${shortsPath}`);
-
-      // 썸네일 1초 인트로 삽입 → YouTube Shorts 커버 프레임 선택 가능
-      const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-      try {
-        await fs.access(thumbShortsPath);
-        const tmpThumbClip  = shortsPath.replace(/\.mp4$/, '_thumbclip.mp4');
-        const tmpMergedPath = shortsPath.replace(/\.mp4$/, '_merged.mp4');
-
-        await execFileAsync(ffmpegPath, [
-          '-loop', '1', '-i', thumbShortsPath,
-          '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-          '-t', '2',
-          '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
-          '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
-          '-preset', 'fast', '-shortest', '-y', tmpThumbClip,
-        ]);
-
-        await execFileAsync(ffmpegPath, [
-          '-i', tmpThumbClip,
-          '-i', shortsPath,
-          '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
-          '-map', '[v]', '-map', '[a]',
-          '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMergedPath,
-        ]);
-
-        await fs.unlink(shortsPath);
-        await fs.rename(tmpMergedPath, shortsPath);
-        await fs.unlink(tmpThumbClip);
-        logger.info(`[media_generator] Shorts thumbnail intro prepended (1s cover frame)`);
-      } catch (thumbErr) {
-        logger.warn(`[media_generator] Shorts thumbnail prepend skipped: ${thumbErr.message}`);
-      }
-    } catch (err) {
-      logger.warn(`[media_generator] Shorts extraction failed: ${err.message}`);
-    }
+  if (!(await fs.access(thumbPath_).then(() => true).catch(() => false))) {
+    await generateFallbackThumbnail(content.keyword, thumbPath_, false).catch(() => {});
   }
 
   return result;
