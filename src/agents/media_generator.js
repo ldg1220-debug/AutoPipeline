@@ -427,16 +427,17 @@ function wrapTextKorean(text, maxCharsPerLine = 22) {
 function buildScenes(scripts, totalDuration) {
   const { hook = '', context = '', insight = '', summary = '', cta = '' } = scripts;
 
+  // 자막 청크: 전체 텍스트 사용 (잘라내기 금지 → 싱크 불일치 원인)
   const actChunks = [
-    { act: 0, chunks: splitText(hook.slice(0, 80), 45) },
+    { act: 0, chunks: splitText(hook, 20) },
     { act: 1, chunks: [
-        ...splitText(context.slice(0, 180), 45),
-        ...splitText(insight.slice(0, 280), 45),
+        ...splitText(context, 20),
+        ...splitText(insight, 20),
       ]
     },
     { act: 2, chunks: [
-        ...splitText(summary.slice(0, 140), 45),
-        ...splitText(cta.slice(0, 100),    45),
+        ...splitText(summary, 20),
+        ...splitText(cta,     20),
       ]
     },
   ];
@@ -609,14 +610,14 @@ async function renderLabelPng(seriesName, outputPath) {
 async function renderSubtitlePngBuffer(text) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const fontSize = 44;           // 48 → 44: 동일 박스에 더 많은 글자 수용
-  const lineH = Math.ceil(fontSize * 1.55);
-  const padding = 24;
+  const fontSize = 54;
+  const lineH = Math.ceil(fontSize * 1.5);
+  const padding = 28;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // 한글 자소 1자 ≈ fontSize * 0.62px 너비, 양쪽 패딩(24*2) + 좌측 강조바(10) 여백 제외
-  const boxX = 60, boxW = 960;
-  const innerW = boxW - padding * 2 - 10;
-  const maxCpl = Math.floor(innerW / (fontSize * 0.62));  // 한글 기준 최대 글자 수
+  // 한 줄 최대 글자수: 박스 내부 너비 / 폰트 크기 (한글 1자 ≈ fontSize px)
+  const boxX = 40, boxW = 1000;
+  const innerW = boxW - padding * 2;
+  const maxCpl = Math.floor(innerW / fontSize);
   const lines = wrapTextKorean(text, maxCpl);
   const boxH = lines.length * lineH + padding * 2;
   const boxY = H - boxH - 100;
