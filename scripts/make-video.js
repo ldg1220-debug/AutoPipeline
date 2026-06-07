@@ -19,6 +19,8 @@
  */
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
+import { parseStringPromise } from 'xml2js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import { writeJSON } from '../src/utils/fileIO.js';
@@ -54,6 +56,36 @@ if (dryRun) {
   config.runtime.youtubeUpload = false;
 }
 
+// ── 최근 뉴스 컨텍스트 수집 (Google News RSS) ─────────────────────────────
+async function fetchRecentNewsContext(kw) {
+  try {
+    const q   = encodeURIComponent(kw);
+    const url = `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;
+    const res = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const parsed = await parseStringPromise(res.data, { explicitArray: false });
+    const items  = parsed?.rss?.channel?.item ?? [];
+    const list   = Array.isArray(items) ? items : [items];
+    const top5   = list.slice(0, 5);
+
+    if (top5.length === 0) return { summary: '', figures: '' };
+
+    const headlines = top5.map((it, i) => {
+      const title   = it.title?.replace(/<[^>]+>/g, '').trim() ?? '';
+      const pubDate = it.pubDate ? new Date(it.pubDate).toLocaleDateString('ko-KR') : '';
+      return `${i + 1}. [${pubDate}] ${title}`;
+    }).join('\n');
+
+    const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    return {
+      summary: `[${today} 기준 최신 뉴스 헤드라인]\n${headlines}`,
+      figures: `위 기사 헤드라인의 구체적 수치·사실을 대본에 인용할 것.`,
+    };
+  } catch (err) {
+    logger.warn(`[make-video] 뉴스 컨텍스트 수집 실패 (계속): ${err.message}`);
+    return { summary: '', figures: '' };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 async function run() {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -66,7 +98,11 @@ async function run() {
   console.log(`   롱폼    : ${longform ? 'ON' : 'OFF (숏폼 전용)'}`);
   console.log(`   업로드  : ${dryRun ? 'OFF (dry-run)' : 'ON'}\n`);
 
-  // ── Step 1: 트렌드 아이템 구성 (키워드 직접 주입) ───────────────────────
+  // ── Step 1: 트렌드 아이템 구성 + 최신 뉴스 컨텍스트 주입 ─────────────────
+  logger.info(`${tag} Step 1: 최신 뉴스 수집 중...`);
+  const newsCtx = await fetchRecentNewsContext(keyword);
+  if (newsCtx.summary) logger.info(`${tag} 뉴스 헤드라인 ${newsCtx.summary.split('\n').length - 1}개 수집 완료`);
+
   const trendItem = {
     keyword,
     category,
@@ -76,6 +112,8 @@ async function run() {
     niche_premium:     0,
     source_url:        'manual',
     forced:            true,
+    summary:           newsCtx.summary,
+    figures:           newsCtx.figures,
   };
   const trendData = { selected_items: [trendItem] };
 
