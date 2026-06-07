@@ -281,12 +281,81 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   let response = await callGpt();
   let parsed = JSON.parse(response.data.choices[0].message.content);
 
-  // insight < 300자 또는 context < 120자이면 1회 재시도
-  const sc = parsed.shortform_script ?? {};
-  if ((sc.insight ?? '').length < 300 || (sc.context ?? '').length < 120) {
-    logger.warn(`[content_creator] Script too short (insight ${(sc.insight ?? '').length}자, context ${(sc.context ?? '').length}자). Retrying...`);
-    response = await callGpt();
-    parsed = JSON.parse(response.data.choices[0].message.content);
+  // insight < 300자이면 해당 섹션만 별도 확장 호출 (전체 재생성보다 신뢰도 높음)
+  const sc0 = parsed.shortform_script ?? {};
+  if ((sc0.insight ?? '').length < 300) {
+    logger.warn(`[content_creator] insight too short (${(sc0.insight ?? '').length}자 < 300). Expanding...`);
+    try {
+      const expandRes = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o',
+          messages: [{
+            role: 'user',
+            content:
+              `아래는 유튜브 숏폼 대본의 insight 섹션입니다. 이것을 350자 이상 450자 이하로 확장하세요.\n` +
+              `키워드: ${item.keyword}\n\n` +
+              `현재 insight:\n${sc0.insight ?? ''}\n\n` +
+              `확장 규칙:\n` +
+              `- [원인] → [과정/메커니즘] → [결과/영향] → [시청자가 할 행동] 구조 유지\n` +
+              `- 구체적 사례나 비유 1개 추가\n` +
+              `- 한 문장 최대 25자, 구어체\n` +
+              `- JSON: {"insight":"확장된 내용"}`,
+          }],
+          response_format: { type: 'json_object' },
+          max_tokens: 800,
+          temperature: 0.75,
+        },
+        {
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 30000,
+        }
+      );
+      const expanded = JSON.parse(expandRes.data.choices[0].message.content);
+      if ((expanded.insight ?? '').length > (sc0.insight ?? '').length) {
+        parsed.shortform_script = { ...sc0, insight: expanded.insight };
+        logger.info(`[content_creator] Insight expanded: ${(sc0.insight ?? '').length}자 → ${expanded.insight.length}자`);
+      }
+    } catch (err) {
+      logger.warn(`[content_creator] Insight expansion failed: ${err.message}`);
+    }
+  }
+
+  // context < 120자이면 별도 확장
+  const sc1 = parsed.shortform_script ?? {};
+  if ((sc1.context ?? '').length < 120) {
+    logger.warn(`[content_creator] context too short (${(sc1.context ?? '').length}자 < 120). Expanding...`);
+    try {
+      const expandRes = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o',
+          messages: [{
+            role: 'user',
+            content:
+              `아래 context 섹션을 150자 이상 200자 이하로 확장하세요.\n` +
+              `키워드: ${item.keyword}\n\n` +
+              `현재 context:\n${sc1.context ?? ''}\n\n` +
+              `규칙: 무슨 일→왜→나에게 영향 순서, 수치는 기준 명시, 구어체, 한 문장 최대 25자\n` +
+              `JSON: {"context":"확장된 내용"}`,
+          }],
+          response_format: { type: 'json_object' },
+          max_tokens: 400,
+          temperature: 0.75,
+        },
+        {
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 20000,
+        }
+      );
+      const expanded = JSON.parse(expandRes.data.choices[0].message.content);
+      if ((expanded.context ?? '').length > (sc1.context ?? '').length) {
+        parsed.shortform_script = { ...sc1, context: expanded.context };
+        logger.info(`[content_creator] Context expanded: ${(sc1.context ?? '').length}자 → ${expanded.context.length}자`);
+      }
+    } catch (err) {
+      logger.warn(`[content_creator] Context expansion failed: ${err.message}`);
+    }
   }
 
   return parsed;
