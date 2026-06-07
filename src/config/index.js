@@ -153,11 +153,13 @@ export const config = {
     publishShorts:    process.env.PUBLISH_SHORTS !== 'false',  // false로 설정 시 쇼츠 업로드 건너뜀
     youtubeUpload:    process.env.YOUTUBE_UPLOAD !== 'false',  // false로 설정 시 YouTube 업로드 전체 건너뜀
     dailyVideos:      parseInt(process.env.DAILY_VIDEOS || '1', 10), // 하루 최대 롱폼 영상 수 (기본 1)
-    // A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
-    cronSchedule:     process.env.CRON_SCHEDULE      || '0 12 * * 1,3,5,0',
-    cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 14 * * 2,4,6',
+    // 숏폼 A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
+    cronSchedule:     process.env.CRON_SCHEDULE      || '0 3 * * 1,3,5,0',
+    cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 5 * * 2,4,6',
     blogCronSchedule:  process.env.BLOG_CRON_SCHEDULE  || '0 22 * * 1,3,5,0',  // KST 07:00 오전 피크
     blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 3 * * 2,4,6',    // KST 12:00 점심 피크
+    // 롱폼 unified 파이프라인: 매주 목요일 22:00 KST (= UTC 13:00) — 주 1회
+    longformCronSchedule: process.env.LONGFORM_CRON_SCHEDULE || '0 13 * * 4',
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
     blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '15', 10),

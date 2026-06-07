@@ -51,16 +51,16 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `  5~10초: 이게 왜 나에게 관련 있는지 한 문장 연결 (공감 유발)\n` +
     `  10~15초: 이 영상을 끝까지 봐야 하는 이유 1문장 예고 (호기심 유지)\n` +
     `  → [배경] 섹션 script의 첫 3문장이 이 구조를 반드시 따를 것\n\n` +
-    `【1】 롱폼 영상 스크립트 (10~20분 목표)\n` +
+    `【1】 롱폼 영상 스크립트 (5~10분 목표 — 주 1회 정성 제작)\n` +
     `  ─── 5단계 스토리텔링 구조 필수 ───\n` +
     `  [배경] 섹션: 왜 지금 이 주제인가? 시청자가 공감할 상황 설정 (훅으로 즉시 시작)\n` +
     `  [디테일] 섹션×2: 배경의 구체적 데이터, 현황, 수치 심층 전개\n` +
     `  [문제] 섹션×2: 이 상황이 왜 문제인가? 시청자에게 미치는 구체적 영향\n` +
-    `  [반전] 섹션×2: 시청자가 예상 못 한 사실 or 의외의 해결책/기회\n` +
+    `  [반전] 섹션×1: 시청자가 예상 못 한 사실 or 의외의 해결책/기회\n` +
     `  [참여] 섹션: 지금 당장 할 수 있는 행동 지침 + 구독/플레이리스트 안내\n` +
     `  [마무리] 섹션: 핵심 요약 + 다음 영상 예고 (시청 유지)\n\n` +
     `  세부 조건:\n` +
-    `  - 섹션 8~10개, 각 섹션 90~120초 분량 (총 12~20분)\n` +
+    `  - 섹션 6~7개, 각 섹션 60~90초 분량 (총 5~10분)\n` +
     `  - 각 섹션 시작은 소제목 형식 (시청자가 타임스탬프로 바로 이동 가능)\n` +
     `  - 전문 용어 사용 즉시 쉬운 말로 풀이\n` +
     `  - 수치는 항상 기준 명시 (예: "1억 원 기준", "서울 평균 기준")\n` +
@@ -82,17 +82,16 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `{\n` +
     `  "long_video": {\n` +
     `    "youtube_title": "유튜브 제목 50자 이내 — 구체적 수치/결과 포함",\n` +
-    `    "duration_minutes": 15,\n` +
+    `    "duration_minutes": 7,\n` +
     `    "sections": [\n` +
-    `      {"name":"배경","duration_seconds":90,"script":"훅으로 즉시 시작...","key_point":""},\n` +
-    `      {"name":"디테일1","duration_seconds":120,"script":"...","key_point":""},\n` +
-    `      {"name":"디테일2","duration_seconds":120,"script":"...","key_point":""},\n` +
-    `      {"name":"문제1","duration_seconds":120,"script":"...","key_point":""},\n` +
-    `      {"name":"문제2","duration_seconds":120,"script":"...","key_point":""},\n` +
-    `      {"name":"반전1","duration_seconds":120,"script":"...","key_point":""},\n` +
-    `      {"name":"반전2","duration_seconds":120,"script":"...","key_point":""},\n` +
-    `      {"name":"참여","duration_seconds":90,"script":"행동지침 + 재생목록 안내...","key_point":""},\n` +
-    `      {"name":"마무리","duration_seconds":60,"script":"요약 + 다음 영상 예고...","key_point":""}\n` +
+    `      {"name":"배경","duration_seconds":75,"script":"훅으로 즉시 시작...","key_point":""},\n` +
+    `      {"name":"디테일1","duration_seconds":80,"script":"...","key_point":""},\n` +
+    `      {"name":"디테일2","duration_seconds":80,"script":"...","key_point":""},\n` +
+    `      {"name":"문제1","duration_seconds":80,"script":"...","key_point":""},\n` +
+    `      {"name":"문제2","duration_seconds":80,"script":"...","key_point":""},\n` +
+    `      {"name":"반전","duration_seconds":90,"script":"...","key_point":""},\n` +
+    `      {"name":"참여","duration_seconds":60,"script":"행동지침 + 재생목록 안내...","key_point":""},\n` +
+    `      {"name":"마무리","duration_seconds":45,"script":"요약 + 다음 영상 예고...","key_point":""}\n` +
     `    ],\n` +
     `    "youtube_description": "영상 설명 300자 + 타임스탬프 + #해시태그",\n` +
     `    "timestamps": "00:00 배경\\n01:30 디테일1..."\n` +

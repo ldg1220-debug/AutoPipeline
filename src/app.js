@@ -1124,12 +1124,14 @@ if (_isDirectEntry) {
       logger.info('[app] DRY_RUN mode — running once and exiting.');
       runPipeline().then(() => process.exit(0));
     } else {
-      // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
+      // 숏폼 파이프라인: A슬롯(매일 12:00 KST) + B슬롯(매일 14:00 KST)
       startScheduler(runPipeline, config.runtime.cronSchedule);
       startScheduler(runPipeline, config.runtime.cronScheduleB);
       // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
       startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
       startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+      // 롱폼 unified 파이프라인: 주 1회 (매주 목요일 22:00 KST)
+      startScheduler(runUnifiedPipeline, config.runtime.longformCronSchedule);
 
       // 최초 기동 시 두 파이프라인 모두 순차 실행
       try {

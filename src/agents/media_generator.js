@@ -1331,7 +1331,8 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
   const audioUrl = await uploadAudioForShotstack(audioPath);
 
   const audioStats = await fs.stat(audioPath);
-  const TOTAL_DURATION = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+  // 숏폼 목표: 90~180초 (1분30초~3분). TTS 오디오 크기로 추정 후 범위 클램프
+  const TOTAL_DURATION = Math.max(90, Math.min(180, Math.ceil(audioStats.size / 24000) + 2));
   logger.info(`[media_generator] Duration: ${TOTAL_DURATION}s`);
 
   const seriesName = content.series_name ?? '매일읽어주는남자';
@@ -1489,7 +1490,7 @@ async function generateMedia(content) {
     // SRT 생성: 오디오 크기로 총 길이 추정 → 씬 타이밍 계산 → SRT 저장
     try {
       const audioStats = await fs.stat(audioPath);
-      const totalDuration = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+      const totalDuration = Math.max(90, Math.min(180, Math.ceil(audioStats.size / 24000) + 2));
       const scenes = buildScenes(
         {
           hook:    content.shortform_script?.hook    ?? '',
@@ -1585,7 +1586,7 @@ async function generateMedia(content) {
   // 5. ffmpeg 영상 렌더링
   try {
     const audioStats = await fs.stat(result.audio);
-    const totalDuration = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+    const totalDuration = Math.max(90, Math.min(180, Math.ceil(audioStats.size / 24000) + 2));
     const scenes = buildScenes(
       {
         hook:    content.shortform_script?.hook    ?? '',
