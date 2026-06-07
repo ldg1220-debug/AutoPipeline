@@ -128,9 +128,9 @@ async function generateContent(item, competitorCtx = '') {
 채널의 나레이터 캐릭터 "매읽남"의 목소리로 2분 30초(150초)짜리 숏폼 대본을 써야 합니다.
 
 ⚠️ 글자수 절대 규칙 (가장 중요):
-  TTS 낭독 속도 기준 5.3자/초 → 150초 완성 = 최소 750자 필요
+  실측 TTS 낭독 속도: 5.0자/초 → 2분 30초(150초) = 750자 필요
   hook + context + insight + summary + cta 합산이 반드시 750자 이상이어야 합니다.
-  각 섹션 목표: context 150~180자, insight 420~480자, summary 65~80자, cta 25자
+  각 섹션 목표: context 150~180자, insight 430~500자, summary 65~80자, cta 25자
   미달 시 insight에 사례·비유·수치를 추가해 반드시 채울 것.
 
 오늘 날짜: ${today} (KST 기준)
@@ -304,7 +304,7 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   const totalLen = (sc0.hook??'').length + (sc0.context??'').length + (sc0.insight??'').length + (sc0.summary??'').length + (sc0.cta??'').length;
   if (totalLen < 750) {
     const insightLen = (sc0.insight ?? '').length;
-    const needed = Math.max(420, 800 - totalLen + insightLen); // 총 800자 달성을 위해 insight가 채워야 할 목표
+    const needed = Math.max(430, 750 - totalLen + insightLen); // 총 750자 달성을 위해 insight가 채워야 할 목표
     logger.warn(`[content_creator] Total too short (${totalLen}자 < 750). Expanding insight to ${needed}자...`);
     try {
       const expandRes = await axios.post(

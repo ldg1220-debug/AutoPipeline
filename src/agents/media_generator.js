@@ -454,9 +454,9 @@ function buildScenes(scripts, totalDuration) {
 
   if (allChunks.length === 0) return [];
 
-  // TTS 낭독 속도 기반 타이밍: 5.3자/초 (ElevenLabs 실측값)
-  // 비율 배분 방식은 긴 청크가 짧은 청크 시간을 빼앗아 싱크 어긋남 발생
-  const TTS_RATE = 5.3; // 자/초
+  // TTS 낭독 속도 기반 타이밍: 5.0자/초 (ElevenLabs 실측값)
+  // 실측: 605자 → 실제 말 122초 (2:02). 이전 5.3은 32초 무음 포함 오측정값.
+  const TTS_RATE = 5.0; // 자/초
   const MIN_DUR  = 1.5;
 
   let elapsed = 0;
