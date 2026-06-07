@@ -22,24 +22,29 @@ const BANNED_WORDS = [
 // ─────────────────────────────────────────────────────────────
 
 async function runLLMQA(content) {
+  const s = content.shortform_script ?? {};
   const qaPrompt = `당신은 한국 미디어 콘텐츠 검수 전문가입니다. 아래 콘텐츠를 검수하고 JSON으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
 검수 대상 콘텐츠:
 - 키워드: ${content.keyword}
-- 숏폼 훅: ${content.shortform_script?.hook ?? ''}
-- 숏폼 컨텍스트: ${content.shortform_script?.context ?? ''}
-- 숏폼 인사이트: ${content.shortform_script?.insight ?? ''}
-- 숏폼 요약: ${content.shortform_script?.summary ?? ''}
-- 숏폼 CTA: ${content.shortform_script?.cta ?? ''}
+- 숏폼 훅: ${s.hook ?? ''}
+- 숏폼 컨텍스트: ${s.context ?? ''}
+- 숏폼 인사이트: ${s.insight ?? ''}
+- 숏폼 요약: ${s.summary ?? ''}
+- 숏폼 CTA: ${s.cta ?? ''}
 - 블로그 제목: ${content.blog_draft?.title ?? ''}
 - 블로그 섹션: ${JSON.stringify(content.blog_draft?.sections ?? [])}
 
 검수 항목:
 1. fact_check_score (0~100): 사실 정확성. 허위·과장·확인 불가 내용 발견 시 감점.
-2. grammar_check ("PASS" | "FAIL"): 맞춤법·문법 오류가 없으면 PASS.
+2. grammar_check ("PASS" | "FAIL"): 맞춤법·문법·오탈자 오류가 없으면 PASS. 오류가 하나라도 있으면 FAIL.
+3. issues (string): 발견된 문제 요약 (없으면 빈 문자열).
+4. corrected_script (object | null): grammar_check가 FAIL인 경우에만 오탈자·문법을 교정한 스크립트를 반환.
+   형식: { "hook": "...", "context": "...", "insight": "...", "summary": "...", "cta": "..." }
+   오류가 없으면 null.
 
 출력 형식 (JSON만):
-{ "fact_check_score": 0, "grammar_check": "PASS", "issues": "발견된 문제 요약 (없으면 빈 문자열)" }`;
+{ "fact_check_score": 0, "grammar_check": "PASS", "issues": "", "corrected_script": null }`;
 
   await throttle(2000);
   const response = await axios.post(
@@ -236,9 +241,21 @@ export async function runTextQA(contentData) {
     if (config.openai.apiKey) {
       try {
         const llmResult = await runLLMQA(content);
-        factScore = llmResult.fact_check_score ?? 80;
-        grammarCheck = llmResult.grammar_check ?? 'PASS';
-        llmIssues = llmResult.issues ?? '';
+        factScore    = llmResult.fact_check_score ?? 80;
+        grammarCheck = llmResult.grammar_check    ?? 'PASS';
+        llmIssues    = llmResult.issues           ?? '';
+
+        // 오탈자 교정: corrected_script가 있으면 스크립트를 덮어씌우고 grammar PASS 처리
+        if (grammarCheck === 'FAIL' && llmResult.corrected_script) {
+          const c = llmResult.corrected_script;
+          const fields = ['hook', 'context', 'insight', 'summary', 'cta'];
+          const hasFix = fields.some((f) => c[f] && c[f] !== content.shortform_script?.[f]);
+          if (hasFix) {
+            content.shortform_script = { ...content.shortform_script, ...c };
+            grammarCheck = 'PASS';
+            logger.info(`[qa_editor] 오탈자 자동 교정 완료: ${content.keyword} | ${llmIssues}`);
+          }
+        }
       } catch (err) {
         logger.warn(`[qa_editor] LLM QA failed for: ${content.keyword}`, { message: err.message });
       }

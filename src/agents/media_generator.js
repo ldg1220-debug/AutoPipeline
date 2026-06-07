@@ -549,9 +549,11 @@ async function renderSubtitlePng(text, outputPath) {
   const lineH = Math.ceil(fontSize * 1.6);
   const padding = 24;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = wrapTextKorean(text, 22);
-  const boxH = lines.length * lineH + padding * 2;
   const boxX = 90, boxW = 900;
+  const innerW = boxW - padding * 2 - 10;
+  const maxCpl = Math.floor(innerW / (fontSize * 0.62));
+  const lines = wrapTextKorean(text, maxCpl);
+  const boxH = lines.length * lineH + padding * 2;
   const boxY = H - boxH - 115;
   const textElems = lines.map((line, i) => {
     const y = boxY + padding + (i + 0.8) * lineH;
@@ -587,13 +589,16 @@ async function renderLabelPng(seriesName, outputPath) {
 async function renderSubtitlePngBuffer(text) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const fontSize = 48;
+  const fontSize = 44;           // 48 → 44: 동일 박스에 더 많은 글자 수용
   const lineH = Math.ceil(fontSize * 1.55);
-  const padding = 28;
+  const padding = 24;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = wrapTextKorean(text, 18);
-  const boxH = lines.length * lineH + padding * 2;
+  // 한글 자소 1자 ≈ fontSize * 0.62px 너비, 양쪽 패딩(24*2) + 좌측 강조바(10) 여백 제외
   const boxX = 60, boxW = 960;
+  const innerW = boxW - padding * 2 - 10;
+  const maxCpl = Math.floor(innerW / (fontSize * 0.62));  // 한글 기준 최대 글자 수
+  const lines = wrapTextKorean(text, maxCpl);
+  const boxH = lines.length * lineH + padding * 2;
   const boxY = H - boxH - 100;
   // 텍스트 그림자 효과: 같은 텍스트를 살짝 오프셋으로 먼저 렌더링
   const shadowElems = lines.map((line, i) => {
