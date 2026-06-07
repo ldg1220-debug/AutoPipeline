@@ -40,7 +40,7 @@ const ACT_MOODS = [
 
 // ── Grok Aurora 이미지 생성 ───────────────────────────────────────────────
 /**
- * xAI Grok Aurora (grok-2-image-1212)로 이미지를 생성한다.
+ * xAI Grok (grok-imagine-image)로 이미지를 생성한다.
  * b64_json이면 outputPath에 저장 후 경로 반환, url이면 URL 반환.
  */
 async function generateImageGrokAurora(prompt, outputPath) {
@@ -49,7 +49,7 @@ async function generateImageGrokAurora(prompt, outputPath) {
   try {
     const res = await axios.post(
       'https://api.x.ai/v1/images/generations',
-      { model: 'grok-2-image-1212', prompt, n: 1 },
+      { model: 'grok-imagine-image', prompt, n: 1 },
       {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         timeout: 120000,

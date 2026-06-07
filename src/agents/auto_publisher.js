@@ -594,6 +594,16 @@ export async function publishContents(qaData, contentData) {
       continue;
     }
 
+    // beauty 카테고리는 매읽남 채널에 업로드하지 않음
+    const YOUTUBE_BLOCKED_CATEGORIES = ['beauty'];
+    if (YOUTUBE_BLOCKED_CATEGORIES.includes(content.category)) {
+      logger.info(`[auto_publisher] YouTube 업로드 건너뜀 — 카테고리 "${content.category}"는 이 채널 대상 아님: ${content.keyword}`);
+      result.youtube        = { platform: 'youtube',        status: 'skipped', reason: `category=${content.category}` };
+      result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped', reason: `category=${content.category}` };
+      results.push(result);
+      continue;
+    }
+
     // YouTube 채널 인증 (롱폼 + 쇼츠 공통)
     let accessToken = null;
     try {
