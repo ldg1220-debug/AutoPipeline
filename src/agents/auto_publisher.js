@@ -191,7 +191,15 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
     logger.warn(`[auto_publisher] Shorts file not found, skipping: ${videoPath}`);
     return { platform: 'youtube_shorts', status: 'skipped_no_video_file' };
   }
-  logger.info(`[auto_publisher] Shorts source: ${hasExtracted ? '롱폼 추출' : '단독 생성'} → ${videoPath}`);
+
+  // 쇼츠 파일 자체 길이 확인 — 60초 초과면 YouTube가 Shorts로 인식 안 함
+  const shortsDurSec = await getVideoDurationSec(videoPath);
+  if (shortsDurSec !== null && shortsDurSec > 60) {
+    logger.warn(`[auto_publisher] Shorts 파일이 ${Math.round(shortsDurSec)}s > 60s → Shorts 업로드 건너뜀: ${videoPath}`);
+    return { platform: 'youtube_shorts', status: 'skipped_too_long', duration: shortsDurSec };
+  }
+
+  logger.info(`[auto_publisher] Shorts source: ${hasExtracted ? '롱폼 추출' : '단독 생성'} → ${videoPath} (${shortsDurSec ? Math.round(shortsDurSec) + 's' : '?'})`);
 
   const blogPostUrl = content.blog_publish?.url ?? content.blog_post_url ?? null;
 
