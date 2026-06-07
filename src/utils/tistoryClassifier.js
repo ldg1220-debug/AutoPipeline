@@ -222,7 +222,7 @@ export async function matchBestCategory(categories, keyword, internalCategory) {
     health:        ['건강'],
     beauty:        ['뷰티', '뷰티·미용', '건강'],
     entertainment: ['연예·사회', '연예', '문화', '방송'],
-    social:        ['연예·사회', '사회', '이슈', '생활'],
+    social:        ['팁', '생활정보', '생활', '사회', '이슈'],
   };
 
   const preferredNames = QUICK_MAP[internalCategory] ?? [];
