@@ -191,6 +191,10 @@ export async function finalApproval(qaReport, content) {
           content:
             `당신은 ${strategy.channel_name} 채널의 총괄 PD입니다. 최종 발행 승인을 결정합니다.\n\n` +
             `[채널 피해야 할 것]\n${(strategy.avoid ?? []).join('\n')}\n` +
+            `[중요 판단 기준]\n` +
+            `- "검증되지 않은 투자 조언"은 실제 매수/매도 추천, 특정 종목 추천을 뜻함\n` +
+            `- 노조, 성과급, 임금, 고용 등 뉴스 보도성 경제 콘텐츠는 투자 조언이 아님\n` +
+            `- 공포 조장 판단: 수치 없이 막연한 위기감만 조성하는 경우만 해당\n` +
             `[디렉터 특별 지시]\n${strategy.director_notes ?? '없음'}\n\n` +
             `[검수 통과한 콘텐츠 요약]\n` +
             `키워드: ${content?.keyword ?? qaReport.keyword}\n` +

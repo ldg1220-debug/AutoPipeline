@@ -347,7 +347,10 @@ export async function runVisionQA(textQaData) {
     if (report.final_decision !== 'APPROVED') continue; // 텍스트 탈락은 건너뜀
 
     const safeKeyword = report.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-    const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+    const longPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
+    const shortPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+    const longExists = await fs.access(longPath).then(() => true).catch(() => false);
+    const videoPath  = longExists ? longPath : shortPath;
 
     logger.info(`[qa_editor] Vision QA: ${report.keyword}`);
     const visionResult = await checkVideoWithGemini(videoPath);
