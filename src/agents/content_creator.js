@@ -260,12 +260,13 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   }
 }`;
 
-  const response = await axios.post(
+  const callGpt = () => axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: contentPrompt }],
       temperature: 0.8,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
     },
     {
@@ -277,7 +278,18 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
     }
   );
 
-  return JSON.parse(response.data.choices[0].message.content);
+  let response = await callGpt();
+  let parsed = JSON.parse(response.data.choices[0].message.content);
+
+  // insight < 300자 또는 context < 120자이면 1회 재시도
+  const sc = parsed.shortform_script ?? {};
+  if ((sc.insight ?? '').length < 300 || (sc.context ?? '').length < 120) {
+    logger.warn(`[content_creator] Script too short (insight ${(sc.insight ?? '').length}자, context ${(sc.context ?? '').length}자). Retrying...`);
+    response = await callGpt();
+    parsed = JSON.parse(response.data.choices[0].message.content);
+  }
+
+  return parsed;
 }
 
 // ── 롱폼 대본 생성 (7~10분) ──────────────────────────────────────────────────
@@ -459,6 +471,8 @@ export async function createContents(trendData) {
 
       // TTS 정규화: 숫자·약어를 한글 발음으로 변환
       const normalizedScript = normalizeScript(generated.shortform_script);
+      const sc = generated.shortform_script ?? {};
+      logger.info(`[content_creator] Script lengths — hook:${(sc.hook??'').length}자 context:${(sc.context??'').length}자 insight:${(sc.insight??'').length}자 summary:${(sc.summary??'').length}자`);
 
       // 롱폼 대본 생성 (3~5분)
       let longVideo = null;
