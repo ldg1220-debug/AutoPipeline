@@ -872,16 +872,37 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, 
       }
     }
 
+    // 오디오 실제 길이를 정밀 측정 (ffprobe -count_packets 방식)
+    // MP3 헤더 기반 추정은 ElevenLabs VBR에서 최대 30초 과보고 발생
+    let exactAudioDur = null;
+    if (audioPath) {
+      try {
+        const { stdout } = await execFileAsync(ffprobePath, [
+          '-v', 'error',
+          '-select_streams', 'a:0',
+          '-count_packets',
+          '-show_entries', 'stream=nb_read_packets,duration',
+          '-of', 'default=noprint_wrappers=1:nokey=1',
+          audioPath,
+        ]);
+        const val = parseFloat(stdout.trim().split('\n')[0]);
+        if (!isNaN(val) && val > 0) exactAudioDur = val;
+      } catch { /* fallback: getAudioDuration 값 사용 */ }
+    }
+
     try {
       await execFileAsync(ffmpegPath, [
         '-f', 'concat', '-safe', '0', '-i', concatFile,
         ...extraInputs,
-        '-c:v', 'copy',
+        // -c:v libx264 로 재인코딩: -shortest/-t 가 정확히 동작하려면 copy 불가
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
         ...(audioPath && audioFilter
-          ? ['-filter_complex', audioFilter, '-c:a', 'aac', '-b:a', '128k', '-shortest']
+          ? ['-filter_complex', audioFilter, '-c:a', 'aac', '-b:a', '128k']
           : audioPath
-            ? ['-c:a', 'aac', '-b:a', '128k', '-shortest']
+            ? ['-c:a', 'aac', '-b:a', '128k']
             : []),
+        // 오디오 종료 지점에서 정확히 자름 (-t 우선, 없으면 -shortest)
+        ...(exactAudioDur ? ['-t', String(exactAudioDur)] : ['-shortest']),
         '-y', outputPath,
       ], { maxBuffer: 50 * 1024 * 1024 });
     } finally {
