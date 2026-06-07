@@ -124,11 +124,11 @@ async function generateContent(item, competitorCtx = '') {
   ].filter(Boolean).join('\n');
 
   const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
-  const contentPrompt = `당신은 유튜브 채널 "매일읽어주는남자"의 전속 작가입니다.
+  const contentPrompt = `${item.director_brief ? `🚨🚨🚨 최최최우선 지시 — 아래 앵글/관점을 대본 전체에 반드시 관철할 것. 이 지시를 위반하면 대본 전체가 무효다.\n━━━━━━━━━━━━━━━━━━━━━━━\n${item.director_brief}\n━━━━━━━━━━━━━━━━━━━━━━━\n\n` : ''}당신은 유튜브 채널 "매일읽어주는남자"의 전속 작가입니다.
 채널의 나레이터 캐릭터 "매읽남"의 목소리로 2분 30초(150초)짜리 숏폼 대본을 써야 합니다.
 
 ⚠️ 글자수 절대 규칙 (가장 중요):
-  실측 TTS 낭독 속도: 7.0자/초 (speed:0.85 설정 시 ~6.0자/초) → 2분 30초(150초) = 1050자 필요
+  실측 TTS 낭독 속도: 7.0자/초 → 2분 30초(150초) = 1050자 필요
   hook + context + insight + summary + cta 합산이 반드시 1050자 이상이어야 합니다.
   각 섹션 목표: context 180~220자, insight 650~750자, summary 70~90자, cta 25자
   미달 시 insight에 사례·비유·수치를 추가해 반드시 채울 것.
@@ -254,7 +254,7 @@ hook → context → insight → summary → cta 전체가 **하나의 연속된
 ❺ cta (145~150초) — 자연스러운 구독 유도 (25자 이내)
    - 훅 질문에 답하는 루프 구조로 마무리
 
-${competitorCtx}${item.director_brief ? `━━━━━━━━━━━━━━━━━━━━━━━\n【디렉터 브리프 — 최우선 준수】\n${item.director_brief}\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━
+${competitorCtx}━━━━━━━━━━━━━━━━━━━━━━━
 JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
 ━━━━━━━━━━━━━━━━━━━━━━━
 
