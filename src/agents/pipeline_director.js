@@ -56,6 +56,13 @@ function buildStrategyContext(strategy) {
   ].filter(Boolean).join('\n');
 }
 
+const LABOR_SOCIAL_PATTERNS = [
+  /노조|파업|임금|성과급|연봉|최저임금|고용|실업|해고|근로|직장|노동|비정규|정규직|육아휴직|산재/,
+];
+function isLaborOrSocialKeyword(kw) {
+  return LABOR_SOCIAL_PATTERNS.some((re) => re.test(kw ?? ''));
+}
+
 // ── 1. 콘텐츠 브리프 생성 ─────────────────────────────────────────────────
 /**
  * 트렌드 아이템 1개에 대해 채널 전략 기반 콘텐츠 브리프를 생성한다.
@@ -78,6 +85,11 @@ export async function createContentBrief(item) {
             `[채널 전략]\n${strategyCtx}\n\n` +
             `[오늘의 키워드]\n${item.keyword}\n` +
             `[카테고리] ${item.category ?? '경제'}\n\n` +
+            (isLaborOrSocialKeyword(item.keyword)
+              ? `⚠️ 이 키워드는 노동·임금·사회 이슈입니다.\n` +
+                `  → 주식 매수·매도·투자 전망은 절대 포함하지 말 것.\n` +
+                `  → 근로자 입장, 임금 현실, 노사 갈등의 사회적 의미에 집중할 것.\n\n`
+              : '') +
             `이 키워드로 영상을 만들 때 콘텐츠 작가에게 줄 구체적인 브리프를 작성하세요.\n` +
             `브리프 포함 항목:\n` +
             `1. 핵심 각도 (어떤 관점으로 접근할지)\n` +
