@@ -1690,20 +1690,6 @@ export async function generateAllMedia(contentData) {
   for (const content of contents) {
     logger.info(`[media_generator] Processing: ${content.keyword}`);
     const shortResult = await generateMedia(content);
-
-    // 롱폼 대본이 있으면 롱폼 영상도 생성
-    if (content.long_video?.sections?.length) {
-      try {
-        const longResult = await generateLongFormMedia(content);
-        shortResult.long_video_path = longResult.video;
-        logger.info(`[media_generator] Long-form video: ${longResult.video ?? 'skipped'}`);
-      } catch (err) {
-        logger.warn(`[media_generator] Long-form video failed: ${err.message}`);
-      }
-    } else {
-      logger.warn(`[media_generator] No long_video sections for "${content.keyword}" — long-form skipped`);
-    }
-
     results.push(shortResult);
   }
   return { generated_at: new Date().toISOString(), results };
