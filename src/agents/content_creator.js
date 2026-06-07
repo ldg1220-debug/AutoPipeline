@@ -290,10 +290,10 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   // 총 글자수 체크: 750자 미만이면 insight 집중 확장
   const sc0 = parsed.shortform_script ?? {};
   const totalLen = (sc0.hook??'').length + (sc0.context??'').length + (sc0.insight??'').length + (sc0.summary??'').length + (sc0.cta??'').length;
-  if (totalLen < 600) {
+  if (totalLen < 750) {
     const insightLen = (sc0.insight ?? '').length;
-    const needed = Math.max(420, 700 - totalLen + insightLen); // insight가 채워야 할 목표 글자수
-    logger.warn(`[content_creator] Total too short (${totalLen}자 < 600). Expanding insight to ${needed}자...`);
+    const needed = Math.max(420, 800 - totalLen + insightLen); // 총 800자 달성을 위해 insight가 채워야 할 목표
+    logger.warn(`[content_creator] Total too short (${totalLen}자 < 750). Expanding insight to ${needed}자...`);
     try {
       const expandRes = await axios.post(
         'https://api.openai.com/v1/chat/completions',
