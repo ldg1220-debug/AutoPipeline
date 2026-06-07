@@ -35,15 +35,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 // ── CLI 인자 파싱 ─────────────────────────────────────────────────────────
-const args    = process.argv.slice(2);
-const kwIdx   = args.indexOf('--keyword');
-const catIdx  = args.indexOf('--category');
-const dryRun  = args.includes('--dry-run');
-const noQA    = args.includes('--no-qa');
-const longform = args.includes('--longform');
+const args     = process.argv.slice(2);
+const kwIdx    = args.indexOf('--keyword');
+const catIdx   = args.indexOf('--category');
+const angleIdx = args.indexOf('--angle');
+const dryRun   = args.includes('--dry-run');
+const noQA     = args.includes('--no-qa');
+const longform  = args.includes('--longform');
 
-const keyword  = kwIdx  !== -1 ? args[kwIdx  + 1] : null;
-const category = catIdx !== -1 ? args[catIdx + 1] : 'economy';
+const keyword  = kwIdx    !== -1 ? args[kwIdx    + 1] : null;
+const category = catIdx   !== -1 ? args[catIdx   + 1] : 'economy';
+const angle    = angleIdx !== -1 ? args[angleIdx + 1] : null;
 
 if (!keyword) {
   console.error('❌ 키워드를 지정하세요: --keyword "키워드"');
@@ -95,6 +97,7 @@ async function run() {
   console.log(`\n🎬 영상 제작 시작`);
   console.log(`   키워드  : ${keyword}`);
   console.log(`   카테고리: ${category}`);
+  if (angle) console.log(`   앵글    : ${angle}`);
   console.log(`   롱폼    : ${longform ? 'ON' : 'OFF (숏폼 전용)'}`);
   console.log(`   업로드  : ${dryRun ? 'OFF (dry-run)' : 'ON'}\n`);
 
@@ -114,6 +117,9 @@ async function run() {
     forced:            true,
     summary:           newsCtx.summary,
     figures:           newsCtx.figures,
+    director_brief:    angle
+      ? `[제작자 앵글 — 최우선 준수]\n${angle}\n\n이 관점을 대본 전체에 일관되게 반영할 것. 반대 관점으로 흐르지 말 것.`
+      : undefined,
   };
   const trendData = { selected_items: [trendItem] };
 
