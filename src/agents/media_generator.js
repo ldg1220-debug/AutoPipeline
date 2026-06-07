@@ -454,9 +454,12 @@ function buildScenes(scripts, totalDuration) {
 
   if (allChunks.length === 0) return [];
 
-  // TTS 낭독 속도 기반 타이밍: 5.0자/초 (ElevenLabs 실측값)
-  // 실측: 605자 → 실제 말 122초 (2:02). 이전 5.3은 32초 무음 포함 오측정값.
-  const TTS_RATE = 5.0; // 자/초
+  // TTS 낭독 속도 기반 타이밍: 7.0자/초 (ElevenLabs 실측값)
+  // 실측: 688자 → 실제 말 100초. totalDuration이 있으면 동적 계산.
+  const totalScriptChars = allChunks.reduce((s, c) => s + c.text.length, 0);
+  const TTS_RATE = (totalDuration > 0 && totalScriptChars > 0)
+    ? totalScriptChars / totalDuration
+    : 7.0; // 자/초
   const MIN_DUR  = 1.5;
 
   let elapsed = 0;
@@ -1261,7 +1264,7 @@ async function generateAudioElevenLabs(text, outputPath) {
       {
         text: text.slice(0, 5000),
         model_id: 'eleven_multilingual_v2',
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: 0.85 },
       },
       {
         headers: {

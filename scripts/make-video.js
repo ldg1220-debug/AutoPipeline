@@ -124,17 +124,21 @@ async function run() {
   const trendData = { selected_items: [trendItem] };
 
   // ── Step 2: Director 브리프 생성 ─────────────────────────────────────────
-  let brief = '';
-  try {
-    brief = await createContentBrief(trendItem);
-    logger.info(`${tag} Director brief 생성 완료`);
-  } catch (err) {
-    logger.warn(`${tag} Director brief 실패 (계속): ${err.message}`);
+  // --angle 지정 시 pipeline_director 호출 생략 — angle 자체가 브리프가 됨
+  if (angle) {
+    trendData.selected_items[0].director_brief =
+      `[제작자 앵글 — 최우선 준수]\n${angle}\n\n이 관점을 대본 전체에 일관되게 반영할 것. 반대 관점으로 절대 흐르지 말 것.`;
+    logger.info(`${tag} --angle 지정됨 → Director 브리프 생략, 앵글만 사용`);
+  } else {
+    let brief = '';
+    try {
+      brief = await createContentBrief(trendItem);
+      logger.info(`${tag} Director brief 생성 완료`);
+    } catch (err) {
+      logger.warn(`${tag} Director brief 실패 (계속): ${err.message}`);
+    }
+    trendData.selected_items[0].director_brief = brief;
   }
-  // --angle 지정 시 앵글을 브리프 앞에 붙여 최우선 보장
-  trendData.selected_items[0].director_brief = angle
-    ? `[제작자 앵글 — 최우선 준수]\n${angle}\n\n이 관점을 대본 전체에 일관되게 반영할 것.\n\n[Director 브리프]\n${brief}`
-    : brief;
 
   // ── Step 3: 스크립트 작성 ────────────────────────────────────────────────
   logger.info(`${tag} Step 3: 스크립트 작성 중...`);
@@ -152,11 +156,12 @@ async function run() {
   }
 
   // ── Step 3-1: PD 검수 + Director 품질 리뷰 ──────────────────────────────
+  const currentBrief = trendData.selected_items[0].director_brief ?? '';
   try {
-    const review = await reviewContent(contentData.contents[0], brief);
+    const review = await reviewContent(contentData.contents[0], currentBrief);
     if (!review.pass) {
       logger.info(`${tag} Director 재생성 지시 (score ${review.score}): ${review.feedback}`);
-      const retryBrief = `${brief}\n\n[재생성 지시] ${review.feedback}`;
+      const retryBrief = `${currentBrief}\n\n[재생성 지시] ${review.feedback}`;
       const retryContent = await createContents({
         selected_items: [{ ...trendItem, director_brief: retryBrief }],
       });
@@ -182,7 +187,7 @@ async function run() {
       if (report?.final_decision === 'REJECTED') {
         logger.warn(`${tag} 텍스트 QA 탈락 (${report.revision_reason}) — 재시도`);
         const retryContent = await createContents({
-          selected_items: [{ ...trendItem, director_brief: brief }],
+          selected_items: [{ ...trendItem, director_brief: currentBrief }],
         });
         contentData = retryContent;
         textQaData  = await runTextQA(contentData);

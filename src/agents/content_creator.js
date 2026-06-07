@@ -128,9 +128,9 @@ async function generateContent(item, competitorCtx = '') {
 채널의 나레이터 캐릭터 "매읽남"의 목소리로 2분 30초(150초)짜리 숏폼 대본을 써야 합니다.
 
 ⚠️ 글자수 절대 규칙 (가장 중요):
-  실측 TTS 낭독 속도: 5.0자/초 → 2분 30초(150초) = 750자 필요
-  hook + context + insight + summary + cta 합산이 반드시 750자 이상이어야 합니다.
-  각 섹션 목표: context 150~180자, insight 430~500자, summary 65~80자, cta 25자
+  실측 TTS 낭독 속도: 7.0자/초 (speed:0.85 설정 시 ~6.0자/초) → 2분 30초(150초) = 1050자 필요
+  hook + context + insight + summary + cta 합산이 반드시 1050자 이상이어야 합니다.
+  각 섹션 목표: context 180~220자, insight 650~750자, summary 70~90자, cta 25자
   미달 시 insight에 사례·비유·수치를 추가해 반드시 채울 것.
 
 오늘 날짜: ${today} (KST 기준)
@@ -239,7 +239,7 @@ hook → context → insight → summary → cta 전체가 **하나의 연속된
    - 수치 쓸 때 기준 명시: "1억 변동금리 기준 월 이자 5만원 올라요"
    - 시청자가 "이게 나랑 무슨 상관?" 을 느끼게 연결
 
-❸ insight (40~130초) — 반전이 있는 핵심 인사이트 (420~480자, 한 문장 최대 25자)
+❸ insight (40~130초) — 반전이 있는 핵심 인사이트 (650~750자, 한 문장 최대 25자)
    - [원인] → [과정] → [결과] → [내가 할 행동] 순서로 전개
    - 예상 못 한 관점/해결책으로 반전 포함
    - 전문 용어 나오면 바로 쉬운 말로 풀기
@@ -263,8 +263,8 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   "shortform_script": {
     "hook": "최대 12자, ?나 !로 끝남 — 스크롤을 멈추게 하는 한 마디",
     "context": "①무슨 일 → ②왜 → ③나에게 영향. 수치는 기준 명시 (150~180자, 한 문장 최대 25자)",
-    "insight": "[원인]→[과정]→[결과]→[내가 할 행동] 단계별 인과관계. 사례·비유 포함. (420~480자, 한 문장 최대 25자)",
-    "summary": "엣지 있는 한 줄 평 또는 도발적 질문 (65~80자) — 중립 결론 금지",
+    "insight": "[원인]→[과정]→[결과]→[내가 할 행동] 단계별 인과관계. 사례·비유 포함. (650~750자, 한 문장 최대 25자)",
+    "summary": "엣지 있는 한 줄 평 또는 도발적 질문 (70~90자) — 중립 결론 금지",
     "cta": "구독 유도 문장 (25자 이내)"
   },
   "youtube_title": "유튜브 제목: 훅을 살린 제목 (25자 이내, 클릭 유발)",
@@ -299,13 +299,13 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   let response = await callGpt();
   let parsed = JSON.parse(response.data.choices[0].message.content);
 
-  // 총 글자수 체크: 750자 미만이면 insight 집중 확장
+  // 총 글자수 체크: 1050자 미만이면 insight 집중 확장
   const sc0 = parsed.shortform_script ?? {};
   const totalLen = (sc0.hook??'').length + (sc0.context??'').length + (sc0.insight??'').length + (sc0.summary??'').length + (sc0.cta??'').length;
-  if (totalLen < 750) {
+  if (totalLen < 1050) {
     const insightLen = (sc0.insight ?? '').length;
-    const needed = Math.max(430, 750 - totalLen + insightLen); // 총 750자 달성을 위해 insight가 채워야 할 목표
-    logger.warn(`[content_creator] Total too short (${totalLen}자 < 750). Expanding insight to ${needed}자...`);
+    const needed = Math.max(650, 1050 - totalLen + insightLen); // 총 1050자 달성을 위해 insight가 채워야 할 목표
+    logger.warn(`[content_creator] Total too short (${totalLen}자 < 1050). Expanding insight to ${needed}자...`);
     try {
       const expandRes = await axios.post(
         'https://api.openai.com/v1/chat/completions',
