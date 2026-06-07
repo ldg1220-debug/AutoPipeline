@@ -24,15 +24,20 @@ const __dirname  = path.dirname(__filename);
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 // ── 매읽남 캐릭터 공통 설명 ──────────────────────────────────────────────
+// 스타일 기준: 흰 복슬 페르시안 고양이 + 금테 안경 + 베이지 재킷 + 따뜻한 실내 배경
+// 순수 흰색 배경 / Grok Aurora 혼용 금지 — 스타일 불일치 원인
 const MAEILNAMJA_BASE =
-  'Flat vector 2D illustration, chibi kawaii style, pure white clean studio background, ' +
-  'white Persian cat professor character, ' +
-  'wearing beige/tan blazer with dark navy necktie, small round gold-rim glasses, ' +
-  'extremely fluffy white fur, adorable chubby proportions, full body visible, ' +
-  'expressive large eyes, bold clean outlines, solid flat colors, no shading gradients, ' +
-  'no photorealism, no 3D rendering, no real backgrounds, no textures, ' +
-  'Korean educational YouTube character illustration style, ' +
-  'absolutely no text or letters anywhere in the image';
+  'Kawaii chibi illustration, Korean educational YouTube character, ' +
+  'white fluffy Persian cat professor, ' +
+  'extremely voluminous fluffy white fur, pure white fur color (NOT gray, NOT dark), ' +
+  'wearing beige tan double-button blazer, dark navy necktie, ' +
+  'large prominent round gold-rim glasses, ' +
+  'chubby adorable chibi proportions, full body visible from head to toe, ' +
+  'warm expressive eyes with bold black outlines, ' +
+  'clean cartoon style with soft cell shading, saturated colors, ' +
+  'warm cozy indoor background (soft lighting, bookshelf or desk), ' +
+  'absolutely no text or letters or numbers anywhere in the image, ' +
+  'no photorealism, consistent character design';
 
 // act별 분위기 가이드
 const ACT_MOODS = [
@@ -258,12 +263,13 @@ async function generateSceneImages(keyword, scripts, category) {
       logger.info(`[media_generator] Cached file missing, regenerating act${i}: ${keyword}`);
     }
 
-    // 매읽남 캐릭터 + 씬별 포즈 — 배경 지정 없이 스타일 고정 (Grok 혼용 금지)
-    const { pose } = sceneList[i] ?? { pose: '' };
+    // 매읽남 캐릭터 + 씬별 포즈 + 배경 — Grok 혼용 금지
+    const { pose = '', bg = 'warm indoor office' } = sceneList[i] ?? {};
     const imagePrompt =
       `${MAEILNAMJA_BASE}. ` +
+      `Background setting: ${bg}. ` +
       `Character action: ${pose}. ` +
-      `Full body character centered, 9:16 portrait composition, high quality.`;
+      `Full body character centered in foreground, 9:16 portrait composition, high quality.`;
 
     const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
     const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
@@ -1556,15 +1562,16 @@ async function generateLongFormMedia(content) {
   // ── 3. 이미지 3컷 생성 후 섹션 전체에 재사용 (스타일 일관성 보장) ──────────
   // 롱폼 섹션 수에 상관없이 동일한 3개 이미지를 순환 사용해 아트 스타일 고정.
   const BASE_POSES = [
-    'dramatic urgent expression, arms raised in surprise, eyes wide open',
-    'explaining confidently, pointing forward, professional teaching gesture',
-    'calm warm smile, thumbs up, slight bow, satisfied expression',
+    { pose: 'dramatic urgent expression, arms raised in surprise, eyes wide open', bg: 'dramatic dark office with glowing screen' },
+    { pose: 'explaining confidently, pointing at whiteboard, professional teaching gesture', bg: 'warm classroom with bookshelf and soft lighting' },
+    { pose: 'calm warm smile, thumbs up, slight bow, satisfied expression', bg: 'cozy study room with desk lamp and books' },
   ];
   const baseImgUrls = [];
   for (let b = 0; b < 3; b++) {
     await throttle(300);
+    const { pose, bg } = BASE_POSES[b];
     const imagePrompt =
-      `${MAEILNAMJA_BASE}. Character action: ${BASE_POSES[b]}. ` +
+      `${MAEILNAMJA_BASE}. Background setting: ${bg}. Character action: ${pose}. ` +
       `Full body visible, 9:16 portrait.`;
     const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_base${b}.png`);
     let imageUrl  = null;
