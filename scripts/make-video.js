@@ -23,7 +23,7 @@ import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { createContents } from '../src/agents/content_creator.js';
-import { createContentBrief, reviewContent, pdReview, finalApproval } from '../src/agents/pipeline_director.js';
+import { createContentBrief, reviewContent, finalApproval } from '../src/agents/pipeline_director.js';
 import { runTextQA, runVisionQA } from '../src/agents/qa_editor.js';
 import { generateAllMedia, generateLongFormMedia } from '../src/agents/media_generator.js';
 import { publishContents } from '../src/agents/auto_publisher.js';
@@ -115,7 +115,6 @@ async function run() {
       });
       if (retryContent.contents?.[0]) contentData.contents[0] = retryContent.contents[0];
     }
-    contentData = await pdReview(contentData);
     logger.info(`${tag} PD 검수 완료`);
   } catch (err) {
     logger.warn(`${tag} PD 검수 실패 (계속): ${err.message}`);
