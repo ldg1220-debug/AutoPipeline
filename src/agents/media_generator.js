@@ -1391,8 +1391,7 @@ async function generateMedia(content) {
       content.shortform_script?.cta     ?? '',
     ].filter(Boolean);
 
-    let scriptText = normalizeScriptForTTS(parts.join(' '));
-    if (scriptText.length > 600) scriptText = scriptText.slice(0, 600);
+    const scriptText = normalizeScriptForTTS(parts.join(' '));
 
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
