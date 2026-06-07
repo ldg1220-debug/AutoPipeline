@@ -454,19 +454,25 @@ function buildScenes(scripts, totalDuration) {
 
   if (allChunks.length === 0) return [];
 
-  const totalChars = allChunks.reduce((s, c) => s + c.text.length, 0);
-  const MIN_DUR = 2;
+  // TTS 낭독 속도 기반 타이밍: 5.3자/초 (ElevenLabs 실측값)
+  // 비율 배분 방식은 긴 청크가 짧은 청크 시간을 빼앗아 싱크 어긋남 발생
+  const TTS_RATE = 5.3; // 자/초
+  const MIN_DUR  = 1.5;
 
   let elapsed = 0;
-  return allChunks.map(({ text, act }, i) => {
-    const isLast = i === allChunks.length - 1;
-    const proportion = text.length / totalChars;
-    const rawDur = Math.max(MIN_DUR, Math.round(proportion * totalDuration));
-    const duration = isLast ? Math.max(MIN_DUR, totalDuration - elapsed) : rawDur;
-    const scene = { text, start: elapsed, duration, act, isKey: allChunks[i].isKey };
-    elapsed += rawDur;
+  const scenes = allChunks.map(({ text, act, isKey }) => {
+    const dur = Math.max(MIN_DUR, text.length / TTS_RATE);
+    const scene = { text, start: elapsed, duration: dur, act, isKey };
+    elapsed += dur;
     return scene;
   });
+
+  // 전체 자막 길이가 오디오보다 짧으면 마지막 자막을 오디오 끝까지 늘림
+  if (elapsed < totalDuration) {
+    scenes[scenes.length - 1].duration += (totalDuration - elapsed);
+  }
+
+  return scenes;
 }
 
 // ── 이미지 배경 클립 생성 ─────────────────────────────────────────────────
@@ -616,11 +622,11 @@ async function renderLabelPng(seriesName, outputPath) {
 async function renderSubtitlePngBuffer(text, isKey = false) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const fontSize = 54;
-  const lineH = Math.ceil(fontSize * 1.5);
-  const padding = 28;
+  const fontSize = 68;
+  const lineH = Math.ceil(fontSize * 1.55);
+  const padding = 32;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const boxX = 40, boxW = 1000;
+  const boxX = 20, boxW = 1040;
   const innerW = boxW - padding * 2;
   const maxCpl = Math.floor(innerW / fontSize);
   const lines = wrapTextKorean(text, maxCpl);
