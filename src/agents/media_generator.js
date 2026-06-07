@@ -19,17 +19,34 @@ const execFileAsync = promisify(execFile);
 const { default: ffmpegPath } = await import('ffmpeg-static');
 const ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/, (_, ext) => `ffprobe${ext ?? ''}`);
 
-// 오디오 파일 실제 길이 측정 (ffprobe). 실패 시 bytes 기반 추정으로 폴백.
+// 오디오 파일 실제 길이 측정 (ffprobe -count_packets).
+// ElevenLabs VBR MP3는 헤더에 기록된 duration이 실제 재생보다 ~32초 부풀려짐.
+// count_packets는 실제 패킷 수로 계산하므로 정확.
 async function getAudioDuration(audioPath) {
+  // 1차: count_packets (VBR MP3에서 정확)
+  try {
+    const { stdout } = await execFileAsync(ffprobePath, [
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-count_packets',
+      '-show_entries', 'stream=nb_read_packets,duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      audioPath,
+    ]);
+    // stdout: "duration\nnb_read_packets" 또는 순서 다를 수 있음 — 첫 번째 숫자가 duration
+    const lines = stdout.trim().split('\n').map(Number).filter(n => !isNaN(n) && n > 0);
+    if (lines.length > 0) return lines[0]; // stream duration (정밀값)
+  } catch { /* fall through */ }
+  // 2차: format duration (헤더값, VBR에서 부풀려질 수 있음)
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
       '-v', 'error', '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1', audioPath,
     ]);
     const sec = parseFloat(stdout);
-    if (!isNaN(sec) && sec > 0) return Math.ceil(sec);
+    if (!isNaN(sec) && sec > 0) return sec;
   } catch { /* fall through */ }
-  // 폴백: ElevenLabs ~104kbps 기준 bytes / 13000
+  // 3차 폴백: ElevenLabs ~104kbps 기준 bytes / 13000
   const stats = await fs.stat(audioPath).catch(() => ({ size: 0 }));
   return Math.max(30, Math.ceil(stats.size / 13000) + 1);
 }
@@ -1486,9 +1503,10 @@ async function generateMedia(content) {
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
 
-    // SRT 생성: ffprobe로 실제 오디오 길이 측정 → 씬 타이밍 계산 → SRT 저장
+    // SRT 생성: ffprobe -count_packets로 실제 오디오 길이 측정 → 씬 타이밍 계산 → SRT 저장
     try {
       const totalDuration = await getAudioDuration(audioPath);
+      logger.info(`[media_generator] 오디오 실측 ${totalDuration.toFixed(1)}초 | 스크립트 ${scriptText.length}자 | TTS속도 ${(scriptText.length / totalDuration).toFixed(2)}자/초`);
       const scenes = buildScenes(
         {
           hook:    content.shortform_script?.hook    ?? '',
