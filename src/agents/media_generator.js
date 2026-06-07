@@ -427,23 +427,29 @@ function wrapTextKorean(text, maxCharsPerLine = 22) {
 function buildScenes(scripts, totalDuration) {
   const { hook = '', context = '', insight = '', summary = '', cta = '' } = scripts;
 
-  // 자막 청크: 전체 텍스트 사용 (잘라내기 금지 → 싱크 불일치 원인)
+  // 자막 청크: 전체 텍스트 사용, 12자 단위 분할 (가독성 최적)
   const actChunks = [
-    { act: 0, chunks: splitText(hook, 20) },
+    { act: 0, chunks: splitText(hook, 12) },
     { act: 1, chunks: [
-        ...splitText(context, 20),
-        ...splitText(insight, 20),
+        ...splitText(context, 12),
+        ...splitText(insight, 12),
       ]
     },
     { act: 2, chunks: [
-        ...splitText(summary, 20),
-        ...splitText(cta,     20),
+        ...splitText(summary, 12),
+        ...splitText(cta,     12),
       ]
     },
   ];
 
+  // isKey: hook(act 0) 또는 숫자+단위 포함 → 주황색 강조
+  const KEY_PATTERN = /\d[\d,]*\.?\d*\s*[%억조만천원↑↓배배]|[?!]/;
   const allChunks = actChunks.flatMap(({ act, chunks }) =>
-    chunks.filter(Boolean).map((text) => ({ text, act }))
+    chunks.filter(Boolean).map((text) => ({
+      text,
+      act,
+      isKey: act === 0 || KEY_PATTERN.test(text),
+    }))
   );
 
   if (allChunks.length === 0) return [];
@@ -457,7 +463,7 @@ function buildScenes(scripts, totalDuration) {
     const proportion = text.length / totalChars;
     const rawDur = Math.max(MIN_DUR, Math.round(proportion * totalDuration));
     const duration = isLast ? Math.max(MIN_DUR, totalDuration - elapsed) : rawDur;
-    const scene = { text, start: elapsed, duration, act };
+    const scene = { text, start: elapsed, duration, act, isKey: allChunks[i].isKey };
     elapsed += rawDur;
     return scene;
   });
@@ -607,40 +613,46 @@ async function renderLabelPng(seriesName, outputPath) {
 }
 
 // ── Sharp 버퍼 반환 변형 (ffmpeg 합성용) ─────────────────────────────────
-async function renderSubtitlePngBuffer(text) {
+async function renderSubtitlePngBuffer(text, isKey = false) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
   const fontSize = 54;
   const lineH = Math.ceil(fontSize * 1.5);
   const padding = 28;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // 한 줄 최대 글자수: 박스 내부 너비 / 폰트 크기 (한글 1자 ≈ fontSize px)
   const boxX = 40, boxW = 1000;
   const innerW = boxW - padding * 2;
   const maxCpl = Math.floor(innerW / fontSize);
   const lines = wrapTextKorean(text, maxCpl);
   const boxH = lines.length * lineH + padding * 2;
-  const boxY = H - boxH - 100;
-  // 텍스트 그림자 효과: 같은 텍스트를 살짝 오프셋으로 먼저 렌더링
-  const shadowElems = lines.map((line, i) => {
-    const y = boxY + padding + (i + 0.82) * lineH;
-    return `<text x="${W / 2 + 3}" y="${y + 3}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.6" text-anchor="middle">${esc(line)}</text>`;
+  const boxY = H - boxH - 120;
+
+  const fillColor = isKey ? '#FF8C00' : '#FFFFFF';
+
+  // 검은 외곽선: 상하좌우 2px 오프셋으로 4방향 그림자 → 외곽선 효과
+  const outline = (line, cx, y) => (
+    [[-2,0],[2,0],[0,-2],[0,2]].map(([dx,dy]) =>
+      `<text x="${cx+dx}" y="${y+dy}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.95" text-anchor="middle">${esc(line)}</text>`
+    ).join('\n')
+  );
+
+  const textSvg = lines.map((line, i) => {
+    const cx = W / 2;
+    const y  = boxY + padding + (i + 0.82) * lineH;
+    return `${outline(line, cx, y)}
+    <text x="${cx}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="${fillColor}" text-anchor="middle">${esc(line)}</text>`;
   }).join('\n');
-  const textElems = lines.map((line, i) => {
-    const y = boxY + padding + (i + 0.82) * lineH;
-    return `<text x="${W / 2}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(line)}</text>`;
-  }).join('\n');
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
     <defs>
       <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000000" stop-opacity="0.75"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="0.92"/>
+        <stop offset="0%" stop-color="#000000" stop-opacity="0.72"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.90"/>
       </linearGradient>
     </defs>
     <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="16" fill="url(#subGrad)"/>
-    <rect x="${boxX}" y="${boxY}" width="6" height="${boxH}" rx="3" fill="#FACC15"/>
-    ${shadowElems}
-    ${textElems}
+    <rect x="${boxX}" y="${boxY}" width="6" height="${boxH}" rx="3" fill="${isKey ? '#FF8C00' : '#FACC15'}"/>
+    ${textSvg}
   </svg>`;
   return await sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -791,7 +803,7 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, 
       composites.push({ input: await renderFirstFramePngBuffer(keyword, seriesName) });
     } else {
       if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
-      if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+      if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle, frames[i].isKey ?? false) });
     }
 
     const frameBuf = composites.length
@@ -822,15 +834,48 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, 
       clipPaths.push(clipPath);
     }
 
-    // 클립 concat (스트림 복사) + 오디오 합성
+    // 클립 concat (스트림 복사) + 오디오 합성 (+ 효과음 믹싱)
     const concatFile = path.resolve(tmpDir, `clips_${sessionId}.txt`);
     await fs.writeFile(concatFile, clipPaths.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n'));
+
+    // 효과음: assets/sounds/intro.mp3 (인트로), transition.mp3 (씬 전환)
+    const soundsDir = path.resolve(__dirname, '../../assets/sounds');
+    const introSfx  = path.resolve(soundsDir, 'intro.mp3');
+    const transitionSfx = path.resolve(soundsDir, 'transition.mp3');
+    const hasIntro  = await fs.access(introSfx).then(() => true).catch(() => false);
+    const hasTrans  = await fs.access(transitionSfx).then(() => true).catch(() => false);
+
+    let audioFilter = null;
+    const extraInputs = [];
+    if (audioPath) extraInputs.push('-i', audioPath);
+    if (hasIntro)  extraInputs.push('-i', introSfx);
+    if (hasTrans && frames.length > 1) extraInputs.push('-i', transitionSfx);
+
+    if (audioPath && (hasIntro || hasTrans)) {
+      // 인트로 + 주TTS 오디오 믹싱, 전환음은 2초 시점에 삽입
+      const inputs = ['[1:a]'];
+      let idx = 2;
+      if (hasIntro)  { inputs.push(`[${idx}:a]`); idx++; }
+      if (hasTrans && frames.length > 1) {
+        // 첫 씬 전환 시점에 전환음 믹싱
+        const transAt = Math.max(1, frames[0]?.duration ?? 3);
+        inputs.push(`[${idx}:a]adelay=${transAt * 1000}|${transAt * 1000}[tr]`);
+        audioFilter = `${inputs.slice(0, -1).join('')}${inputs[inputs.length - 1]};amix=inputs=${inputs.length - 1 + 1}:duration=first`;
+      } else {
+        audioFilter = `${inputs.join('')}amix=inputs=${inputs.length}:duration=first`;
+      }
+    }
+
     try {
       await execFileAsync(ffmpegPath, [
         '-f', 'concat', '-safe', '0', '-i', concatFile,
-        ...(audioPath ? ['-i', audioPath] : []),
+        ...extraInputs,
         '-c:v', 'copy',
-        ...(audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : []),
+        ...(audioPath && audioFilter
+          ? ['-filter_complex', audioFilter, '-c:a', 'aac', '-b:a', '128k', '-shortest']
+          : audioPath
+            ? ['-c:a', 'aac', '-b:a', '128k', '-shortest']
+            : []),
         '-y', outputPath,
       ], { maxBuffer: 50 * 1024 * 1024 });
     } finally {
@@ -1508,6 +1553,7 @@ async function generateMedia(content) {
       bgUrl:    sceneUrls[scene.act] ?? null,
       label:    seriesName,
       subtitle: scene.text,
+      isKey:    scene.isKey ?? false,
       duration: scene.duration,
     }));
     await renderFramesWithFfmpeg(frames, result.audio, videoPath, { keyword: content.keyword, seriesName });
