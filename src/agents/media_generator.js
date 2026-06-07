@@ -17,6 +17,22 @@ const sharp   = require('sharp');
 const execFileAsync = promisify(execFile);
 // ffmpeg-static 번들 바이너리 (시스템 ffmpeg 설치 불필요)
 const { default: ffmpegPath } = await import('ffmpeg-static');
+const ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/, (_, ext) => `ffprobe${ext ?? ''}`);
+
+// 오디오 파일 실제 길이 측정 (ffprobe). 실패 시 bytes 기반 추정으로 폴백.
+async function getAudioDuration(audioPath) {
+  try {
+    const { stdout } = await execFileAsync(ffprobePath, [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', audioPath,
+    ]);
+    const sec = parseFloat(stdout);
+    if (!isNaN(sec) && sec > 0) return Math.ceil(sec);
+  } catch { /* fall through */ }
+  // 폴백: ElevenLabs ~104kbps 기준 bytes / 13000
+  const stats = await fs.stat(audioPath).catch(() => ({ size: 0 }));
+  return Math.max(30, Math.ceil(stats.size / 13000) + 1);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -1241,9 +1257,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
   logger.info(`[media_generator] Uploading audio: ${content.keyword}`);
   const audioUrl = await uploadAudioForShotstack(audioPath);
 
-  const audioStats = await fs.stat(audioPath);
-  // 숏폼 목표: 90~180초 (1분30초~3분). TTS 오디오 크기로 추정 후 범위 클램프
-  const TOTAL_DURATION = Math.max(90, Math.min(180, Math.ceil(audioStats.size / 24000) + 2));
+  const TOTAL_DURATION = await getAudioDuration(audioPath);
   logger.info(`[media_generator] Duration: ${TOTAL_DURATION}s`);
 
   const seriesName = content.series_name ?? '매일읽어주는남자';
@@ -1396,10 +1410,9 @@ async function generateMedia(content) {
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
 
-    // SRT 생성: 오디오 크기로 총 길이 추정 → 씬 타이밍 계산 → SRT 저장
+    // SRT 생성: ffprobe로 실제 오디오 길이 측정 → 씬 타이밍 계산 → SRT 저장
     try {
-      const audioStats = await fs.stat(audioPath);
-      const totalDuration = Math.max(90, Math.min(180, Math.ceil(audioStats.size / 24000) + 2));
+      const totalDuration = await getAudioDuration(audioPath);
       const scenes = buildScenes(
         {
           hook:    content.shortform_script?.hook    ?? '',
@@ -1478,8 +1491,7 @@ async function generateMedia(content) {
 
   // 5. ffmpeg 영상 렌더링
   try {
-    const audioStats = await fs.stat(result.audio);
-    const totalDuration = Math.max(90, Math.min(180, Math.ceil(audioStats.size / 24000) + 2));
+    const totalDuration = await getAudioDuration(result.audio);
     const scenes = buildScenes(
       {
         hook:    content.shortform_script?.hook    ?? '',
@@ -1550,7 +1562,7 @@ async function generateLongFormMedia(content) {
       if (!p) return sections[i]?.duration_seconds ?? 60;
       try {
         const stats = await fs.stat(p);
-        return Math.max(10, Math.ceil(stats.size / 24000) + 1);
+        return Math.max(10, Math.ceil(stats.size / 13000) + 1);
       } catch {
         return sections[i]?.duration_seconds ?? 60;
       }
