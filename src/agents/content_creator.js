@@ -215,25 +215,25 @@ hook → context → insight → summary → cta 는 하나의 말로 이어진�
    B. 통념파괴형: "집값 오른다? 착각!", "금리 내려도 손해?"
    C. 경고형: "이 지표, 무시하면 손해!", "모르면 청산당해요?"
 
-❷ context (8~40초) — 친구한테 설명하듯 배경 (150~200자, 한 문장 최대 25자)
+❷ context (8~40초) — 친구한테 설명하듯 배경 (100~130자, 한 문장 최대 25자)
    - 훅에서 자연스럽게 이어지는 연결어로 시작
    - 무슨 일이 왜 일어났는지 구체적으로 설명
    - 수치 쓸 때 기준 명시: "1억 변동금리 기준 월 이자 5만원 올라요"
    - 시청자가 "이게 나랑 무슨 상관?" 을 느끼게 연결
 
-❸ insight (40~130초) — 반전이 있는 핵심 인사이트 (350~450자, 한 문장 최대 25자)
-   - [원인] → [과정] → [결과] → [내가 할 행동] 순서로 충분히 전개
+❸ insight (40~130초) — 반전이 있는 핵심 인사이트 (260~320자, 한 문장 최대 25자)
+   - [원인] → [과정] → [결과] → [내가 할 행동] 순서로 전개
    - 예상 못 한 관점/해결책으로 반전 포함
    - 전문 용어 나오면 바로 쉬운 말로 풀기
-   - 구체적 사례·비유 1개 이상 포함
-   - 핵심 포인트를 2~3가지 단계로 나눠 설명
+   - 구체적 사례·비유 1개 포함
+   - 핵심 포인트 2가지로 나눠 설명
 
-❹ summary (130~145초) — 핵심 정리 (60~80자)
+❹ summary (130~145초) — 핵심 정리 (50~65자)
    - "그러니까 한 마디로 하면요~" 식 연결어로 시작
    - 중립 결론 절대 금지. 엣지 있는 한 줄 평 또는 도발적 질문
    - insight의 핵심 메시지를 압축해서 기억에 남게
 
-❺ cta (145~150초) — 자연스러운 구독 유도 (30자 이내)
+❺ cta (145~150초) — 자연스러운 구독 유도 (25자 이내)
    - 훅 질문에 답하는 루프 구조로 마무리
 
 ${competitorCtx}${item.director_brief ? `━━━━━━━━━━━━━━━━━━━━━━━\n【디렉터 브리프 — 최우선 준수】\n${item.director_brief}\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━
@@ -244,10 +244,10 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   "series_name": "${seriesName}",
   "shortform_script": {
     "hook": "최대 12자, ?나 !로 끝남 — 스크롤을 멈추게 하는 한 마디",
-    "context": "①무슨 일 → ②왜 → ③나에게 영향. 수치는 기준 명시 (150~200자, 한 문장 최대 25자)",
-    "insight": "[원인]→[과정]→[결과]→[내가 할 행동] 단계별 인과관계. 사례·비유 포함. (350~450자, 한 문장 최대 25자)",
-    "summary": "엣지 있는 한 줄 평 또는 도발적 질문 (60~80자) — 중립 결론 금지",
-    "cta": "구독 유도 문장 (30자 이내)"
+    "context": "①무슨 일 → ②왜 → ③나에게 영향. 수치는 기준 명시 (100~130자, 한 문장 최대 25자)",
+    "insight": "[원인]→[과정]→[결과]→[내가 할 행동] 단계별 인과관계. 사례·비유 포함. (260~320자, 한 문장 최대 25자)",
+    "summary": "엣지 있는 한 줄 평 또는 도발적 질문 (50~65자) — 중립 결론 금지",
+    "cta": "구독 유도 문장 (25자 이내)"
   },
   "youtube_title": "유튜브 제목: 훅을 살린 제목 (25자 이내, 클릭 유발)",
   "youtube_description": "영상 설명란 200자: 핵심 내용 요약 + 구독 유도. #해시태그 포함.",
@@ -281,10 +281,10 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   let response = await callGpt();
   let parsed = JSON.parse(response.data.choices[0].message.content);
 
-  // insight < 300자이면 해당 섹션만 별도 확장 호출 (전체 재생성보다 신뢰도 높음)
+  // insight < 220자이면 해당 섹션만 별도 확장 호출 (전체 재생성보다 신뢰도 높음)
   const sc0 = parsed.shortform_script ?? {};
-  if ((sc0.insight ?? '').length < 300) {
-    logger.warn(`[content_creator] insight too short (${(sc0.insight ?? '').length}자 < 300). Expanding...`);
+  if ((sc0.insight ?? '').length < 220) {
+    logger.warn(`[content_creator] insight too short (${(sc0.insight ?? '').length}자 < 220). Expanding...`);
     try {
       const expandRes = await axios.post(
         'https://api.openai.com/v1/chat/completions',
@@ -293,13 +293,14 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
           messages: [{
             role: 'user',
             content:
-              `아래는 유튜브 숏폼 대본의 insight 섹션입니다. 이것을 350자 이상 450자 이하로 확장하세요.\n` +
+              `아래는 유튜브 숏폼 대본의 insight 섹션입니다. 이것을 260자 이상 320자 이하로 확장하세요.\n` +
               `키워드: ${item.keyword}\n\n` +
               `현재 insight:\n${sc0.insight ?? ''}\n\n` +
               `확장 규칙:\n` +
               `- [원인] → [과정/메커니즘] → [결과/영향] → [시청자가 할 행동] 구조 유지\n` +
               `- 구체적 사례나 비유 1개 추가\n` +
               `- 한 문장 최대 25자, 구어체\n` +
+              `- 최종 글자수 반드시 260자 이상 320자 이하\n` +
               `- JSON: {"insight":"확장된 내용"}`,
           }],
           response_format: { type: 'json_object' },
@@ -321,10 +322,10 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
     }
   }
 
-  // context < 120자이면 별도 확장
+  // context < 85자이면 별도 확장
   const sc1 = parsed.shortform_script ?? {};
-  if ((sc1.context ?? '').length < 120) {
-    logger.warn(`[content_creator] context too short (${(sc1.context ?? '').length}자 < 120). Expanding...`);
+  if ((sc1.context ?? '').length < 85) {
+    logger.warn(`[content_creator] context too short (${(sc1.context ?? '').length}자 < 85). Expanding...`);
     try {
       const expandRes = await axios.post(
         'https://api.openai.com/v1/chat/completions',
@@ -333,10 +334,10 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
           messages: [{
             role: 'user',
             content:
-              `아래 context 섹션을 150자 이상 200자 이하로 확장하세요.\n` +
+              `아래 context 섹션을 100자 이상 130자 이하로 확장하세요.\n` +
               `키워드: ${item.keyword}\n\n` +
               `현재 context:\n${sc1.context ?? ''}\n\n` +
-              `규칙: 무슨 일→왜→나에게 영향 순서, 수치는 기준 명시, 구어체, 한 문장 최대 25자\n` +
+              `규칙: 무슨 일→왜→나에게 영향 순서, 수치는 기준 명시, 구어체, 한 문장 최대 25자, 최종 100~130자\n` +
               `JSON: {"context":"확장된 내용"}`,
           }],
           response_format: { type: 'json_object' },
