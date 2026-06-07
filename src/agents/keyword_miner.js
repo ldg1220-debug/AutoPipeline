@@ -10,6 +10,18 @@ import db from '../db/db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 제외 패턴 — 상호명·지명·의미없는 자동완성 필터
+const BLACKLIST_PATTERNS = [
+  /의원|병원$|클리닉$|약국$|센터$|스튜디오$|[샵숍]$|마트$/,   // 상호명 접미사
+  /[가-힣]{2,4}(구|시|군|동|로|역|읍|면|리)\s*(피부|스킨|뷰티|헬스)/,  // 지역+카테고리
+  /^[가-힣]{2,6}(피부과|피부관리실|피부샵|뷰티샵|헤어샵)$/,            // 상호명 전체
+  /rpg|게임|공략|패치|업데이트|캐릭터/i,                              // 게임 관련
+];
+
+function isBlacklisted(keyword) {
+  return BLACKLIST_PATTERNS.some((re) => re.test(keyword));
+}
+
 // 상업적 의도 키워드 — 이 단어가 포함된 롱테일은 전환율이 높다
 const COMMERCIAL_WORDS = [
   '추천', '비교', '후기', '가격', '방법', '순위', '최저가',
@@ -145,6 +157,7 @@ function scoreKeywords(allSuggestions, datalabScores = {}) {
   for (const { keyword, rank, source } of allSuggestions) {
     const kw = keyword.trim().replace(/\s+/g, ' ');  // 공백 정규화
     if (!kw || kw.length < 3) continue;
+    if (isBlacklisted(kw)) continue;
 
     if (!map.has(kw)) map.set(kw, { sources: new Set(), rankSum: 0, count: 0 });
     const entry = map.get(kw);

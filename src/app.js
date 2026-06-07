@@ -683,6 +683,24 @@ async function runBlogPipeline(youtubeResults = null) {
     return;
   }
 
+  // ── 카테고리별 일일 발행 상한 적용 ────────────────────────────────────────
+  {
+    const limits = config.keywordMiner?.categoryDailyLimit ?? {};
+    const catCount = {};
+    keywordData.contents = keywordData.contents.filter((item) => {
+      const cat = item.category ?? 'economy';
+      const max = limits[cat] ?? 0;
+      if (max === 0) return true;
+      catCount[cat] = (catCount[cat] ?? 0) + 1;
+      if (catCount[cat] > max) {
+        logger.info(`[app] 카테고리 "${cat}" 일일 상한(${max}) 초과 — 제외: ${item.keyword}`);
+        return false;
+      }
+      return true;
+    });
+    logger.info(`[app] 카테고리 상한 적용 후: ${keywordData.contents.length}개`);
+  }
+
   // ── 경쟁 채널 분석 (주 1회 — 인사이트 7일 캐시) ─────────────────────────
   try {
     await analyzeCompetitors();

@@ -106,13 +106,26 @@ export const config = {
     credentials: process.env.GOOGLE_SC_CREDENTIALS,  // JSON 키 파일 경로
   },
   keywordMiner: {
+    // 카테고리 비율 목표: 경제/부동산 40% · 복지/사회 30% · 뷰티/건강 20% · 연예 10%
     seeds:  process.env.KEYWORD_SEEDS ||
-      '재테크,부동산,경기침체,금리,주식투자,코인투자,ETF,달러환율,인플레이션,가계부채,' +
-      '아파트청약,전세사기,재건축,역세권,부동산세금,임대차,분양권,갭투자,경매부동산,신도시,' +
-      '노후준비,연금저축,개인연금,실업급여,정부지원금,국민연금,건강보험,복지혜택,청년지원,소득공제,' +
-      '피부관리,스킨케어루틴,선스틱추천,수분크림추천,여드름피부,건성피부관리,지성피부관리,' +
-      '봄피부관리,여름자외선차단,가을환절기피부,겨울건조피부,민감성피부,피부트러블해결',
+      // 경제·금융 (10개)
+      '재테크,금리,주식투자,코인투자,ETF,달러환율,인플레이션,가계부채,경기침체,소득공제,' +
+      // 부동산 (8개)
+      '아파트청약,전세사기,재건축,부동산세금,임대차,갭투자,경매부동산,신도시,' +
+      // 복지·사회 (8개)
+      '노후준비,연금저축,실업급여,정부지원금,국민연금,복지혜택,청년지원,건강보험,' +
+      // 뷰티·건강 (4개 — 의도적으로 적게)
+      '스킨케어루틴,여드름피부,선스틱추천,수분크림추천',
     topN:   parseInt(process.env.KEYWORD_TOP_N || '20', 10),
+    // 카테고리별 하루 최대 발행 수 (0 = 무제한)
+    categoryDailyLimit: {
+      beauty:        parseInt(process.env.BLOG_CATEGORY_LIMIT_BEAUTY        || '2', 10),
+      entertainment: parseInt(process.env.BLOG_CATEGORY_LIMIT_ENTERTAINMENT || '1', 10),
+      economy:       parseInt(process.env.BLOG_CATEGORY_LIMIT_ECONOMY       || '0', 10),
+      social:        parseInt(process.env.BLOG_CATEGORY_LIMIT_SOCIAL        || '0', 10),
+      health:        parseInt(process.env.BLOG_CATEGORY_LIMIT_HEALTH        || '0', 10),
+      realestate:    parseInt(process.env.BLOG_CATEGORY_LIMIT_REALESTATE    || '0', 10),
+    },
   },
   // 쇼핑 파이프라인 — links.json 제품 기반 (TikTok/Instagram/네이버클립용)
   shopping: {
