@@ -131,7 +131,10 @@ async function run() {
   } catch (err) {
     logger.warn(`${tag} Director brief 실패 (계속): ${err.message}`);
   }
-  trendData.selected_items[0].director_brief = brief;
+  // --angle 지정 시 앵글을 브리프 앞에 붙여 최우선 보장
+  trendData.selected_items[0].director_brief = angle
+    ? `[제작자 앵글 — 최우선 준수]\n${angle}\n\n이 관점을 대본 전체에 일관되게 반영할 것.\n\n[Director 브리프]\n${brief}`
+    : brief;
 
   // ── Step 3: 스크립트 작성 ────────────────────────────────────────────────
   logger.info(`${tag} Step 3: 스크립트 작성 중...`);
