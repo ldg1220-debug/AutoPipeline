@@ -265,6 +265,17 @@ async function run() {
   }
 
   // ── Step 9: YouTube 업로드 ───────────────────────────────────────────────
+  // 숏폼 전용 실행 시 이전에 남은 _long.mp4가 있으면 업로더가 그걸 우선 선택하므로 제거
+  if (!longform) {
+    const { default: fsSync } = await import('fs');
+    const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    const longPath = path.resolve(__dirname, `../output/media/${safeKw}_long.mp4`);
+    try {
+      fsSync.unlinkSync(longPath);
+      logger.info(`${tag} 이전 롱폼 파일 제거 (숏폼 업로드 보장): ${longPath}`);
+    } catch { /* 없으면 무시 */ }
+  }
+
   if (dryRun) {
     console.log('\n✅ Dry-run 완료 — YouTube 업로드 건너뜀');
     console.log(`   스크립트: output/scripts/video_script_${date}_${keyword.replace(/\s/g, '_')}.json`);
