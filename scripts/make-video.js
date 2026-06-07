@@ -297,11 +297,33 @@ async function run() {
     const result = publishResult.results?.[0];
     const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
 
+    // 영상 파일 실제 길이 측정
+    const { getVideoDurationSec } = await import('../src/agents/auto_publisher.js').catch(() => ({ getVideoDurationSec: null }));
+    const safeKw   = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    const vidPath  = path.resolve(__dirname, `../output/media/${safeKw}.mp4`);
+    let videoDurStr = '';
+    try {
+      const { execFile } = await import('child_process');
+      const { promisify } = await import('util');
+      const execFileAsync = promisify(execFile);
+      const ffprobePath = (await import('ffmpeg-static')).default.replace('ffmpeg', 'ffprobe');
+      const { stdout } = await execFileAsync(ffprobePath, [
+        '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', vidPath,
+      ]).catch(() => ({ stdout: '' }));
+      const sec = parseFloat(stdout);
+      if (!isNaN(sec)) {
+        const m = Math.floor(sec / 60);
+        const s = Math.round(sec % 60);
+        videoDurStr = `${m}분 ${s}초`;
+      }
+    } catch { /* ffprobe 없으면 생략 */ }
+
     console.log('\n✅ 완료!');
-    console.log(`   키워드 : ${keyword}`);
-    if (result?.youtube?.url) console.log(`   YouTube: ${result.youtube.url}`);
-    if (result?.youtube_shorts?.url) console.log(`   Shorts : ${result.youtube_shorts.url}`);
-    console.log(`   소요   : ${elapsed}분\n`);
+    console.log(`   키워드   : ${keyword}`);
+    if (videoDurStr) console.log(`   영상길이 : ${videoDurStr}`);
+    if (result?.youtube?.url) console.log(`   YouTube  : ${result.youtube.url}`);
+    console.log(`   처리시간 : ${elapsed}분\n`);
   } catch (err) {
     logger.error(`${tag} YouTube 업로드 실패: ${err.message}`);
     process.exit(1);
