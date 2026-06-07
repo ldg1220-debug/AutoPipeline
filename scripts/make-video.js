@@ -216,9 +216,9 @@ async function run() {
   logger.info(`${tag} Step 6: 영상 제작 중...`);
   try {
     const content = contentData.contents[0];
-    if (content.long_video?.sections?.length) {
+    if (longform && content.long_video?.sections?.length) {
       await generateLongFormMedia(content);
-      logger.info(`${tag} 롱폼 + 숏폼 영상 제작 완료`);
+      logger.info(`${tag} 롱폼 영상 제작 완료`);
     } else {
       await generateAllMedia(contentData);
       logger.info(`${tag} 숏폼 영상 제작 완료`);
