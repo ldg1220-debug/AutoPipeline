@@ -234,6 +234,7 @@ export async function generateYouTubeTitle(keyword, hook, existingTitle = null) 
 
   try {
     await throttle(300);
+    const currentYear = new Date(Date.now() + 9 * 3600 * 1000).getFullYear(); // KST 기준
     const res = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -245,6 +246,11 @@ export async function generateYouTubeTitle(keyword, hook, existingTitle = null) 
             `키워드: ${keyword}\n` +
             `훅/주제: ${(hook ?? '').slice(0, 80)}\n` +
             `기존 제목: ${existingTitle ?? '없음'}\n\n` +
+            `⚠️ 연도 규칙 (절대 위반 금지):\n` +
+            `  - 현재 연도는 ${currentYear}년이다\n` +
+            `  - 제목에 연도를 쓸 때는 반드시 ${currentYear}년만 허용\n` +
+            `  - "2023년", "2024년", "2025년" 등 과거 연도를 제목에 절대 쓰지 마라\n` +
+            `  - 연도 없이 작성해도 됨 — 연도 없는 제목이 연도 틀린 제목보다 낫다\n\n` +
             `핵심 전략 — 썸네일↔제목 상호보완:\n` +
             `  - 썸네일은 감정·궁금증을 담당함 (이미 처리됨)\n` +
             `  - 제목은 썸네일의 궁금증에 답하는 "구체적 약속"이어야 함\n` +
@@ -265,7 +271,10 @@ export async function generateYouTubeTitle(keyword, hook, existingTitle = null) 
         timeout: 15000,
       }
     );
-    const title = res.data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    let title = res.data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    // 과거 연도 후처리 — GPT가 규칙을 어겼을 때 안전망
+    title = title.replace(/20(1\d|2[0-5])년/g, '');
+    title = title.replace(/\s{2,}/g, ' ').trim();
     logger.info(`[youtubeSEO] Optimized title (complementary): "${title}"`);
     return title || existingTitle || `${keyword} 핵심 정리`;
   } catch (err) {

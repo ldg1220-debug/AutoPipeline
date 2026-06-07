@@ -37,9 +37,12 @@ async function runLLMQA(content) {
 
 검수 항목:
 1. fact_check_score (0~100): 사실 정확성. 허위·과장·확인 불가 내용 발견 시 감점.
+   ⚠️ 연도 오류 중점 검수: 현재는 2026년이다.
+     - "2023년에", "올해 2023", "2024년 현재" 등 과거 연도를 현재로 쓴 표현 발견 시 -30점 이상 감점
+     - 연도 없이 구체적 수치를 현재형으로 사실처럼 서술한 경우 -20점 감점
 2. grammar_check ("PASS" | "FAIL"): 맞춤법·문법·오탈자 오류가 없으면 PASS. 오류가 하나라도 있으면 FAIL.
-3. issues (string): 발견된 문제 요약 (없으면 빈 문자열).
-4. corrected_script (object | null): grammar_check가 FAIL인 경우에만 오탈자·문법을 교정한 스크립트를 반환.
+3. issues (string): 발견된 문제 요약. 연도 오류가 있으면 반드시 명시 (없으면 빈 문자열).
+4. corrected_script (object | null): grammar_check가 FAIL인 경우에만 오탈자·문법·연도 오류를 교정한 스크립트를 반환.
    형식: { "hook": "...", "context": "...", "insight": "...", "summary": "...", "cta": "..." }
    오류가 없으면 null.
 
