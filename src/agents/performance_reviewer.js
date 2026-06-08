@@ -80,8 +80,10 @@ async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
       }
     } catch (err) {
       if (err.response?.status === 403) {
-        // yt-analytics.readonly 스코프 미부여 → 폴백 플래그 반환
-        results[videoId] = { _need_fallback: true };
+        const reason = err.response?.data?.error?.errors?.[0]?.reason ?? '';
+        const detail = err.response?.data?.error?.message ?? err.message;
+        logger.warn(`[perf_reviewer] YT Analytics 403 (${videoId}): reason="${reason}" — ${detail}`);
+        results[videoId] = { _need_fallback: true, _403_reason: reason };
       } else {
         logger.warn(`[perf_reviewer] YT Analytics failed for ${videoId}: ${err.message}`);
         results[videoId] = null;
@@ -716,9 +718,16 @@ export async function runPerformanceReview(options = {}) {
       // 403 폴백 감지 — 하나라도 _need_fallback 이면 Analytics 스코프 미부여
       const needFallback = Object.values(analyticsResult).some((v) => v?._need_fallback);
       if (needFallback) {
-        logger.warn('[perf_reviewer] YouTube Analytics API 403 — yt-analytics.readonly 스코프 미부여');
+        const reason403 = Object.values(analyticsResult).find((v) => v?._403_reason)?._403_reason ?? '';
+        if (reason403 === 'accessNotConfigured' || reason403 === 'forbidden') {
+          logger.warn('[perf_reviewer] ⚠️  YouTube Analytics API가 GCP 프로젝트에서 비활성화 상태입니다.');
+          logger.warn('[perf_reviewer] 해결: console.cloud.google.com → APIs & Services → Enable APIs');
+          logger.warn('[perf_reviewer]         → "YouTube Analytics API" 검색 → 사용 설정');
+        } else {
+          logger.warn('[perf_reviewer] YouTube Analytics API 403 — yt-analytics.readonly 스코프 미부여');
+          logger.warn('[perf_reviewer] watch_time·CTR 수집을 원하면: npm run youtube:auth:analytics');
+        }
         logger.warn('[perf_reviewer] Data API v3 (videos.list) 폴백으로 조회수·좋아요·댓글 수집');
-        logger.warn('[perf_reviewer] watch_time·CTR 수집을 원하면: npm run youtube:auth:analytics');
         ytAnalyticsMap = await fetchYouTubeStatsFallback(accessToken, videoIds);
       } else {
         ytAnalyticsMap = analyticsResult;
