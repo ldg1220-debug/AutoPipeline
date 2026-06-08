@@ -25,8 +25,3 @@ output/analytics/*
 
 # SQLite DB (로컬 전용)
 data/
-
-# 매읽남 레퍼런스 이미지 (개인 저작물, git 추적 제외)
-reference/*.png
-reference/*.jpg
-reference/*.jpeg
