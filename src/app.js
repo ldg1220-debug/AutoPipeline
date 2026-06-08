@@ -25,6 +25,7 @@ import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
 import { runProjectManagerReview } from './agents/project_manager.js';
+import { runPerformanceReview } from './agents/performance_reviewer.js';
 import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1112,6 +1113,9 @@ if (_isDirectEntry) {
       // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
       startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
       startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+      // 실적 검토: 매주 월요일 오전 9시 KST (0 0 * * 1)
+      const perfCron = process.env.PERF_REVIEW_CRON || '0 0 * * 1';
+      startScheduler(runPerformanceReview, perfCron);
 
       // 최초 기동 시 두 파이프라인 모두 순차 실행
       try {

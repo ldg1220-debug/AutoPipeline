@@ -32,6 +32,8 @@
     "blog:publish": "node src/agents/blog_publisher.js",
     "blog:fix-categories": "node scripts/fix-post-categories.js",
     "blog:analytics": "node src/agents/blog_analytics.js",
+    "perf:review": "node src/agents/performance_reviewer.js",
+    "perf:review:28d": "node -e \"import('./src/agents/performance_reviewer.js').then(m=>m.runPerformanceReview({daysBack:28}))\"",
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:pipeline:auto": "node scripts/run-blog-pipeline.js --auto",
     "blog:login": "node scripts/tistory-login.js",
