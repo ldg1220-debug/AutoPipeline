@@ -51,19 +51,18 @@ async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
       const res = await axios.get('https://youtubeanalytics.googleapis.com/v2/reports', {
         headers: { Authorization: `Bearer ${accessToken}` },
         params: {
-          ids:        'channel==MINE',
+          ids:      'channel==MINE',
           startDate,
           endDate,
-          metrics:    'views,estimatedMinutesWatched,averageViewDuration,impressions,impressionClickThroughRate,likes,comments,subscribersGained',
-          dimensions: 'video',
-          filters:    `video==${videoId}`,
-          maxResults: 1,
+          metrics:  'views,estimatedMinutesWatched,averageViewDuration,impressions,impressionClickThroughRate,likes,comments,subscribersGained',
+          filters:  `video==${videoId}`,
+          // dimensions 없이 filters만 쓰면 해당 영상 집계값 단일 행 반환
         },
         timeout: 15000,
       });
       const rows = res.data?.rows ?? [];
       if (rows.length > 0) {
-        const [, views, watchMin, avgDur, impr, ctr, likes, comments, subs] = rows[0];
+        const [views, watchMin, avgDur, impr, ctr, likes, comments, subs] = rows[0];
         results[videoId] = {
           views:                 views ?? 0,
           watch_minutes:         +(watchMin ?? 0).toFixed(1),
@@ -79,10 +78,11 @@ async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
         results[videoId] = null;
       }
     } catch (err) {
-      if (err.response?.status === 403) {
-        const reason = err.response?.data?.error?.errors?.[0]?.reason ?? '';
-        const detail = err.response?.data?.error?.message ?? err.message;
-        logger.warn(`[perf_reviewer] YT Analytics 403 (${videoId}): reason="${reason}" — ${detail}`);
+      const status = err.response?.status;
+      const reason = err.response?.data?.error?.errors?.[0]?.reason ?? '';
+      const detail = err.response?.data?.error?.message ?? err.message;
+      if (status === 403 || status === 400) {
+        logger.warn(`[perf_reviewer] YT Analytics ${status} (${videoId}): reason="${reason}" — ${detail}`);
         results[videoId] = { _need_fallback: true, _403_reason: reason };
       } else {
         logger.warn(`[perf_reviewer] YT Analytics failed for ${videoId}: ${err.message}`);
