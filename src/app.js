@@ -392,33 +392,17 @@ async function runPipeline() {
   };
 
   // 롱폼은 runUnifiedPipeline() (목요일 22시 스케줄) 또는 --longform 플래그 시에만 생성.
-  // runPipeline()에서는 숏폼만 제작한다.
+  // runPipeline()에서는 long_video 데이터를 무시하고 전체를 숏폼으로 제작한다.
 
   try {
     if (approvedContentData.contents.length === 0) {
       logger.warn('[app] Agent 2.5 skipped — no text-approved items to produce.');
     } else {
-      // 롱폼 항목(최상위 키워드)과 쇼츠 전용 항목 분리
-      const _longformItems   = approvedContentData.contents.filter((c) => c.long_video?.sections?.length);
-      const _shortsOnlyItems = approvedContentData.contents.filter((c) => !c.long_video?.sections?.length);
-
-      for (const tc of _longformItems) {
-        try {
-          logger.info(`[app] 롱폼+쇼츠 미디어 생성: "${tc.keyword}"`);
-          await generateLongFormMedia(tc);
-          logger.info(`[app] 롱폼 미디어 완료: "${tc.keyword}"`);
-        } catch (lfErr) {
-          logger.warn(`[app] 롱폼 미디어 실패 ("${tc.keyword}"): ${lfErr.message}`);
-        }
-      }
-
-      if (_shortsOnlyItems.length > 0) {
-        const mediaResult = await generateAllMedia({ ...approvedContentData, contents: _shortsOnlyItems });
-        await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
-        logger.info(`[app] 쇼츠 미디어 생성 완료: ${mediaResult.results?.length ?? 0}개`);
-      }
-
-      logger.info(`[app] Agent 2.5 complete. 롱폼: ${_longformItems.length}, 쇼츠: ${_shortsOnlyItems.length}`);
+      // 모든 항목을 숏폼으로 강제 처리 (long_video 무시)
+      const shortsContents = approvedContentData.contents.map((c) => ({ ...c, long_video: undefined }));
+      const mediaResult = await generateAllMedia({ ...approvedContentData, contents: shortsContents });
+      await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
+      logger.info(`[app] Agent 2.5 complete. 숏폼: ${mediaResult.results?.length ?? 0}개`);
     }
   } catch (err) {
     logger.warn('[app] Agent 2.5 (media_generator) failed. Continuing without media.', {
