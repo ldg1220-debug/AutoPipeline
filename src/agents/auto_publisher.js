@@ -10,6 +10,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import db from '../db/db.js';
 import { generateYouTubeDescription, generateYouTubeTags, generateYouTubeTitle } from '../utils/youtubeSEO.js';
 import { getManualCoupangLink } from './monetizer.js';
+import { refreshYouTubeAccessToken } from '../utils/youtubeAuth.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -68,24 +69,7 @@ function getYouTubeChannelConfig(category) {
   return config.youtube;
 }
 
-/**
- * refresh_token으로 YouTube access_token을 갱신한다.
- * google-auth-library 없이 axios 직접 호출 방식을 사용한다.
- * 토큰 값은 로그에 절대 출력하지 않는다.
- */
-async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
-  const response = await axios.post(
-    'https://oauth2.googleapis.com/token',
-    new URLSearchParams({
-      client_id:     channelConfig.clientId,
-      client_secret: channelConfig.clientSecret,
-      refresh_token: channelConfig.refreshToken,
-      grant_type:    'refresh_token',
-    }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
-  );
-  return response.data.access_token;
-}
+// refreshYouTubeAccessToken은 src/utils/youtubeAuth.js에서 import
 
 /**
  * 오늘(KST) 롱폼 업로드 수를 로컬 파일로 추적.

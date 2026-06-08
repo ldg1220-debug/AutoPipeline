@@ -15,8 +15,20 @@ const require = createRequire(import.meta.url);
 const sharp   = require('sharp');
 
 const execFileAsync = promisify(execFile);
-// ffmpeg-static 번들 바이너리 (시스템 ffmpeg 설치 불필요)
-const { default: ffmpegPath } = await import('ffmpeg-static');
+
+// ffmpeg-static 지연 로드 — 패키지 없을 시 부트 크래시 방지
+let _ffmpegPath = null;
+async function getFfmpegPath() {
+  if (_ffmpegPath) return _ffmpegPath;
+  try {
+    const mod = await import('ffmpeg-static');
+    _ffmpegPath = mod.default;
+  } catch {
+    _ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    logger.warn('[media_generator] ffmpeg-static 없음 — 시스템 ffmpeg 사용');
+  }
+  return _ffmpegPath;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -701,6 +713,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
   const listFile = `${outputPath}.list.txt`;
   await fs.writeFile(listFile, listContent);
 
+  const ffmpegPath = await getFfmpegPath();
   await execFileAsync(ffmpegPath, [
     '-f', 'concat', '-safe', '0', '-i', listFile,
     '-c:a', 'libmp3lame', '-q:a', '2', '-y', outputPath,
@@ -712,6 +725,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
 // ── ffmpeg stderr로 실제 오디오 길이(초) 측정 ───────────────────────────
 async function getAudioDurationSec(audioPath) {
   try {
+    const ffmpegPath = await getFfmpegPath();
     // ffmpeg -i 는 항상 Duration을 stderr에 출력하고 에러 코드 1을 반환 (출력 없으므로)
     const { stderr = '' } = await execFileAsync(
       ffmpegPath, ['-i', audioPath], { encoding: 'utf8' }
@@ -734,6 +748,7 @@ async function getAudioDurationSec(audioPath) {
  *   duration — 프레임 표시 시간(초)
  */
 async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, seriesName } = {}) {
+  const ffmpegPath = await getFfmpegPath();
   const sessionId = Date.now().toString(36);
   const tmpDir    = path.resolve(path.dirname(outputPath), 'tmp_ffmpeg');
   await fs.mkdir(tmpDir, { recursive: true });
@@ -1619,6 +1634,7 @@ async function generateMedia(content) {
  *   5. ffmpeg로 영상 렌더링 (로컬, 클라우드 의존 없음)
  */
 async function generateLongFormMedia(content) {
+  const ffmpegPath = await getFfmpegPath();
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const videoPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
   const result      = { keyword: content.keyword, video: null };

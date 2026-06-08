@@ -9,34 +9,19 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import logger from '../../src/utils/logger.js';
+import { refreshYouTubeAccessToken } from '../../src/utils/youtubeAuth.js';
 
 const router = Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/**
- * YouTube access_token 갱신
- */
-async function refreshYouTubeToken() {
-  const { YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN } = process.env;
-  if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET || !YOUTUBE_REFRESH_TOKEN) {
-    throw new Error('YouTube OAuth 환경변수가 설정되지 않았습니다.');
-  }
-
-  const response = await axios.post(
-    'https://oauth2.googleapis.com/token',
-    new URLSearchParams({
-      client_id: YOUTUBE_CLIENT_ID,
-      client_secret: YOUTUBE_CLIENT_SECRET,
-      refresh_token: YOUTUBE_REFRESH_TOKEN,
-      grant_type: 'refresh_token',
-    }).toString(),
-    {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      timeout: 10000,
-    }
-  );
-  return response.data.access_token;
+// YouTube access_token 갱신 — src/utils/youtubeAuth.js 공통 유틸 사용
+function refreshYouTubeToken() {
+  return refreshYouTubeAccessToken({
+    clientId:     process.env.YOUTUBE_CLIENT_ID,
+    clientSecret: process.env.YOUTUBE_CLIENT_SECRET,
+    refreshToken: process.env.YOUTUBE_REFRESH_TOKEN,
+  });
 }
 
 /**
@@ -91,27 +76,21 @@ async function uploadToYouTube(videoPath, title, description, tags, accessToken)
  * TikTok 업로드 (stub)
  */
 async function uploadToTikTok(videoPath, title) {
-  logger.info(`[publish] TikTok stub 업로드: ${title}`);
-  // TODO: TikTok Content Posting API 연동 필요
-  return { status: 'stub', message: 'TikTok 업로드는 현재 개발 중입니다.' };
+  return { status: 'not_implemented', message: 'TikTok 업로드는 준비 중입니다.' };
 }
 
 /**
  * Instagram Reels 업로드 (stub)
  */
 async function uploadToInstagram(videoPath, title) {
-  logger.info(`[publish] Instagram stub 업로드: ${title}`);
-  // TODO: Instagram Graph API 연동 필요
-  return { status: 'stub', message: 'Instagram 업로드는 현재 개발 중입니다.' };
+  return { status: 'not_implemented', message: 'Instagram 업로드는 준비 중입니다.' };
 }
 
 /**
  * Threads 업로드 (stub)
  */
 async function uploadToThreads(videoPath, title) {
-  logger.info(`[publish] Threads stub 업로드: ${title}`);
-  // TODO: Threads API 연동 필요
-  return { status: 'stub', message: 'Threads 업로드는 현재 개발 중입니다.' };
+  return { status: 'not_implemented', message: 'Threads 업로드는 준비 중입니다.' };
 }
 
 /**

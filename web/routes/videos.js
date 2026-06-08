@@ -14,11 +14,9 @@ import axios from 'axios';
 import fs from 'fs/promises';
 import logger from '../../src/utils/logger.js';
 import { SESSION_FILE } from './taobao.js';
+import { XHS_SESSION_FILE } from './xhs.js';
 
 const router = Router();
-
-// 샤오홍슈 세션 파일 (타오바오와 별도 관리)
-const XHS_SESSION_FILE = SESSION_FILE.replace('taobao_session', 'xhs_session');
 
 const hasChinese = (t) => /[一-鿿]/.test(t);
 
