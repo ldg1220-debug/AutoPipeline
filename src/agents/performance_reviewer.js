@@ -133,19 +133,39 @@ async function fetchYouTubeStatsFallback(accessToken, videoIds) {
   return results;
 }
 
-// ── YouTube Analytics 지표 DB 저장 ────────────────────────────────────────
+// ── YouTube Analytics 지표 DB 저장 (당일 중복 방지: 같은 날 이미 수집된 경우 UPDATE) ──
 function saveYouTubeMetrics(analyticsMap) {
+  // 오늘 이미 수집된 video_id 목록 조회
+  const todaySet = new Set(
+    db.prepare(`
+      SELECT DISTINCT video_id FROM youtube_metrics
+      WHERE DATE(collected_at) = DATE('now','localtime')
+    `).all().map((r) => r.video_id)
+  );
+
   const insert = db.prepare(`
     INSERT INTO youtube_metrics
       (video_id, views, watch_minutes, avg_view_duration_sec, impressions, ctr, likes, comments, subscribers_gained)
     VALUES
       (@video_id, @views, @watch_minutes, @avg_view_duration_sec, @impressions, @ctr, @likes, @comments, @subscribers_gained)
   `);
+  const update = db.prepare(`
+    UPDATE youtube_metrics
+    SET views=@views, watch_minutes=@watch_minutes, avg_view_duration_sec=@avg_view_duration_sec,
+        impressions=@impressions, ctr=@ctr, likes=@likes, comments=@comments,
+        subscribers_gained=@subscribers_gained, collected_at=datetime('now','localtime')
+    WHERE video_id=@video_id AND DATE(collected_at)=DATE('now','localtime')
+  `);
 
   let saved = 0;
   for (const [videoId, m] of Object.entries(analyticsMap)) {
-    if (!m) continue;
-    insert.run({ video_id: videoId, ...m });
+    if (!m || m._need_fallback) continue;
+    const row = { video_id: videoId, ...m };
+    if (todaySet.has(videoId)) {
+      update.run(row);
+    } else {
+      insert.run(row);
+    }
     saved++;
   }
   return saved;
@@ -181,23 +201,31 @@ function identifyYouTubeUnderperformers() {
 
 // ── 채널 전체 주간 집계 ───────────────────────────────────────────────────
 function buildYouTubeWeeklySummary() {
+  // 영상별 최신 지표 1건만 집계 (중복 방지)
   const totals = db.prepare(`
     SELECT
-      COUNT(DISTINCT ym.video_id)  AS videos_tracked,
-      SUM(ym.views)                AS total_views,
-      SUM(ym.watch_minutes)        AS total_watch_minutes,
-      AVG(ym.avg_view_duration_sec) AS avg_duration_sec,
-      SUM(ym.subscribers_gained)   AS subs_gained
-    FROM youtube_metrics ym
-    WHERE ym.collected_at >= datetime('now','-7 days','localtime')
+      COUNT(*)                      AS videos_tracked,
+      SUM(latest.views)             AS total_views,
+      SUM(latest.watch_minutes)     AS total_watch_minutes,
+      AVG(latest.avg_view_duration_sec) AS avg_duration_sec,
+      SUM(latest.subscribers_gained) AS subs_gained
+    FROM (
+      SELECT video_id, views, watch_minutes, avg_view_duration_sec, subscribers_gained,
+             MAX(collected_at) AS collected_at
+      FROM youtube_metrics
+      GROUP BY video_id
+    ) latest
   `).get();
 
   const topVideos = db.prepare(`
-    SELECT yp.title, yp.channel_type, yp.keyword, ym.views, ym.watch_minutes, ym.ctr
+    SELECT yp.title, yp.channel_type, yp.keyword, latest.views, latest.watch_minutes, latest.ctr
     FROM youtube_posts yp
-    JOIN youtube_metrics ym ON ym.video_id = yp.video_id
-    WHERE ym.collected_at >= datetime('now','-7 days','localtime')
-    ORDER BY ym.views DESC
+    JOIN (
+      SELECT video_id, views, watch_minutes, ctr, MAX(collected_at) AS collected_at
+      FROM youtube_metrics
+      GROUP BY video_id
+    ) latest ON latest.video_id = yp.video_id
+    ORDER BY latest.views DESC
     LIMIT 5
   `).all();
 
@@ -333,64 +361,82 @@ async function analyzeAndSuggest(ytMetrics, blogUnderperformers, crossAnalysis) 
     `  "${p.title}" — 클릭 ${p.clicks}, 노출 ${p.impressions}, ${p.avg_position?.toFixed(1) ?? '-'}위`
   ).join('\n') || '  (데이터 없음)';
 
-  // 키워드별 조회수 분류 (흥행 공식 도출용)
-  const ytBestKeywords = ytBest.map((v) => `"${v.title}" (${v.channel_type}, 조회 ${v.views}, 좋아요 ${v.likes})`).join('\n');
-  const ytWorstKeywords = ytWorst.map((v) => `"${v.title}" (${v.channel_type}, 조회 ${v.views})`).join('\n');
+  // 영상별 키워드+제목+지표 상세 목록 (GPT 키워드 분석용)
+  const allVideosStr = ytSorted.map((v) =>
+    `  키워드: "${v.keyword}" | 제목: "${v.title}" | 포맷: ${v.channel_type} | 조회 ${v.views}회 | 좋아요 ${v.likes} | 댓글 ${v.comments}`
+  ).join('\n');
+
+  const ytBestStr = ytBest.map((v) =>
+    `  키워드: "${v.keyword}" | 제목: "${v.title}" | 포맷: ${v.channel_type} | 조회 ${v.views}회 | 좋아요 ${v.likes}`
+  ).join('\n');
+  const ytWorstStr = ytWorst.map((v) =>
+    `  키워드: "${v.keyword}" | 제목: "${v.title}" | 포맷: ${v.channel_type} | 조회 ${v.views}회`
+  ).join('\n');
 
   const prompt = `당신은 유튜브 및 블로그 콘텐츠 데이터 분석에 특화된 '콘텐츠 성장 전략가 겸 시니어 데이터 애널리스트'입니다.
 복잡한 트래픽 지표를 분석하여 채널 스케일업을 위한 구체적이고 실행 가능한 전략을 제시하는 것이 목표입니다.
 추상적이거나 뻔한 조언("양질의 콘텐츠를 만드세요")은 절대 배제하고, 실무에 즉시 적용 가능한 피드백만 제공하세요.
 
-[Input Data]
-- 추적 영상 수: ${ytMetrics.length}개 (숏폼 ${shorts.length}개 / 롱폼 ${longform.length}개)
+[채널 전체 영상 목록 — 키워드·제목·성과 데이터]
+${allVideosStr || '(데이터 없음)'}
+
+[요약 지표]
+- 추적 영상: ${ytMetrics.length}개 (숏폼 ${shorts.length}개 / 롱폼 ${longform.length}개)
 - 숏폼 평균 조회수: ${shortAvgViews}회 | 롱폼 평균 조회수: ${longAvgViews}회
 - 숏폼 평균 좋아요: ${shortAvgLikes} | 롱폼 평균 좋아요: ${longAvgLikes}
 
-[고성과 영상 (TOP 3)]
-${ytBestKeywords || '(데이터 없음)'}
+[고성과 영상 TOP 3]
+${ytBestStr || '(데이터 없음)'}
 
-[저성과 영상 (BOTTOM 3)]
-${ytWorstKeywords || '(데이터 없음)'}
+[저성과 영상 BOTTOM 3]
+${ytWorstStr || '(데이터 없음)'}
 
 [블로그 개선 필요 포스트]
 ${blogStr}
 
-아래 4단계 프레임워크로 분석 후 JSON만 반환하세요:
+아래 4단계 프레임워크로 분석 후 JSON만 반환하세요.
+⚠️ 반드시 위 [채널 전체 영상 목록]의 실제 키워드·제목 데이터를 기반으로 분석하세요. 데이터에 없는 영상/키워드를 만들어내지 마세요.
 
-1단계 현황진단: 단순 수치 나열이 아닌, 숏폼/롱폼 간 성과 편차와 채널의 현재 성장 단계를 한 줄로 진단
-2단계 고성과 원인 역추적: 잘 된 영상의 제목 구조·키워드 조합에서 반복되는 흥행 패턴 도출 (CTR 후킹 성공 여부, 검색 의도 충족 여부 등)
-3단계 병목 구간 진단: 저성과 영상의 트래픽 퍼널 어디서 이탈하는지 (노출 부족인지, 클릭 후 이탈인지) 원인 진단 + 즉시 수정 가능한 대안 제시
-4단계 강점 정의 + 스케일업 전략: 현재 채널의 차별화된 강점 한 문장 + 다음에 타겟팅할 롱테일 키워드 3가지 (경쟁이 낮고 전문성 영토 확장 가능한 조합)
+1단계 현황진단: 숏폼/롱폼 성과 편차 + 채널 성장 단계 한 줄 진단
+2단계 고성과 원인: 잘 된 영상의 키워드 유형(트렌드/Evergreen/Niche) 분류 + 흥행 패턴 도출
+   - "어떤 키워드가 왜 먹혔는지"를 구체적으로 — 검색 의도 충족 여부, 키워드 경쟁도 등
+3단계 병목 진단: 저성과 영상의 트래픽 퍼널 병목 지점 특정 + 즉시 수정 가능한 대안
+4단계 강점 + 스케일업: 채널 강점 한 문장 + 기존 고성과 키워드를 축으로 한 롱테일 확장 키워드 3개
+   - 기존에 잘 됐던 키워드 패턴 (예: "[이슈 기업명] + [수치/돌파/결과]")을 유지하되 세부화
+   - 아직 아무도 안 만든 빈 자리 공략형 조합 우선
 
 {
-  "channel_diagnosis": "채널 전체 현황 한 줄 진단 — 숏폼/롱폼 편차, 성장 단계 포함 (50자 이내)",
+  "channel_diagnosis": "채널 전체 현황 한 줄 진단 — 어떤 키워드/포맷이 주도하는지 포함 (50자 이내)",
   "what_worked": [
     {
-      "title": "잘된 영상 제목",
+      "keyword": "실제 키워드 (위 목록의 keyword 필드값)",
+      "title": "실제 영상 제목",
       "keyword_type": "트렌드/이슈성 | 상시검색형(Evergreen) | 타겟맞춤형(Niche) 중 하나",
-      "reason": "흥행 원인 — 제목 구조, 키워드 조합, 검색 의도 충족 여부 구체적으로",
-      "lesson": "다음 영상 기획에 즉시 적용할 교훈 (구체적 행동 포함)"
+      "reason": "이 키워드가 왜 먹혔는지 — 검색 의도 충족, 경쟁 키워드 현황, 타이밍 등 구체적으로",
+      "lesson": "다음 영상 기획에 즉시 적용할 교훈 (구체적 행동, 예: '~기업 + ~수치' 제목 패턴 유지)"
     }
   ],
   "what_failed": [
     {
-      "title": "저성과 영상 제목",
+      "keyword": "실제 키워드",
+      "title": "실제 영상 제목",
       "funnel_bottleneck": "노출부족 | CTR저조(썸네일/제목문제) | 초반이탈(인트로문제) | 전반이탈(내용문제) 중 하나",
-      "reason": "병목 원인 진단",
-      "fix": "즉시 수정 가능한 구체적 개선안 (예: 썸네일 수치 강조, 제목 재구성)"
+      "reason": "이 키워드/제목의 구조적 문제 진단",
+      "fix": "즉시 실행 가능한 개선안 — 구체적 제목 재구성 예시 또는 썸네일 수정 방향 포함"
     }
   ],
-  "channel_strength": "이 채널만의 차별화된 강점 한 문장 정의",
-  "format_insight": "숏폼 vs 롱폼 중 현재 채널에 더 유리한 포맷과 근거 (데이터 기반, 80자 이내)",
+  "keyword_pattern": "현재 채널에서 반복적으로 잘 먹히는 키워드 조합 패턴 (예: '[기업명] + [수치/돌파] + 숏폼')",
+  "channel_strength": "이 채널만의 차별화된 강점 한 문장",
+  "format_insight": "숏폼 vs 롱폼 중 현재 채널에 더 유리한 포맷과 데이터 근거 (80자 이내)",
   "next_actions": [
-    "이번 주 안에 실행할 구체적 행동 1 (측정 가능한 목표 포함)",
-    "이번 주 안에 실행할 구체적 행동 2",
-    "이번 주 안에 실행할 구체적 행동 3"
+    "이번 주 실행할 구체적 행동 1 — 키워드/제목/포맷 명시",
+    "이번 주 실행할 구체적 행동 2",
+    "이번 주 실행할 구체적 행동 3"
   ],
   "keyword_opportunities": [
-    {"keyword": "롱테일 키워드 조합 1", "type": "evergreen|trend|niche", "reason": "왜 이 키워드인지"},
-    {"keyword": "롱테일 키워드 조합 2", "type": "evergreen|trend|niche", "reason": "왜 이 키워드인지"},
-    {"keyword": "롱테일 키워드 조합 3", "type": "evergreen|trend|niche", "reason": "왜 이 키워드인지"}
+    {"keyword": "기존 성공 키워드 패턴 기반 롱테일 조합 1", "type": "evergreen|trend|niche", "reason": "왜 이 키워드가 지금 빈 자리인지"},
+    {"keyword": "롱테일 조합 2", "type": "evergreen|trend|niche", "reason": "경쟁 현황과 예상 조회수 근거"},
+    {"keyword": "롱테일 조합 3", "type": "evergreen|trend|niche", "reason": "채널 기존 강점과 연결되는 이유"}
   ]
 }`;
 
@@ -586,6 +632,10 @@ function printReport(report) {
       console.log(`\n  ▶ 현황 진단`);
       console.log(`  ${a.channel_diagnosis}`);
     }
+    if (a.keyword_pattern) {
+      console.log(`\n  ▶ 흥행 키워드 패턴`);
+      console.log(`  ${a.keyword_pattern}`);
+    }
     if (a.channel_strength) {
       console.log(`\n  ▶ 채널 차별화 강점`);
       console.log(`  ${a.channel_strength}`);
@@ -595,7 +645,8 @@ function printReport(report) {
     if (a.what_worked?.length) {
       console.log('\n  ▶ 고성과 콘텐츠 분석 (What Went Well)');
       a.what_worked.forEach((w) => {
-        console.log(`\n  ✅ "${w.title}" [${w.keyword_type ?? ''}]`);
+        const kw = w.keyword ? ` #${w.keyword}` : '';
+        console.log(`\n  ✅ "${w.title}"${kw} [${w.keyword_type ?? ''}]`);
         console.log(`     원인: ${w.reason}`);
         console.log(`     교훈: ${w.lesson}`);
       });
@@ -605,7 +656,8 @@ function printReport(report) {
     if (a.what_failed?.length) {
       console.log('\n  ▶ 개선 필요 콘텐츠 분석 (Areas for Improvement)');
       a.what_failed.forEach((w) => {
-        console.log(`\n  ❌ "${w.title}"`);
+        const kw = w.keyword ? ` #${w.keyword}` : '';
+        console.log(`\n  ❌ "${w.title}"${kw}`);
         console.log(`     병목: ${w.funnel_bottleneck ?? ''}`);
         console.log(`     원인: ${w.reason}`);
         console.log(`     개선: ${w.fix}`);
