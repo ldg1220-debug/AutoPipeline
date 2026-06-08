@@ -276,6 +276,83 @@ async function buildSceneBackgrounds(keyword, scripts) {
   }
 }
 
+// ── 레퍼런스 이미지 로더 ──────────────────────────────────────────────────
+// reference/ 폴더의 매읽남 캐릭터 기본 이미지를 찾아 Buffer로 반환한다.
+// 파일명 우선순위: maeilnamja.png > maeilnamja.jpg > character.png > character.jpg
+// 없으면 null 반환 → 기존 generations API 사용
+const REFERENCE_DIR = path.resolve(__dirname, '../../reference');
+const REFERENCE_CANDIDATES = [
+  'maeilnamja.png', 'maeilnamja.jpg',
+  'character.png',  'character.jpg',
+  'ref.png',        'ref.jpg',
+];
+let _refImageCache = undefined; // undefined = 미조회, null = 없음
+
+async function loadReferenceImage() {
+  if (_refImageCache !== undefined) return _refImageCache;
+  for (const name of REFERENCE_CANDIDATES) {
+    const p = path.resolve(REFERENCE_DIR, name);
+    try {
+      const buf = await fs.readFile(p);
+      _refImageCache = { buffer: buf, name, path: p };
+      logger.info(`[media_generator] 레퍼런스 이미지 로드: ${name}`);
+      return _refImageCache;
+    } catch { /* 없으면 다음 후보 */ }
+  }
+  _refImageCache = null;
+  return null;
+}
+
+/**
+ * gpt-image-1 /images/edits 로 레퍼런스 이미지 기반 씬 이미지를 생성한다.
+ * 레퍼런스 이미지의 캐릭터 스타일을 유지하면서 새 배경+포즈를 적용한다.
+ * 성공 시 로컬 파일 경로 반환, 실패 시 null 반환.
+ */
+async function generateImageWithReference(imagePrompt, refBuf, refName, imgPath) {
+  try {
+    const form = new FormData();
+    form.append('model', 'gpt-image-1');
+    form.append('prompt', imagePrompt);
+    form.append('n', '1');
+    form.append('size', '1024x1536');
+    form.append('quality', 'high');
+
+    // image 파라미터: File-like Blob (Node 22 네이티브 FormData + Blob)
+    const mime = refName.endsWith('.jpg') || refName.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
+    const blob = new Blob([refBuf], { type: mime });
+    form.append('image', blob, refName);
+
+    const res = await axios.post(
+      'https://api.openai.com/v1/images/edits',
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${config.openai.apiKey}`,
+          ...form.getHeaders?.() ?? {},
+        },
+        timeout: 120000,
+      }
+    );
+    const item = res.data.data[0];
+    if (item?.b64_json) {
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+      return imgPath;
+    }
+    if (item?.url) {
+      const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+      return imgPath;
+    }
+    return null;
+  } catch (err) {
+    const msg = err.response?.data?.error?.message ?? err.message;
+    logger.warn(`[media_generator] gpt-image-1 edits failed: ${msg}`);
+    return null;
+  }
+}
+
 // ── 씬 이미지 5컷 생성 ────────────────────────────────────────────────────
 /**
  * 대본 내용 기반 씬 이미지 5컷 생성 (hook/context/insight_cause/insight_effect/close).
@@ -293,7 +370,14 @@ async function generateSceneImages(keyword, scripts, category) {
     scenes.insight_effect,
     scenes.close,
   ];
-  logger.info(`[media_generator] Scene prompts ready (5 cuts) for: ${keyword}`);
+
+  // 레퍼런스 이미지 사전 로딩 (reference/ 폴더)
+  const refImage = await loadReferenceImage();
+  const useEdits = !!refImage;
+  logger.info(
+    `[media_generator] Scene prompts ready (5 cuts) for: ${keyword} | ` +
+    `mode: ${useEdits ? `edits (ref: ${refImage.name})` : 'generations (no ref image)'}`
+  );
 
   const segLabels = ['hook', 'context', 'insight_cause', 'insight_effect', 'close'];
   const results = [];
@@ -322,9 +406,16 @@ async function generateSceneImages(keyword, scripts, category) {
     const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
     const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
 
-    // gpt-image-1 단일 엔진 — Grok Aurora 혼용 시 스타일 불일치 발생
     let imageUrl = null;
-    if (config.openai.apiKey) {
+
+    // 레퍼런스 이미지 있음 → /images/edits (캐릭터 스타일 일관성 보장)
+    if (useEdits) {
+      imageUrl = await generateImageWithReference(imagePrompt, refImage.buffer, refImage.name, imgPath);
+      if (imageUrl) logger.info(`[media_generator] Scene ${i + 1}/5 done (${segLabels[i]}, edits+ref): ${keyword}`);
+    }
+
+    // 레퍼런스 없거나 edits 실패 → /images/generations (기존 방식)
+    if (!imageUrl) {
       try {
         const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
         const res = await axios.post(
@@ -333,6 +424,7 @@ async function generateSceneImages(keyword, scripts, category) {
         );
         const item = res.data.data[0];
         if (item.b64_json) {
+          await fs.mkdir(path.dirname(imgPath), { recursive: true });
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         } else if (item.url) {
@@ -341,7 +433,7 @@ async function generateSceneImages(keyword, scripts, category) {
           await fs.writeFile(imgPath, Buffer.from(imgRes.data));
           imageUrl = imgPath;
         }
-        if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/5 done (${segLabels[i]}, gpt-image-1): ${keyword}`);
+        if (imageUrl) logger.info(`[media_generator] Scene ${i + 1}/5 done (${segLabels[i]}, generations): ${keyword}`);
       } catch (err) {
         logger.warn(`[media_generator] gpt-image-1 scene${i} failed: ${err.response?.data?.error?.message ?? err.message}`);
       }
@@ -351,7 +443,7 @@ async function generateSceneImages(keyword, scripts, category) {
     if (!imageUrl) {
       const pexels = await searchPexelsImages(keyword, category, 1);
       imageUrl = pexels[0] || null;
-      if (imageUrl) logger.info(`[media_generator] Scene image scene${i} → Pexels fallback`);
+      if (imageUrl) logger.info(`[media_generator] Scene${i} → Pexels fallback`);
     }
 
     results.push(imageUrl ?? null);
