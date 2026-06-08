@@ -204,40 +204,49 @@ async function verifyCharacterImage(imageUrl, actName) {
 
 // ── GPT-4o-mini로 대본 기반 장면 배경 생성 ────────────────────────────────
 /**
- * 대본 3개 구간(도입/본론/마무리)의 실제 내용을 분석해
+ * 대본 5개 구간(hook/context/insight_cause/insight_effect/close)의 실제 내용을 분석해
  * 각 DALL-E 이미지에 쓸 장면 배경 설명을 영어로 생성한다.
- * GPT-4o-mini 1회 호출 ($0.0001) → 이미지 3장의 배경이 대본과 일치한다.
+ * GPT-4o-mini 1회 호출 → 이미지 5장의 배경이 대본과 일치한다.
  */
 async function buildSceneBackgrounds(keyword, scripts) {
-  const actTexts = [
-    scripts.hook    ?? '',
-    `${scripts.context ?? ''} ${scripts.insight ?? ''}`.trim(),
-    `${scripts.summary ?? ''} ${scripts.cta ?? ''}`.trim(),
-  ].map((t) => t.slice(0, 150));
+  const insight = scripts.insight ?? '';
+  const insightMid = Math.floor(insight.length / 2);
+
+  const segTexts = [
+    (scripts.hook    ?? '').slice(0, 120),
+    (scripts.context ?? '').slice(0, 120),
+    insight.slice(0, insightMid).slice(0, 120),
+    insight.slice(insightMid).slice(0, 120),
+    `${scripts.summary ?? ''} ${scripts.cta ?? ''}`.trim().slice(0, 120),
+  ];
 
   const prompt =
     `You are a visual director for a Korean economic YouTube Shorts channel.\n` +
     `Topic: "${keyword}"\n\n` +
-    `Script sections (Korean):\n` +
-    `[도입/Hook]: ${actTexts[0]}\n` +
-    `[본론/Body]: ${actTexts[1]}\n` +
-    `[마무리/Close]: ${actTexts[2]}\n\n` +
-    `For each section, generate:\n` +
-    `1. "bg": background scene (the environment/setting relevant to the script)\n` +
-    `2. "pose": character action/pose for the chibi cat professor (매읽남) in that scene\n\n` +
+    `Script segments (Korean):\n` +
+    `[1 Hook/도입]: ${segTexts[0]}\n` +
+    `[2 Context/배경]: ${segTexts[1]}\n` +
+    `[3 Cause/원인]: ${segTexts[2]}\n` +
+    `[4 Effect/영향]: ${segTexts[3]}\n` +
+    `[5 Close/마무리]: ${segTexts[4]}\n\n` +
+    `For each segment generate "bg" (background scene) and "pose" (character action).\n\n` +
     `Rules for bg:\n` +
-    `- Directly relevant to the script content (courtroom, trading floor, office, etc.)\n` +
-    `- NO text, NO numbers, NO specific prices or index values anywhere\n` +
-    `- Stock charts may show trend arrows or candlestick shapes ONLY — zero visible numerical data\n` +
-    `Rules for pose (character action, not background):\n` +
-    `- Act 0 mood: ${ACT_MOODS[0]} — e.g. gasping, pointing at screen in shock\n` +
-    `- Act 1 mood: ${ACT_MOODS[1]} — e.g. holding document, gesturing at chart\n` +
-    `- Act 2 mood: ${ACT_MOODS[2]} — e.g. thumbs up, calm smile, bowing slightly\n` +
+    `- Directly relevant to the segment content (stock exchange, courtroom, hospital, etc.)\n` +
+    `- NO text, NO numbers, NO prices anywhere\n` +
+    `- Stock charts: trend arrows or candlestick shapes ONLY — zero numerical data\n` +
+    `Rules for pose:\n` +
+    `- Segment 1 (Hook): ${ACT_MOODS[0]} — alarmed, gasping, pointing in shock\n` +
+    `- Segment 2 (Context): informative, calm explaining gesture\n` +
+    `- Segment 3 (Cause): ${ACT_MOODS[1]} — holding document, gesturing at chart\n` +
+    `- Segment 4 (Effect): urgent, concerned expression, showing consequence\n` +
+    `- Segment 5 (Close): ${ACT_MOODS[2]} — calm wise smile, thumbs up\n` +
     `- Each bg/pose under 120 chars\n` +
     `Return JSON: {\n` +
-    `  "hook":  {"bg":"...","pose":"..."},\n` +
-    `  "body":  {"bg":"...","pose":"..."},\n` +
-    `  "close": {"bg":"...","pose":"..."}\n` +
+    `  "hook":           {"bg":"...","pose":"..."},\n` +
+    `  "context":        {"bg":"...","pose":"..."},\n` +
+    `  "insight_cause":  {"bg":"...","pose":"..."},\n` +
+    `  "insight_effect": {"bg":"...","pose":"..."},\n` +
+    `  "close":          {"bg":"...","pose":"..."}\n` +
     `}`;
 
   try {
@@ -258,45 +267,51 @@ async function buildSceneBackgrounds(keyword, scripts) {
   } catch (err) {
     logger.warn(`[media_generator] Scene background generation failed: ${err.message}. Using defaults.`);
     return {
-      hook:  { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines on screens, no numbers no text, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
-      body:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text, warm lighting',   pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
-      close: { bg: 'cozy library with warm golden sunlight through window, stacked books, no text',                                   pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
+      hook:           { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines on screens, no numbers no text, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
+      context:        { bg: 'bright modern newsroom with abstract chart shapes on screens, no numbers no text, cool lighting', pose: 'reading newspaper attentively, calm informative expression' },
+      insight_cause:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text, warm lighting', pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
+      insight_effect: { bg: 'dramatic city skyline at dusk with falling graph silhouette in background, no text', pose: 'concerned expression, hands forward showing impact, serious tone' },
+      close:          { bg: 'cozy library with warm golden sunlight through window, stacked books, no text', pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
     };
   }
 }
 
-// ── 씬 이미지 3컷 생성 ────────────────────────────────────────────────────
+// ── 씬 이미지 5컷 생성 ────────────────────────────────────────────────────
 /**
- * 대본 내용 기반 씬 이미지 3컷 생성 (도입/본론/마무리).
- * 캐릭터 없이 콘텐츠와 직결된 시네마틱 장면으로 컷 전환 연출.
+ * 대본 내용 기반 씬 이미지 5컷 생성 (hook/context/insight_cause/insight_effect/close).
+ * 각 이미지가 그 시점의 스크립트 내용과 직접 대응하여 영상 몰입감을 높인다.
  * gpt-image-1 → Pexels 순으로 폴백.
  */
 async function generateSceneImages(keyword, scripts, category) {
-  if (!config.openai.apiKey) return [null, null, null];
+  if (!config.openai.apiKey) return [null, null, null, null, null];
 
   const scenes = await buildSceneBackgrounds(keyword, scripts ?? {});
-  const sceneList = [scenes.hook, scenes.body, scenes.close];
-  logger.info(`[media_generator] Scene prompts ready for: ${keyword}`);
+  const sceneList = [
+    scenes.hook,
+    scenes.context,
+    scenes.insight_cause,
+    scenes.insight_effect,
+    scenes.close,
+  ];
+  logger.info(`[media_generator] Scene prompts ready (5 cuts) for: ${keyword}`);
 
-  const actLabels = ['도입', '본론', '마무리'];
+  const segLabels = ['hook', 'context', 'insight_cause', 'insight_effect', 'close'];
   const results = [];
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
     await throttle(300);
     const cachedUrl = await findSimilarImage(keyword, i);
     if (cachedUrl) {
-      // 로컬 파일 경로인 경우 실제 존재 여부 검증 (이전 실행에서 생성 후 삭제된 경우 방지)
       const isValid = cachedUrl.startsWith('http://') || cachedUrl.startsWith('https://')
         || await fs.access(cachedUrl).then(() => true).catch(() => false);
       if (isValid) {
-        logger.info(`[media_generator] Reusing cached scene act${i} (${actLabels[i]}): ${keyword}`);
+        logger.info(`[media_generator] Reusing cached scene ${i} (${segLabels[i]}): ${keyword}`);
         results.push(cachedUrl);
         continue;
       }
-      logger.info(`[media_generator] Cached file missing, regenerating act${i}: ${keyword}`);
+      logger.info(`[media_generator] Cached file missing, regenerating scene${i}: ${keyword}`);
     }
 
-    // 매읽남 캐릭터 + 씬별 포즈 + 배경 — Grok 혼용 금지
     const { pose = '', bg = 'warm indoor office' } = sceneList[i] ?? {};
     const imagePrompt =
       `${MAEILNAMJA_BASE}. ` +
@@ -307,7 +322,7 @@ async function generateSceneImages(keyword, scripts, category) {
     const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
     const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
 
-    // gpt-image-1 단일 엔진 사용 — Grok Aurora와 혼용 시 스타일 불일치 발생
+    // gpt-image-1 단일 엔진 — Grok Aurora 혼용 시 스타일 불일치 발생
     let imageUrl = null;
     if (config.openai.apiKey) {
       try {
@@ -321,15 +336,14 @@ async function generateSceneImages(keyword, scripts, category) {
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         } else if (item.url) {
-          // OpenAI 임시 URL도 만료 가능 → 즉시 다운로드
           const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
           await fs.mkdir(path.dirname(imgPath), { recursive: true });
           await fs.writeFile(imgPath, Buffer.from(imgRes.data));
           imageUrl = imgPath;
         }
-        if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, gpt-image-1): ${keyword}`);
+        if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/5 done (${segLabels[i]}, gpt-image-1): ${keyword}`);
       } catch (err) {
-        logger.warn(`[media_generator] gpt-image-1 act${i} failed: ${err.response?.data?.error?.message ?? err.message}`);
+        logger.warn(`[media_generator] gpt-image-1 scene${i} failed: ${err.response?.data?.error?.message ?? err.message}`);
       }
     }
 
@@ -337,7 +351,7 @@ async function generateSceneImages(keyword, scripts, category) {
     if (!imageUrl) {
       const pexels = await searchPexelsImages(keyword, category, 1);
       imageUrl = pexels[0] || null;
-      if (imageUrl) logger.info(`[media_generator] Scene image act${i} → Pexels fallback`);
+      if (imageUrl) logger.info(`[media_generator] Scene image scene${i} → Pexels fallback`);
     }
 
     results.push(imageUrl ?? null);
@@ -437,22 +451,28 @@ function wrapTextKorean(text, maxCharsPerLine = 22) {
 
 // ── 씬 리스트 생성 ─────────────────────────────────────────────────────────
 /**
- * 스크립트 5구간을 45자 단위로 분할, 글자 수 비례로 타이밍 배분.
- * 반환: [{ text, start, duration, act }]
- *   act 0 = 도입(hook), act 1 = 본론(context+insight), act 2 = 마무리(summary+cta)
+ * 스크립트 5구간을 12자 단위로 분할, 글자 수 비례로 타이밍 배분.
+ * 반환: [{ text, start, duration, act, subAct }]
+ *   act    0 = 도입(hook), 1 = 본론, 2 = 마무리
+ *   subAct 0 = hook, 1 = context, 2 = insight 전반(원인), 3 = insight 후반(영향), 4 = close
+ *   → subAct를 이미지 인덱스로 사용해 씬 이미지 5컷을 각 구간에 매핑한다.
  */
 function buildScenes(scripts, totalDuration) {
   const { hook = '', context = '', insight = '', summary = '', cta = '' } = scripts;
 
-  // 자막 청크: 전체 텍스트 사용, 12자 단위 분할 (가독성 최적)
+  // insight를 절반으로 나눠 원인/영향 구간 분리
+  const insightMid = Math.floor(insight.length / 2);
+  const insightCause  = insight.slice(0, insightMid);
+  const insightEffect = insight.slice(insightMid);
+
+  // 자막 청크: 12자 단위 분할 (가독성 최적)
+  // subAct: 5개 이미지 구간 인덱스 (generateSceneImages 순서와 일치)
   const actChunks = [
-    { act: 0, chunks: splitText(hook, 12) },
-    { act: 1, chunks: [
-        ...splitText(context, 12),
-        ...splitText(insight, 12),
-      ]
-    },
-    { act: 2, chunks: [
+    { act: 0, subAct: 0, chunks: splitText(hook, 12) },
+    { act: 1, subAct: 1, chunks: splitText(context, 12) },
+    { act: 1, subAct: 2, chunks: splitText(insightCause, 12) },
+    { act: 1, subAct: 3, chunks: splitText(insightEffect, 12) },
+    { act: 2, subAct: 4, chunks: [
         ...splitText(summary, 12),
         ...splitText(cta,     12),
       ]
@@ -461,10 +481,11 @@ function buildScenes(scripts, totalDuration) {
 
   // isKey: hook(act 0) 또는 숫자+단위 포함 → 주황색 강조
   const KEY_PATTERN = /\d[\d,]*\.?\d*\s*[%억조만천원↑↓배배]|[?!]/;
-  const allChunks = actChunks.flatMap(({ act, chunks }) =>
+  const allChunks = actChunks.flatMap(({ act, subAct, chunks }) =>
     chunks.filter(Boolean).map((text) => ({
       text,
       act,
+      subAct,
       isKey: act === 0 || KEY_PATTERN.test(text),
     }))
   );
@@ -480,9 +501,9 @@ function buildScenes(scripts, totalDuration) {
   const MIN_DUR  = 1.5;
 
   let elapsed = 0;
-  const scenes = allChunks.map(({ text, act, isKey }) => {
+  const scenes = allChunks.map(({ text, act, subAct, isKey }) => {
     const dur = Math.max(MIN_DUR, text.length / TTS_RATE);
-    const scene = { text, start: elapsed, duration: dur, act, isKey };
+    const scene = { text, start: elapsed, duration: dur, act, subAct, isKey };
     elapsed += dur;
     return scene;
   });
@@ -497,8 +518,9 @@ function buildScenes(scripts, totalDuration) {
 
 // ── 이미지 배경 클립 생성 ─────────────────────────────────────────────────
 /**
- * act 0·1·2별로 캐릭터 이미지를 할당한다.
- * 같은 act 내 씬들은 동일 캐릭터 이미지를 사용해 구간감을 살린다.
+ * subAct(0-4)별로 씬 이미지를 할당한다.
+ * 같은 subAct 내 씬들은 동일 이미지를 사용해 자연스러운 구간 전환을 만든다.
+ * imageUrls: 5개 배열 (hook/context/insight_cause/insight_effect/close)
  */
 function buildImageClips(imageUrls, scenes, totalDuration) {
   const FALLBACK = 'https://placehold.co/1080x1920/1a1a2e/1a1a2e.png';
@@ -507,39 +529,40 @@ function buildImageClips(imageUrls, scenes, totalDuration) {
     return [{ asset: { type: 'image', src: FALLBACK }, start: 0, length: totalDuration, fit: 'cover' }];
   }
 
-  // act별 이미지 URL 결정 (null이면 FALLBACK)
-  const imgByAct = [0, 1, 2].map((act) => imageUrls[act] || FALLBACK);
+  // subAct별 이미지 URL 결정 (null이면 FALLBACK)
+  const imgBySubAct = [0, 1, 2, 3, 4].map((i) => imageUrls[i] || FALLBACK);
 
-  // act 구간 경계를 scene 단위로 병합 → 같은 act는 하나의 이미지 클립
+  // subAct 구간 경계를 scene 단위로 병합 → 같은 subAct는 하나의 이미지 클립
   const clips = [];
-  let lastAct = -1;
+  let lastSubAct = -1;
   let clipStart = 0;
   let clipEnd = 0;
 
   for (const scene of scenes) {
-    if (scene.act !== lastAct) {
-      if (lastAct >= 0) {
+    const subAct = scene.subAct ?? scene.act ?? 0;
+    if (subAct !== lastSubAct) {
+      if (lastSubAct >= 0) {
         clips.push({
-          asset: { type: 'image', src: imgByAct[lastAct] },
+          asset: { type: 'image', src: imgBySubAct[lastSubAct] },
           start:  clipStart,
           length: clipEnd - clipStart,
           fit:    'cover',
-          effect: lastAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
+          effect: lastSubAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
           transition: { in: 'fade', out: 'fade' },
         });
       }
       clipStart = scene.start;
-      lastAct = scene.act;
+      lastSubAct = subAct;
     }
     clipEnd = scene.start + scene.duration;
   }
-  // 마지막 act 클립
+  // 마지막 클립
   clips.push({
-    asset: { type: 'image', src: imgByAct[lastAct] },
+    asset: { type: 'image', src: imgBySubAct[lastSubAct] },
     start:  clipStart,
     length: Math.max(1, clipEnd - clipStart),
     fit:    'cover',
-    effect: lastAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
+    effect: lastSubAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
     transition: { in: 'fade', out: 'fade' },
   });
 
@@ -1545,23 +1568,23 @@ async function generateMedia(content) {
     content = { ...content, image_prompt: enhancedPrompt };
   }
 
-  // 3. 씬 이미지 3컷 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
+  // 3. 씬 이미지 5컷 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
   let sceneUrls;
   try {
-    logger.info(`[media_generator] Generating scene images (3 cuts): ${content.keyword}`);
+    logger.info(`[media_generator] Generating scene images (5 cuts): ${content.keyword}`);
     sceneUrls = await generateSceneImages(content.keyword, content.shortform_script ?? {}, content.category);
     const successCount = sceneUrls.filter(Boolean).length;
-    logger.info(`[media_generator] Scene images: ${successCount}/3 generated`);
+    logger.info(`[media_generator] Scene images: ${successCount}/5 generated`);
 
     if (successCount === 0) {
       logger.warn('[media_generator] All scene images failed. Falling back to Pexels.');
-      const pexels = await searchPexelsImages(content.keyword, content.category, 3);
-      sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
+      const pexels = await searchPexelsImages(content.keyword, content.category, 5);
+      sceneUrls = [pexels[0]||null, pexels[1]||null, pexels[2]||null, pexels[3]||null, pexels[4]||null];
     }
   } catch (err) {
     logger.warn(`[media_generator] Scene image error: ${err.message}. Falling back to Pexels.`);
-    const pexels = await searchPexelsImages(content.keyword, content.category, 3);
-    sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
+    const pexels = await searchPexelsImages(content.keyword, content.category, 5);
+    sceneUrls = [pexels[0]||null, pexels[1]||null, pexels[2]||null, pexels[3]||null, pexels[4]||null];
   }
 
   // 4. 썸네일 생성 (16:9) — 반드시 생성 보장
@@ -1598,7 +1621,7 @@ async function generateMedia(content) {
     );
     const seriesName = content.series_name ?? '매일읽어주는남자';
     const frames = scenes.map((scene) => ({
-      bgUrl:    sceneUrls[scene.act] ?? null,
+      bgUrl:    sceneUrls[scene.subAct ?? scene.act] ?? null,
       label:    seriesName,
       subtitle: scene.text,
       isKey:    scene.isKey ?? false,
