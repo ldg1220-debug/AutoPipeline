@@ -5,6 +5,7 @@ import { parseStringPromise } from 'xml2js';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import { throttle } from '../utils/rateLimiter.js';
 import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -125,6 +126,7 @@ async function scoreKeywordsWithLLM(keywords) {
 키워드(${keywords.length}개):
 ${JSON.stringify(keywords.map((k) => ({ keyword: k.keyword, source_url: k.source_url })), null, 2)}`;
 
+  await throttle(1500);
   const response = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     {

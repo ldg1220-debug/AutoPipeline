@@ -138,7 +138,9 @@ function validateHookQuality(content) {
 function detectBannedWords(content) {
   const fullText = [
     content.shortform_script?.hook ?? '',
-    content.shortform_script?.body ?? '',
+    content.shortform_script?.context ?? '',
+    content.shortform_script?.insight ?? '',
+    content.shortform_script?.summary ?? '',
     content.shortform_script?.cta ?? '',
     content.blog_draft?.title ?? '',
     ...(content.blog_draft?.sections ?? []).map((s) => s.body ?? ''),

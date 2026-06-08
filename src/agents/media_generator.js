@@ -15,14 +15,31 @@ const require = createRequire(import.meta.url);
 const sharp   = require('sharp');
 
 const execFileAsync = promisify(execFile);
-// ffmpeg-static 번들 바이너리 (시스템 ffmpeg 설치 불필요)
-const { default: ffmpegPath } = await import('ffmpeg-static');
-const ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/, (_, ext) => `ffprobe${ext ?? ''}`);
+
+// ffmpeg-static 지연 로드 — 패키지 없을 시 부트 크래시 방지
+let _ffmpegPath = null;
+async function getFfmpegPath() {
+  if (_ffmpegPath) return _ffmpegPath;
+  try {
+    const mod = await import('ffmpeg-static');
+    _ffmpegPath = mod.default;
+  } catch {
+    _ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    logger.warn('[media_generator] ffmpeg-static 없음 — 시스템 ffmpeg 사용');
+  }
+  return _ffmpegPath;
+}
+
+// ffprobePath: ffmpeg-static 번들 ffprobe (동일 디렉토리)
+async function getFfprobePath() {
+  const fp = await getFfmpegPath();
+  return fp.replace(/ffmpeg(\.exe)?$/, (_, ext) => `ffprobe${ext ?? ''}`);
+}
 
 // 오디오 파일 실제 길이 측정 (ffprobe -count_packets).
 // ElevenLabs VBR MP3는 헤더에 기록된 duration이 실제 재생보다 ~32초 부풀려짐.
-// count_packets는 실제 패킷 수로 계산하므로 정확.
 async function getAudioDuration(audioPath) {
+  const ffprobePath = await getFfprobePath();
   // 1차: count_packets (VBR MP3에서 정확)
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
@@ -33,11 +50,10 @@ async function getAudioDuration(audioPath) {
       '-of', 'default=noprint_wrappers=1:nokey=1',
       audioPath,
     ]);
-    // stdout: "duration\nnb_read_packets" 또는 순서 다를 수 있음 — 첫 번째 숫자가 duration
     const lines = stdout.trim().split('\n').map(Number).filter(n => !isNaN(n) && n > 0);
-    if (lines.length > 0) return lines[0]; // stream duration (정밀값)
+    if (lines.length > 0) return lines[0];
   } catch { /* fall through */ }
-  // 2차: format duration (헤더값, VBR에서 부풀려질 수 있음)
+  // 2차: format duration (헤더값)
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
       '-v', 'error', '-show_entries', 'format=duration',
@@ -910,6 +926,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
   const listFile = `${outputPath}.list.txt`;
   await fs.writeFile(listFile, listContent);
 
+  const ffmpegPath = await getFfmpegPath();
   await execFileAsync(ffmpegPath, [
     '-f', 'concat', '-safe', '0', '-i', listFile,
     '-c:a', 'libmp3lame', '-q:a', '2', '-y', outputPath,
@@ -921,6 +938,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
 // ── ffmpeg stderr로 실제 오디오 길이(초) 측정 ───────────────────────────
 async function getAudioDurationSec(audioPath) {
   try {
+    const ffmpegPath = await getFfmpegPath();
     // ffmpeg -i 는 항상 Duration을 stderr에 출력하고 에러 코드 1을 반환 (출력 없으므로)
     const { stderr = '' } = await execFileAsync(
       ffmpegPath, ['-i', audioPath], { encoding: 'utf8' }
@@ -943,6 +961,7 @@ async function getAudioDurationSec(audioPath) {
  *   duration — 프레임 표시 시간(초)
  */
 async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, seriesName } = {}) {
+  const ffmpegPath = await getFfmpegPath();
   const sessionId = Date.now().toString(36);
   const tmpDir    = path.resolve(path.dirname(outputPath), 'tmp_ffmpeg');
   await fs.mkdir(tmpDir, { recursive: true });
@@ -1784,6 +1803,7 @@ async function generateMedia(content) {
  *   5. ffmpeg로 영상 렌더링 (로컬, 클라우드 의존 없음)
  */
 async function generateLongFormMedia(content) {
+  const ffmpegPath = await getFfmpegPath();
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const videoPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
   const result      = { keyword: content.keyword, video: null };
