@@ -25,6 +25,7 @@ import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
 import { runProjectManagerReview } from './agents/project_manager.js';
+import { runPerformanceReview } from './agents/performance_reviewer.js';
 import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1092,6 +1093,9 @@ if (_isDirectEntry) {
       startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
       // 롱폼 unified 파이프라인: 주 1회 (매주 목요일 22:00 KST)
       startScheduler(runUnifiedPipeline, config.runtime.longformCronSchedule);
+      // 실적 검토: 매주 월요일 오전 9시 KST (0 0 * * 1)
+      const perfCron = process.env.PERF_REVIEW_CRON || '0 0 * * 1';
+      startScheduler(runPerformanceReview, perfCron);
 
       // 최초 기동 시 두 파이프라인 모두 순차 실행 (--no-blog 시 블로그 생략)
       try {
