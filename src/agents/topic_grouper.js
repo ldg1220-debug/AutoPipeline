@@ -221,13 +221,35 @@ async function saveFeedback(entry) {
 
 // ── 공개 API ───────────────────────────────────────────────────────────────
 
+// 블로그에 사용하지 않을 키워드 패턴 (브랜드명·병원명·고유 시스템명)
+const BLOG_BLACKLIST = [
+  /피부과의원/,
+  /피부과\s*(목동|강남|홍대|신촌|종로|잠실|분당|수원|인천|부산)/,
+  /병원\s*(목동|강남|홍대|신촌|종로|잠실|분당)/,
+  /의원\s*(목동|강남|홍대)/,
+  /edi$/i,
+];
+
 export async function groupSimilarTopics(contentData) {
-  const contents = contentData?.contents ?? [];
+  let contents = contentData?.contents ?? [];
   if (contents.length === 0) return contentData;
+
+  // 브랜드·고유명사 블랙리스트 필터
+  const before = contents.length;
+  contents = contents.filter((c) => {
+    const kw = c.keyword ?? '';
+    const blocked = BLOG_BLACKLIST.some((re) => re.test(kw));
+    if (blocked) logger.info(`[topic_grouper] 블랙리스트 제외: "${kw}"`);
+    return !blocked;
+  });
+  if (contents.length < before) {
+    logger.info(`[topic_grouper] 블랙리스트 필터: ${before}개 → ${contents.length}개`);
+  }
+  if (contents.length === 0) return { ...contentData, contents: [] };
 
   if (!config.openai.apiKey && !config.anthropic.apiKey) {
     logger.warn('[topic_grouper] No API key. Skipping grouping.');
-    return contentData;
+    return { ...contentData, contents };
   }
 
   const keywords      = contents.map((c) => c.keyword);

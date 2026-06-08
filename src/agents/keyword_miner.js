@@ -183,7 +183,22 @@ function filterNewKeywords(scored) {
   const cutoff = new Date(Date.now() - REUSE_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const stmt = db.prepare('SELECT status, used_at FROM keywords WHERE keyword = ?');
 
+  // 특정 브랜드·병원명·고유명사 — 저작권·허위광고 위험으로 블로그 제외
+  const BRAND_PATTERNS = [
+    /피부과의원/,     // 특정 피부과 병원명
+    /피부과\s*(목동|강남|홍대|신촌|종로|잠실|분당|수원|인천|부산)/,
+    /병원\s*(목동|강남|홍대|신촌|종로|잠실|분당)/,
+    /의원\s*(목동|강남|홍대)/,
+    /edi$/i,          // 국민연금edi, 건강보험edi — 시스템 검색어, 콘텐츠 가치 낮음
+  ];
+
   return scored.filter(({ keyword }) => {
+    // 브랜드·고유명사 제외
+    if (BRAND_PATTERNS.some((re) => re.test(keyword))) {
+      logger.debug(`[keyword_miner] 블랙리스트 제외: "${keyword}"`);
+      return false;
+    }
+
     const row = stmt.get(keyword);
     if (!row) return true;                                           // 신규
     if (row.status === 'pending') return false;                     // 이미 대기 중
