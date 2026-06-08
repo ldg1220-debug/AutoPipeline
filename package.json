@@ -20,6 +20,7 @@
     "analyze": "node scripts/analyze-rejected.js",
     "analyze:grouper": "node scripts/analyze-grouper.js",
     "youtube:auth": "node scripts/get-youtube-token.js",
+    "youtube:auth:analytics": "node scripts/get-youtube-analytics-token.js",
     "youtube:channel-setup": "node scripts/youtube-channel-setup.js",
     "youtube:subscribers": "node scripts/check-subscribers.js",
     "blog:reset-today": "node scripts/reset-blog-published.js",
