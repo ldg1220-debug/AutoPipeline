@@ -16,6 +16,7 @@ import videosRouter from './routes/videos.js';
 import scriptRouter from './routes/script.js';
 import publishRouter from './routes/publish.js';
 import taobaoRouter from './routes/taobao.js';
+import xhsRouter from './routes/xhs.js';
 import logger from '../src/utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -60,6 +61,7 @@ app.use('/api/videos', videosRouter);
 app.use('/api/script', scriptRouter);
 app.use('/api/publish', publishRouter);
 app.use('/api/taobao', taobaoRouter);
+app.use('/api/xhs', xhsRouter);
 
 /**
  * 완성 영상 업로드
@@ -122,6 +124,7 @@ const ALLOWED_IMAGE_HOSTS = [
   'i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com',  // Bilibili CDN
   'images.pexels.com',
   'img.alicdn.com', 'gw.alicdn.com',                 // Taobao
+  'sns-img-hw.xhscdn.com', 'sns-img-bd.xhscdn.com', // XHS
   'via.placeholder.com',
 ];
 app.get('/api/proxy-image', async (req, res) => {
