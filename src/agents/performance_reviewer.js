@@ -301,57 +301,78 @@ async function getGoogleAccessToken(credentials) {
   });
 }
 
-// ── GPT-4o 개선 제안 생성 ────────────────────────────────────────────────
-async function generateImprovementSuggestions(ytUnderperformers, blogUnderperformers, crossAnalysis) {
+// ── GPT-4o 종합 분석 (항상 실행 — 데이터만 있으면 분석) ───────────────────
+async function analyzeAndSuggest(ytMetrics, blogUnderperformers, crossAnalysis) {
   if (!config.openai?.apiKey) return null;
-  if (!ytUnderperformers.length && !blogUnderperformers.length) return null;
+  if (!ytMetrics.length && !blogUnderperformers.length) return null;
 
-  const ytList = ytUnderperformers.slice(0, 5).map((v) =>
-    `  - [${v.channel_type}] "${v.title}" (키워드: ${v.keyword}) — 조회수 ${v.views}, CTR ${(v.ctr * 100).toFixed(1)}%`
+  // YouTube 전체 목록 (성과 좋은것 + 나쁜것 함께)
+  const ytSorted = [...ytMetrics].sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+  const ytBest  = ytSorted.slice(0, 3);
+  const ytWorst = ytSorted.slice(-3).reverse();
+
+  // 숏폼 vs 롱폼 평균 비교
+  const shorts  = ytMetrics.filter((v) => v.channel_type === 'shorts');
+  const longform = ytMetrics.filter((v) => v.channel_type === 'longform');
+  const avg = (arr, key) => arr.length ? (arr.reduce((s, v) => s + (v[key] ?? 0), 0) / arr.length).toFixed(1) : '0';
+
+  const shortAvgViews   = avg(shorts, 'views');
+  const longAvgViews    = avg(longform, 'views');
+  const shortAvgLikes   = avg(shorts, 'likes');
+  const longAvgLikes    = avg(longform, 'likes');
+
+  const ytBestStr = ytBest.map((v) =>
+    `  [${v.channel_type}] "${v.title}" — 조회수 ${v.views}, 좋아요 ${v.likes}, 댓글 ${v.comments}`
   ).join('\n');
 
-  const blogList = blogUnderperformers.slice(0, 5).map((p) =>
-    `  - "${p.title}" (키워드: ${p.keyword}) — 클릭 ${p.clicks}, 노출 ${p.impressions}, ${p.avg_position?.toFixed(1)}위`
+  const ytWorstStr = ytWorst.map((v) =>
+    `  [${v.channel_type}] "${v.title}" — 조회수 ${v.views}, 좋아요 ${v.likes}`
   ).join('\n');
 
-  // 교차 분석: 블로그는 잘 되는데 YouTube는 부진한 키워드 찾기
-  const blogGoodYtBad = crossAnalysis.filter(
-    (r) => r.blog_clicks >= 10 && r.yt_views < 300
-  ).slice(0, 3).map((r) =>
-    `  - "${r.keyword}": 블로그 ${r.blog_clicks}클릭 vs 유튜브 ${r.yt_views}조회 — 영상 컨텐츠 개선 여지`
-  ).join('\n');
+  const blogStr = blogUnderperformers.slice(0, 5).map((p) =>
+    `  "${p.title}" — 클릭 ${p.clicks}, 노출 ${p.impressions}, ${p.avg_position?.toFixed(1) ?? '-'}위`
+  ).join('\n') || '  (데이터 없음)';
 
-  const ytGoodBlogBad = crossAnalysis.filter(
-    (r) => r.yt_views >= 500 && r.blog_clicks < 5
-  ).slice(0, 3).map((r) =>
-    `  - "${r.keyword}": 유튜브 ${r.yt_views}조회 vs 블로그 ${r.blog_clicks}클릭 — 블로그 SEO 개선 여지`
-  ).join('\n');
+  const prompt = `당신은 한국 유튜브+블로그 채널 성과 분석 전문가입니다.
+아래 실적 데이터를 바탕으로 채널 현황을 진단하고 구체적인 개선 방안을 제시하세요.
+오늘 날짜 기준으로 현실적이고 실행 가능한 분석을 해주세요.
 
-  const prompt = `당신은 한국 유튜브+블로그 통합 콘텐츠 전략가입니다.
-아래 성과 데이터를 보고 각 채널의 부진 원인과 구체적 개선 방안을 제시해주세요.
+[YouTube 채널 현황]
+총 ${ytMetrics.length}개 영상 추적 중
+- 숏폼 평균 조회수: ${shortAvgViews}회 (${shorts.length}개)
+- 롱폼 평균 조회수: ${longAvgViews}회 (${longform.length}개)
+- 숏폼 평균 좋아요: ${shortAvgLikes} / 롱폼 평균 좋아요: ${longAvgLikes}
 
-[YouTube 부진 영상 (${ytUnderperformers.length}건 중 상위 5건)]
-${ytList || '  없음'}
+[잘 된 영상 TOP 3]
+${ytBestStr || '  (데이터 없음)'}
 
-[블로그 부진 포스트 (${blogUnderperformers.length}건 중 상위 5건)]
-${blogList || '  없음'}
+[저조한 영상 BOTTOM 3]
+${ytWorstStr || '  (데이터 없음)'}
 
-[교차 분석 인사이트]
-블로그 성과 좋은데 YouTube 부진:
-${blogGoodYtBad || '  없음'}
-YouTube 성과 좋은데 블로그 부진:
-${ytGoodBlogBad || '  없음'}
+[블로그 개선 필요 포스트]
+${blogStr}
 
-다음 형식으로 JSON만 반환:
+아래 항목을 포함해서 JSON만 반환하세요:
 {
-  "youtube_fixes": [{"keyword":"...", "issue":"...", "action":"..."}],
-  "blog_fixes": [{"keyword":"...", "issue":"...", "action":"..."}],
-  "cross_channel_strategy": ["..."],
-  "priority_keywords": ["..."]
+  "channel_diagnosis": "채널 전체 현황 한 줄 진단 (한국어, 50자 이내)",
+  "what_worked": [
+    {"title": "잘된 콘텐츠 제목", "reason": "왜 잘됐는지 구체적 이유", "lesson": "다음 영상에 적용할 교훈"}
+  ],
+  "what_failed": [
+    {"title": "저조한 콘텐츠 제목", "reason": "왜 저조한지 구체적 이유", "fix": "구체적 개선 방법"}
+  ],
+  "format_insight": "숏폼 vs 롱폼 중 어느 포맷이 현재 채널에 더 유리한지 이유 포함 (한국어, 80자 이내)",
+  "next_actions": [
+    "이번 주 안에 실행할 구체적 행동 1",
+    "이번 주 안에 실행할 구체적 행동 2",
+    "이번 주 안에 실행할 구체적 행동 3"
+  ],
+  "keyword_opportunities": ["다음에 만들면 좋을 키워드 1", "키워드 2", "키워드 3"]
 }`;
 
   try {
     await throttle(2000, 'openai');
+    logger.info('[perf_reviewer] GPT-4o 분석 중...');
     const res = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -362,12 +383,12 @@ ${ytGoodBlogBad || '  없음'}
       },
       {
         headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 30000,
+        timeout: 40000,
       }
     );
     return JSON.parse(res.data.choices[0].message.content);
   } catch (err) {
-    logger.warn(`[perf_reviewer] GPT suggestions failed: ${err.message}`);
+    logger.warn(`[perf_reviewer] GPT analysis failed: ${err.message}`);
     return null;
   }
 }
@@ -528,11 +549,42 @@ function printReport(report) {
     if (blBad) console.log(`  블로그 부진 : ${blBad}건`);
   }
 
-  // 개선 제안
-  const sugg = report.improvement_suggestions;
-  if (sugg?.cross_channel_strategy?.length) {
-    console.log('\n  [전략 제안]');
-    sugg.cross_channel_strategy.slice(0, 3).forEach((s) => console.log(`  • ${s}`));
+  // GPT-4o 분석 결과
+  const a = report.analysis;
+  if (a) {
+    console.log('\n  ─── GPT-4o 채널 분석 ─────────────────────────');
+    if (a.channel_diagnosis) {
+      console.log(`\n  [채널 진단] ${a.channel_diagnosis}`);
+    }
+    if (a.what_worked?.length) {
+      console.log('\n  [잘 된 콘텐츠]');
+      a.what_worked.forEach((w) => {
+        console.log(`  ✅ "${w.title}"`);
+        console.log(`     이유: ${w.reason}`);
+        console.log(`     교훈: ${w.lesson}`);
+      });
+    }
+    if (a.what_failed?.length) {
+      console.log('\n  [개선 필요 콘텐츠]');
+      a.what_failed.forEach((w) => {
+        console.log(`  ❌ "${w.title}"`);
+        console.log(`     이유: ${w.reason}`);
+        console.log(`     개선: ${w.fix}`);
+      });
+    }
+    if (a.format_insight) {
+      console.log(`\n  [포맷 인사이트] ${a.format_insight}`);
+    }
+    if (a.next_actions?.length) {
+      console.log('\n  [이번 주 할 일]');
+      a.next_actions.forEach((action) => console.log(`  → ${action}`));
+    }
+    if (a.keyword_opportunities?.length) {
+      console.log(`\n  [추천 키워드] ${a.keyword_opportunities.join(' / ')}`);
+    }
+    console.log('  ──────────────────────────────────────────────');
+  } else {
+    console.log('\n  [GPT 분석] OPENAI_API_KEY 미설정 또는 데이터 부족 — 분석 생략');
   }
 
   console.log(`\n${line}\n`);
@@ -594,10 +646,27 @@ export async function runPerformanceReview(options = {}) {
 
   logger.info(`[perf_reviewer] YouTube 부진: ${ytUnderperformers.length}건 | 블로그 부진: ${blogUnderperformers.length}건`);
 
-  // Step 6: GPT-4o 개선 제안
-  const suggestions = await generateImprovementSuggestions(
-    ytUnderperformers, blogUnderperformers, crossData
-  );
+  // Step 6: GPT-4o 종합 분석
+  // ytMetricsWithMeta — youtube_posts의 channel_type/title과 Analytics 지표 결합
+  const ytMetricsWithMeta = ytPosts
+    .map((p) => {
+      const m = ytAnalyticsMap[p.video_id];
+      if (!m) return null;
+      return {
+        video_id:     p.video_id,
+        title:        p.title ?? p.keyword,
+        keyword:      p.keyword,
+        channel_type: p.channel_type,
+        views:        m.views ?? 0,
+        likes:        m.likes ?? 0,
+        comments:     m.comments ?? 0,
+        watch_minutes: m.watch_minutes ?? 0,
+        ctr:          m.ctr ?? 0,
+      };
+    })
+    .filter(Boolean);
+
+  const analysis = await analyzeAndSuggest(ytMetricsWithMeta, blogUnderperformers, crossData);
 
   // Step 7: 리포트 구성
   const report = {
@@ -631,7 +700,7 @@ export async function runPerformanceReview(options = {}) {
       avg_position: p.avg_position,
       ctr_pct:      ((p.ctr ?? 0) * 100).toFixed(2) + '%',
     })),
-    improvement_suggestions: suggestions,
+    analysis,
   };
 
   // Step 8: 파일 저장
@@ -675,9 +744,12 @@ async function sendTelegramSummary(report) {
     lines.push(`⚠️ 블로그 개선 필요: ${report.blog_underperformers.length}건`);
   }
 
-  const sugg = report.improvement_suggestions;
-  if (sugg?.priority_keywords?.length) {
-    lines.push('', `🎯 우선 키워드: ${sugg.priority_keywords.slice(0, 3).join(', ')}`);
+  const a = report.analysis;
+  if (a?.keyword_opportunities?.length) {
+    lines.push('', `🎯 추천 키워드: ${a.keyword_opportunities.slice(0, 3).join(', ')}`);
+  }
+  if (a?.channel_diagnosis) {
+    lines.push('', `💡 ${a.channel_diagnosis}`);
   }
 
   try {
