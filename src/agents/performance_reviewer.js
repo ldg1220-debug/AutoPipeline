@@ -39,19 +39,16 @@ function getDateRange(daysBack = 28) {
   };
 }
 
-// ── YouTube Analytics API ───────────────────────────────────────────────────
+// ── YouTube Analytics API (yt-analytics.readonly 스코프 필요) ──────────────
 async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
   if (!videoIds.length) return {};
 
   const { startDate, endDate } = getDateRange(daysBack);
-
-  // YouTube Analytics API는 영상 하나씩 쿼리해야 함
   const results = {};
   for (const videoId of videoIds) {
     try {
       await throttle(500, 'youtube_analytics');
-      const url = 'https://youtubeanalytics.googleapis.com/v2/reports';
-      const res = await axios.get(url, {
+      const res = await axios.get('https://youtubeanalytics.googleapis.com/v2/reports', {
         headers: { Authorization: `Bearer ${accessToken}` },
         params: {
           ids:        'channel==MINE',
@@ -64,10 +61,9 @@ async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
         },
         timeout: 15000,
       });
-
       const rows = res.data?.rows ?? [];
       if (rows.length > 0) {
-        const [vid, views, watchMin, avgDur, impr, ctr, likes, comments, subs] = rows[0];
+        const [, views, watchMin, avgDur, impr, ctr, likes, comments, subs] = rows[0];
         results[videoId] = {
           views:                 views ?? 0,
           watch_minutes:         +(watchMin ?? 0).toFixed(1),
@@ -77,13 +73,61 @@ async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
           likes:                 likes ?? 0,
           comments:              comments ?? 0,
           subscribers_gained:    subs ?? 0,
+          source: 'analytics_api',
         };
       } else {
         results[videoId] = null;
       }
     } catch (err) {
-      logger.warn(`[perf_reviewer] YT Analytics failed for ${videoId}: ${err.message}`);
-      results[videoId] = null;
+      if (err.response?.status === 403) {
+        // yt-analytics.readonly 스코프 미부여 → 폴백 플래그 반환
+        results[videoId] = { _need_fallback: true };
+      } else {
+        logger.warn(`[perf_reviewer] YT Analytics failed for ${videoId}: ${err.message}`);
+        results[videoId] = null;
+      }
+    }
+  }
+  return results;
+}
+
+// ── YouTube Data API v3 videos.list 폴백 (기존 upload 토큰으로 동작) ──────
+// Analytics API 403시 사용. 조회수·좋아요·댓글은 수집 가능. watch_time/CTR은 불가.
+async function fetchYouTubeStatsFallback(accessToken, videoIds) {
+  if (!videoIds.length) return {};
+
+  const results = {};
+  // videos.list는 id를 50개까지 한 번에 조회 가능
+  const chunks = [];
+  for (let i = 0; i < videoIds.length; i += 50) chunks.push(videoIds.slice(i, i + 50));
+
+  for (const chunk of chunks) {
+    try {
+      await throttle(300, 'youtube_data');
+      const res = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: {
+          part: 'statistics',
+          id:   chunk.join(','),
+        },
+        timeout: 15000,
+      });
+      for (const item of res.data?.items ?? []) {
+        const s = item.statistics ?? {};
+        results[item.id] = {
+          views:                 parseInt(s.viewCount ?? 0),
+          watch_minutes:         0,  // Data API에서는 제공 안 함
+          avg_view_duration_sec: 0,
+          impressions:           0,
+          ctr:                   0,
+          likes:                 parseInt(s.likeCount ?? 0),
+          comments:              parseInt(s.commentCount ?? 0),
+          subscribers_gained:    0,
+          source: 'data_api_fallback',
+        };
+      }
+    } catch (err) {
+      logger.warn(`[perf_reviewer] YT Data API fallback failed: ${err.message}`);
     }
   }
   return results;
@@ -509,14 +553,29 @@ export async function runPerformanceReview(options = {}) {
 
   if (config.youtube?.refreshToken && ytPosts.length > 0) {
     try {
-      logger.info('[perf_reviewer] YouTube Analytics API 호출 중...');
       const accessToken = await refreshYouTubeAccessToken(config.youtube);
       const videoIds    = ytPosts.map((p) => p.video_id);
-      ytAnalyticsMap    = await fetchYouTubeAnalytics(accessToken, videoIds, daysBack);
+
+      // Analytics API 시도
+      logger.info('[perf_reviewer] YouTube Analytics API 호출 중...');
+      const analyticsResult = await fetchYouTubeAnalytics(accessToken, videoIds, daysBack);
+
+      // 403 폴백 감지 — 하나라도 _need_fallback 이면 Analytics 스코프 미부여
+      const needFallback = Object.values(analyticsResult).some((v) => v?._need_fallback);
+      if (needFallback) {
+        logger.warn('[perf_reviewer] YouTube Analytics API 403 — yt-analytics.readonly 스코프 미부여');
+        logger.warn('[perf_reviewer] Data API v3 (videos.list) 폴백으로 조회수·좋아요·댓글 수집');
+        logger.warn('[perf_reviewer] watch_time·CTR 수집을 원하면: npm run youtube:auth:analytics');
+        ytAnalyticsMap = await fetchYouTubeStatsFallback(accessToken, videoIds);
+      } else {
+        ytAnalyticsMap = analyticsResult;
+      }
+
       const saved = saveYouTubeMetrics(ytAnalyticsMap);
-      logger.info(`[perf_reviewer] YouTube 지표 저장: ${saved}건`);
+      const source = needFallback ? 'Data API 폴백' : 'Analytics API';
+      logger.info(`[perf_reviewer] YouTube 지표 저장: ${saved}건 (${source})`);
     } catch (err) {
-      logger.warn(`[perf_reviewer] YouTube Analytics 수집 실패: ${err.message}`);
+      logger.warn(`[perf_reviewer] YouTube 지표 수집 실패: ${err.message}`);
     }
   } else {
     logger.info('[perf_reviewer] YouTube refreshToken 미설정 또는 영상 없음 — Analytics 건너뜀');
