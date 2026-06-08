@@ -54,21 +54,21 @@ async function fetchYouTubeAnalytics(accessToken, videoIds, daysBack = 28) {
           ids:      'channel==MINE',
           startDate,
           endDate,
-          metrics:  'views,estimatedMinutesWatched,averageViewDuration,impressions,impressionClickThroughRate,likes,comments,subscribersGained',
+          // impressions/CTR은 dimensions=video 없이는 지원 안 됨 → 제외
+          metrics:  'views,estimatedMinutesWatched,averageViewDuration,likes,comments,subscribersGained',
           filters:  `video==${videoId}`,
-          // dimensions 없이 filters만 쓰면 해당 영상 집계값 단일 행 반환
         },
         timeout: 15000,
       });
       const rows = res.data?.rows ?? [];
       if (rows.length > 0) {
-        const [views, watchMin, avgDur, impr, ctr, likes, comments, subs] = rows[0];
+        const [views, watchMin, avgDur, likes, comments, subs] = rows[0];
         results[videoId] = {
           views:                 views ?? 0,
           watch_minutes:         +(watchMin ?? 0).toFixed(1),
           avg_view_duration_sec: +(avgDur ?? 0).toFixed(1),
-          impressions:           impr ?? 0,
-          ctr:                   +(ctr ?? 0).toFixed(4),
+          impressions:           0,   // video 단위 필터에서는 Analytics API 미지원
+          ctr:                   0,
           likes:                 likes ?? 0,
           comments:              comments ?? 0,
           subscribers_gained:    subs ?? 0,
