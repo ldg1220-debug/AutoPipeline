@@ -545,13 +545,16 @@ async function syncAllChannelVideos(accessToken) {
       return 0;
     }
 
+    // REPLACE로 channel_type·title·keyword 재분류 반영
     const upsert = db.prepare(`
-      INSERT OR IGNORE INTO youtube_posts (keyword, category, video_id, channel_type, url, title, published_at)
+      INSERT OR REPLACE INTO youtube_posts (keyword, category, video_id, channel_type, url, title, published_at)
       VALUES (@keyword, @category, @video_id, @channel_type, @url, @title, @published_at)
     `);
 
     let synced = 0;
     let pageToken = null;
+    const videoIdsForDuration = [];
+    const videoMeta = {};
 
     do {
       await throttle(300, 'youtube_data');
@@ -568,32 +571,62 @@ async function syncAllChannelVideos(accessToken) {
       });
 
       for (const item of res.data?.items ?? []) {
-        const snippet  = item.snippet ?? {};
-        const videoId  = snippet.resourceId?.videoId;
+        const snippet = item.snippet ?? {};
+        const videoId = snippet.resourceId?.videoId;
         if (!videoId) continue;
-
-        const title        = snippet.title ?? '';
-        const publishedAt  = snippet.publishedAt ?? null;
-        // 제목에서 키워드 추출 (첫 10자 또는 첫 어절)
-        const keyword      = title.replace(/[^\w가-힣\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
-        // #Shorts 태그 또는 제목에 shorts 포함 여부로 분류 (contentDetails duration은 별도 API 필요)
-        const isShorts = title.toLowerCase().includes('#shorts') ||
-          (snippet.description ?? '').toLowerCase().includes('#shorts');
-        const channelType = isShorts ? 'shorts' : 'longform';
-
-        upsert.run({
-          keyword,
-          category:     'economy',
-          video_id:     videoId,
-          channel_type: channelType,
-          url:          `https://youtu.be/${videoId}`,
-          title,
-          published_at: publishedAt,
-        });
-        synced++;
+        videoIdsForDuration.push(videoId);
+        videoMeta[videoId] = { snippet };
       }
       pageToken = res.data?.nextPageToken ?? null;
     } while (pageToken);
+
+    // contentDetails.duration으로 숏폼/롱폼 정확히 분류
+    const durationMap = {};
+    for (let i = 0; i < videoIdsForDuration.length; i += 50) {
+      const chunk = videoIdsForDuration.slice(i, i + 50);
+      await throttle(300, 'youtube_data');
+      const dRes = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { part: 'contentDetails', id: chunk.join(',') },
+        timeout: 15000,
+      });
+      for (const v of dRes.data?.items ?? []) {
+        // ISO 8601 duration → 초 변환 (PT1M30S → 90)
+        const d = v.contentDetails?.duration ?? 'PT0S';
+        const seconds = (parseInt(d.match(/(\d+)M/)?.[1] ?? 0) * 60)
+                      + parseInt(d.match(/(\d+)S/)?.[1] ?? 0)
+                      + (parseInt(d.match(/(\d+)H/)?.[1] ?? 0) * 3600);
+        durationMap[v.id] = seconds;
+      }
+    }
+
+    for (const videoId of videoIdsForDuration) {
+      const snippet     = videoMeta[videoId]?.snippet ?? {};
+      const title       = snippet.title ?? '';
+      const publishedAt = snippet.publishedAt ?? null;
+      const durationSec = durationMap[videoId] ?? 999;
+
+      // 60초 이하이거나 제목/설명에 #Shorts 포함이면 숏폼
+      const isShorts    = durationSec <= 60 ||
+        title.toLowerCase().includes('#shorts') ||
+        (snippet.description ?? '').toLowerCase().includes('#shorts');
+      const channelType = isShorts ? 'shorts' : 'longform';
+
+      // 제목에서 키워드 추출 — "유튜브 제목:" 같은 템플릿 접두사 제거
+      const cleanTitle = title.replace(/^(유튜브\s*제목\s*[:：]\s*)/i, '').trim();
+      const keyword    = cleanTitle.split(/[,!?！？\s]+/).filter(Boolean).slice(0, 4).join(' ');
+
+      upsert.run({
+        keyword,
+        category:     'economy',
+        video_id:     videoId,
+        channel_type: channelType,
+        url:          `https://youtu.be/${videoId}`,
+        title:        cleanTitle || title,
+        published_at: publishedAt,
+      });
+      synced++;
+    }
 
     logger.info(`[perf_reviewer] 채널 전체 영상 동기화: ${synced}건`);
     return synced;
