@@ -390,33 +390,8 @@ async function runPipeline() {
     contents: contentData.contents.filter((c) => approvedKeywords.has(c.keyword)),
   };
 
-  // ── 최상위 키워드 롱폼 생성 (score 1위 또는 --force-keyword) ─────────────
-  // 나머지 키워드는 standalone 쇼츠(최대 59초, 완전한 한 편)로 유지
-  const _bestKeyword = trendData.selected_items[0]?.keyword;
-  if (_bestKeyword && approvedKeywords.has(_bestKeyword)) {
-    try {
-      const _bestContent = approvedContentData.contents.find((c) => c.keyword === _bestKeyword);
-      if (_bestContent) {
-        logger.info(`[app] 최상위 키워드 롱폼 생성 시작: "${_bestKeyword}"`);
-        const _lfResult = await createLongFormAndShorts(
-          trendData.selected_items[0],
-          _bestContent.blog_draft ?? null
-        );
-        if (_lfResult.long_video?.sections?.length) {
-          const _lfIdx = approvedContentData.contents.findIndex((c) => c.keyword === _bestKeyword);
-          if (_lfIdx !== -1) {
-            approvedContentData.contents[_lfIdx] = {
-              ...approvedContentData.contents[_lfIdx],
-              long_video: _lfResult.long_video,
-            };
-          }
-          logger.info(`[app] 롱폼 생성 완료: "${_bestKeyword}" (${_lfResult.long_video.sections.length}섹션)`);
-        }
-      }
-    } catch (err) {
-      logger.warn(`[app] 롱폼 생성 실패 ("${_bestKeyword}"): ${err.message}. 쇼츠만 진행.`);
-    }
-  }
+  // 롱폼은 runUnifiedPipeline() (목요일 22시 스케줄) 또는 --longform 플래그 시에만 생성.
+  // runPipeline()에서는 숏폼만 제작한다.
 
   try {
     if (approvedContentData.contents.length === 0) {
