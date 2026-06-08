@@ -333,41 +333,65 @@ async function analyzeAndSuggest(ytMetrics, blogUnderperformers, crossAnalysis) 
     `  "${p.title}" — 클릭 ${p.clicks}, 노출 ${p.impressions}, ${p.avg_position?.toFixed(1) ?? '-'}위`
   ).join('\n') || '  (데이터 없음)';
 
-  const prompt = `당신은 한국 유튜브+블로그 채널 성과 분석 전문가입니다.
-아래 실적 데이터를 바탕으로 채널 현황을 진단하고 구체적인 개선 방안을 제시하세요.
-오늘 날짜 기준으로 현실적이고 실행 가능한 분석을 해주세요.
+  // 키워드별 조회수 분류 (흥행 공식 도출용)
+  const ytBestKeywords = ytBest.map((v) => `"${v.title}" (${v.channel_type}, 조회 ${v.views}, 좋아요 ${v.likes})`).join('\n');
+  const ytWorstKeywords = ytWorst.map((v) => `"${v.title}" (${v.channel_type}, 조회 ${v.views})`).join('\n');
 
-[YouTube 채널 현황]
-총 ${ytMetrics.length}개 영상 추적 중
-- 숏폼 평균 조회수: ${shortAvgViews}회 (${shorts.length}개)
-- 롱폼 평균 조회수: ${longAvgViews}회 (${longform.length}개)
-- 숏폼 평균 좋아요: ${shortAvgLikes} / 롱폼 평균 좋아요: ${longAvgLikes}
+  const prompt = `당신은 유튜브 및 블로그 콘텐츠 데이터 분석에 특화된 '콘텐츠 성장 전략가 겸 시니어 데이터 애널리스트'입니다.
+복잡한 트래픽 지표를 분석하여 채널 스케일업을 위한 구체적이고 실행 가능한 전략을 제시하는 것이 목표입니다.
+추상적이거나 뻔한 조언("양질의 콘텐츠를 만드세요")은 절대 배제하고, 실무에 즉시 적용 가능한 피드백만 제공하세요.
 
-[잘 된 영상 TOP 3]
-${ytBestStr || '  (데이터 없음)'}
+[Input Data]
+- 추적 영상 수: ${ytMetrics.length}개 (숏폼 ${shorts.length}개 / 롱폼 ${longform.length}개)
+- 숏폼 평균 조회수: ${shortAvgViews}회 | 롱폼 평균 조회수: ${longAvgViews}회
+- 숏폼 평균 좋아요: ${shortAvgLikes} | 롱폼 평균 좋아요: ${longAvgLikes}
 
-[저조한 영상 BOTTOM 3]
-${ytWorstStr || '  (데이터 없음)'}
+[고성과 영상 (TOP 3)]
+${ytBestKeywords || '(데이터 없음)'}
+
+[저성과 영상 (BOTTOM 3)]
+${ytWorstKeywords || '(데이터 없음)'}
 
 [블로그 개선 필요 포스트]
 ${blogStr}
 
-아래 항목을 포함해서 JSON만 반환하세요:
+아래 4단계 프레임워크로 분석 후 JSON만 반환하세요:
+
+1단계 현황진단: 단순 수치 나열이 아닌, 숏폼/롱폼 간 성과 편차와 채널의 현재 성장 단계를 한 줄로 진단
+2단계 고성과 원인 역추적: 잘 된 영상의 제목 구조·키워드 조합에서 반복되는 흥행 패턴 도출 (CTR 후킹 성공 여부, 검색 의도 충족 여부 등)
+3단계 병목 구간 진단: 저성과 영상의 트래픽 퍼널 어디서 이탈하는지 (노출 부족인지, 클릭 후 이탈인지) 원인 진단 + 즉시 수정 가능한 대안 제시
+4단계 강점 정의 + 스케일업 전략: 현재 채널의 차별화된 강점 한 문장 + 다음에 타겟팅할 롱테일 키워드 3가지 (경쟁이 낮고 전문성 영토 확장 가능한 조합)
+
 {
-  "channel_diagnosis": "채널 전체 현황 한 줄 진단 (한국어, 50자 이내)",
+  "channel_diagnosis": "채널 전체 현황 한 줄 진단 — 숏폼/롱폼 편차, 성장 단계 포함 (50자 이내)",
   "what_worked": [
-    {"title": "잘된 콘텐츠 제목", "reason": "왜 잘됐는지 구체적 이유", "lesson": "다음 영상에 적용할 교훈"}
+    {
+      "title": "잘된 영상 제목",
+      "keyword_type": "트렌드/이슈성 | 상시검색형(Evergreen) | 타겟맞춤형(Niche) 중 하나",
+      "reason": "흥행 원인 — 제목 구조, 키워드 조합, 검색 의도 충족 여부 구체적으로",
+      "lesson": "다음 영상 기획에 즉시 적용할 교훈 (구체적 행동 포함)"
+    }
   ],
   "what_failed": [
-    {"title": "저조한 콘텐츠 제목", "reason": "왜 저조한지 구체적 이유", "fix": "구체적 개선 방법"}
+    {
+      "title": "저성과 영상 제목",
+      "funnel_bottleneck": "노출부족 | CTR저조(썸네일/제목문제) | 초반이탈(인트로문제) | 전반이탈(내용문제) 중 하나",
+      "reason": "병목 원인 진단",
+      "fix": "즉시 수정 가능한 구체적 개선안 (예: 썸네일 수치 강조, 제목 재구성)"
+    }
   ],
-  "format_insight": "숏폼 vs 롱폼 중 어느 포맷이 현재 채널에 더 유리한지 이유 포함 (한국어, 80자 이내)",
+  "channel_strength": "이 채널만의 차별화된 강점 한 문장 정의",
+  "format_insight": "숏폼 vs 롱폼 중 현재 채널에 더 유리한 포맷과 근거 (데이터 기반, 80자 이내)",
   "next_actions": [
-    "이번 주 안에 실행할 구체적 행동 1",
+    "이번 주 안에 실행할 구체적 행동 1 (측정 가능한 목표 포함)",
     "이번 주 안에 실행할 구체적 행동 2",
     "이번 주 안에 실행할 구체적 행동 3"
   ],
-  "keyword_opportunities": ["다음에 만들면 좋을 키워드 1", "키워드 2", "키워드 3"]
+  "keyword_opportunities": [
+    {"keyword": "롱테일 키워드 조합 1", "type": "evergreen|trend|niche", "reason": "왜 이 키워드인지"},
+    {"keyword": "롱테일 키워드 조합 2", "type": "evergreen|trend|niche", "reason": "왜 이 키워드인지"},
+    {"keyword": "롱테일 키워드 조합 3", "type": "evergreen|trend|niche", "reason": "왜 이 키워드인지"}
+  ]
 }`;
 
   try {
@@ -552,37 +576,62 @@ function printReport(report) {
   // GPT-4o 분석 결과
   const a = report.analysis;
   if (a) {
-    console.log('\n  ─── GPT-4o 채널 분석 ─────────────────────────');
+    const div = '─'.repeat(46);
+    console.log(`\n  ${div}`);
+    console.log('  GPT-4o 콘텐츠 성과 분석 리포트');
+    console.log(`  ${div}`);
+
+    // 1단계: 현황 진단
     if (a.channel_diagnosis) {
-      console.log(`\n  [채널 진단] ${a.channel_diagnosis}`);
+      console.log(`\n  ▶ 현황 진단`);
+      console.log(`  ${a.channel_diagnosis}`);
     }
+    if (a.channel_strength) {
+      console.log(`\n  ▶ 채널 차별화 강점`);
+      console.log(`  ${a.channel_strength}`);
+    }
+
+    // 2단계: 고성과 원인
     if (a.what_worked?.length) {
-      console.log('\n  [잘 된 콘텐츠]');
+      console.log('\n  ▶ 고성과 콘텐츠 분석 (What Went Well)');
       a.what_worked.forEach((w) => {
-        console.log(`  ✅ "${w.title}"`);
-        console.log(`     이유: ${w.reason}`);
+        console.log(`\n  ✅ "${w.title}" [${w.keyword_type ?? ''}]`);
+        console.log(`     원인: ${w.reason}`);
         console.log(`     교훈: ${w.lesson}`);
       });
     }
+
+    // 3단계: 병목 구간 진단
     if (a.what_failed?.length) {
-      console.log('\n  [개선 필요 콘텐츠]');
+      console.log('\n  ▶ 개선 필요 콘텐츠 분석 (Areas for Improvement)');
       a.what_failed.forEach((w) => {
-        console.log(`  ❌ "${w.title}"`);
-        console.log(`     이유: ${w.reason}`);
+        console.log(`\n  ❌ "${w.title}"`);
+        console.log(`     병목: ${w.funnel_bottleneck ?? ''}`);
+        console.log(`     원인: ${w.reason}`);
         console.log(`     개선: ${w.fix}`);
       });
     }
+
+    // 4단계: 스케일업 전략
     if (a.format_insight) {
-      console.log(`\n  [포맷 인사이트] ${a.format_insight}`);
+      console.log(`\n  ▶ 포맷 인사이트 (숏폼 vs 롱폼)`);
+      console.log(`  ${a.format_insight}`);
     }
     if (a.next_actions?.length) {
-      console.log('\n  [이번 주 할 일]');
-      a.next_actions.forEach((action) => console.log(`  → ${action}`));
+      console.log('\n  ▶ 이번 주 실행 플랜');
+      a.next_actions.forEach((action, i) => console.log(`  ${i + 1}. ${action}`));
     }
     if (a.keyword_opportunities?.length) {
-      console.log(`\n  [추천 키워드] ${a.keyword_opportunities.join(' / ')}`);
+      console.log('\n  ▶ 차기 롱테일 키워드 전략');
+      a.keyword_opportunities.forEach((k) => {
+        const kw   = typeof k === 'string' ? k : k.keyword;
+        const type = typeof k === 'object' ? ` [${k.type}]` : '';
+        const why  = typeof k === 'object' && k.reason ? ` — ${k.reason}` : '';
+        console.log(`  • ${kw}${type}${why}`);
+      });
     }
-    console.log('  ──────────────────────────────────────────────');
+
+    console.log(`\n  ${div}`);
   } else {
     console.log('\n  [GPT 분석] OPENAI_API_KEY 미설정 또는 데이터 부족 — 분석 생략');
   }
@@ -745,11 +794,17 @@ async function sendTelegramSummary(report) {
   }
 
   const a = report.analysis;
-  if (a?.keyword_opportunities?.length) {
-    lines.push('', `🎯 추천 키워드: ${a.keyword_opportunities.slice(0, 3).join(', ')}`);
-  }
   if (a?.channel_diagnosis) {
     lines.push('', `💡 ${a.channel_diagnosis}`);
+  }
+  if (a?.channel_strength) {
+    lines.push(`⭐ ${a.channel_strength}`);
+  }
+  if (a?.keyword_opportunities?.length) {
+    const kws = a.keyword_opportunities.slice(0, 3).map((k) =>
+      typeof k === 'string' ? k : k.keyword
+    );
+    lines.push('', `🎯 차기 키워드: ${kws.join(' / ')}`);
   }
 
   try {
