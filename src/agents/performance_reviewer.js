@@ -529,6 +529,80 @@ async function syncYouTubePostsFromOutput() {
   return synced;
 }
 
+// ── YouTube 채널 전체 영상 동기화 (Data API v3 playlistItems) ─────────────
+// 파이프라인 외에 직접 업로드한 영상도 포함하여 채널 전체를 추적
+async function syncAllChannelVideos(accessToken) {
+  try {
+    // 1. 채널 정보에서 uploads 재생목록 ID 조회
+    const chRes = await axios.get('https://www.googleapis.com/youtube/v3/channels', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { part: 'contentDetails', mine: true },
+      timeout: 10000,
+    });
+    const uploadsPlaylistId = chRes.data?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+    if (!uploadsPlaylistId) {
+      logger.warn('[perf_reviewer] uploads 재생목록 ID를 찾을 수 없습니다.');
+      return 0;
+    }
+
+    const upsert = db.prepare(`
+      INSERT OR IGNORE INTO youtube_posts (keyword, category, video_id, channel_type, url, title, published_at)
+      VALUES (@keyword, @category, @video_id, @channel_type, @url, @title, @published_at)
+    `);
+
+    let synced = 0;
+    let pageToken = null;
+
+    do {
+      await throttle(300, 'youtube_data');
+      const params = {
+        part:       'snippet',
+        playlistId: uploadsPlaylistId,
+        maxResults: 50,
+        ...(pageToken && { pageToken }),
+      };
+      const res = await axios.get('https://www.googleapis.com/youtube/v3/playlistItems', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params,
+        timeout: 15000,
+      });
+
+      for (const item of res.data?.items ?? []) {
+        const snippet  = item.snippet ?? {};
+        const videoId  = snippet.resourceId?.videoId;
+        if (!videoId) continue;
+
+        const title        = snippet.title ?? '';
+        const publishedAt  = snippet.publishedAt ?? null;
+        // 제목에서 키워드 추출 (첫 10자 또는 첫 어절)
+        const keyword      = title.replace(/[^\w가-힣\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+        // #Shorts 태그 또는 제목에 shorts 포함 여부로 분류 (contentDetails duration은 별도 API 필요)
+        const isShorts = title.toLowerCase().includes('#shorts') ||
+          (snippet.description ?? '').toLowerCase().includes('#shorts');
+        const channelType = isShorts ? 'shorts' : 'longform';
+
+        upsert.run({
+          keyword,
+          category:     'economy',
+          video_id:     videoId,
+          channel_type: channelType,
+          url:          `https://youtu.be/${videoId}`,
+          title,
+          published_at: publishedAt,
+        });
+        synced++;
+      }
+      pageToken = res.data?.nextPageToken ?? null;
+    } while (pageToken);
+
+    logger.info(`[perf_reviewer] 채널 전체 영상 동기화: ${synced}건`);
+    return synced;
+  } catch (err) {
+    logger.warn(`[perf_reviewer] 채널 전체 영상 동기화 실패: ${err.message}`);
+    return 0;
+  }
+}
+
 // ── 블로그 부진 포스트 조회 (blog_analytics.js identifyUnderperformers 재사용) ─
 function getBlogUnderperformers() {
   return db.prepare(`
@@ -696,12 +770,23 @@ export async function runPerformanceReview(options = {}) {
 
   // Step 2: YouTube Analytics 수집
   let ytAnalyticsMap = {};
+  let accessToken = null;
+
+  if (config.youtube?.refreshToken) {
+    try {
+      accessToken = await refreshYouTubeAccessToken(config.youtube);
+      // 채널 전체 영상 동기화 (직접 업로드 영상 포함)
+      await syncAllChannelVideos(accessToken);
+    } catch (err) {
+      logger.warn(`[perf_reviewer] YouTube 토큰 발급 실패: ${err.message}`);
+    }
+  }
+
   const ytPosts = loadYouTubePosts();
 
-  if (config.youtube?.refreshToken && ytPosts.length > 0) {
+  if (accessToken && ytPosts.length > 0) {
     try {
-      const accessToken = await refreshYouTubeAccessToken(config.youtube);
-      const videoIds    = ytPosts.map((p) => p.video_id);
+      const videoIds = ytPosts.map((p) => p.video_id);
 
       // Analytics API 시도
       logger.info('[perf_reviewer] YouTube Analytics API 호출 중...');
@@ -732,7 +817,7 @@ export async function runPerformanceReview(options = {}) {
       logger.warn(`[perf_reviewer] YouTube 지표 수집 실패: ${err.message}`);
     }
   } else {
-    logger.info('[perf_reviewer] YouTube refreshToken 미설정 또는 영상 없음 — Analytics 건너뜀');
+    logger.info('[perf_reviewer] YouTube 토큰 없음 또는 영상 없음 — Analytics 건너뜀');
   }
 
   // Step 3: GSC 블로그 지표는 blog_analytics.js가 이미 수집 → DB에서 읽기만 함
