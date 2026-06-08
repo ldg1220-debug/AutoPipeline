@@ -229,24 +229,24 @@ async function buildSceneBackgrounds(keyword, scripts) {
     `[3 Cause/원인]: ${segTexts[2]}\n` +
     `[4 Effect/영향]: ${segTexts[3]}\n` +
     `[5 Close/마무리]: ${segTexts[4]}\n\n` +
-    `For each segment generate "bg" (background scene) and "pose" (character action).\n\n` +
+    `For each segment generate "bg", "pose" (initial pose), and "pose2" (follow-up pose — a contrasting but related action).\n\n` +
     `Rules for bg:\n` +
-    `- Directly relevant to the segment content (stock exchange, courtroom, hospital, etc.)\n` +
+    `- Directly relevant to the segment content\n` +
     `- NO text, NO numbers, NO prices anywhere\n` +
-    `- Stock charts: trend arrows or candlestick shapes ONLY — zero numerical data\n` +
-    `Rules for pose:\n` +
-    `- Segment 1 (Hook): ${ACT_MOODS[0]} — alarmed, gasping, pointing in shock\n` +
-    `- Segment 2 (Context): informative, calm explaining gesture\n` +
-    `- Segment 3 (Cause): ${ACT_MOODS[1]} — holding document, gesturing at chart\n` +
-    `- Segment 4 (Effect): urgent, concerned expression, showing consequence\n` +
-    `- Segment 5 (Close): ${ACT_MOODS[2]} — calm wise smile, thumbs up\n` +
-    `- Each bg/pose under 120 chars\n` +
+    `- Stock charts: trend arrows or candlestick shapes ONLY\n` +
+    `Rules for pose / pose2 (character actions — must clearly differ from each other):\n` +
+    `- Segment 1 (Hook): pose=shocked gasping arms up, pose2=pointing at screen urgently\n` +
+    `- Segment 2 (Context): pose=reading document calmly, pose2=explaining with open arms\n` +
+    `- Segment 3 (Cause): pose=pointing at chart confidently, pose2=holding up finger making key point\n` +
+    `- Segment 4 (Effect): pose=concerned hands forward, pose2=shaking head worried\n` +
+    `- Segment 5 (Close): pose=thumbs up warm smile, pose2=slight bow hands clasped\n` +
+    `- Each bg/pose/pose2 under 120 chars\n` +
     `Return JSON: {\n` +
-    `  "hook":           {"bg":"...","pose":"..."},\n` +
-    `  "context":        {"bg":"...","pose":"..."},\n` +
-    `  "insight_cause":  {"bg":"...","pose":"..."},\n` +
-    `  "insight_effect": {"bg":"...","pose":"..."},\n` +
-    `  "close":          {"bg":"...","pose":"..."}\n` +
+    `  "hook":           {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "context":        {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "insight_cause":  {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "insight_effect": {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "close":          {"bg":"...","pose":"...","pose2":"..."}\n` +
     `}`;
 
   try {
@@ -267,11 +267,11 @@ async function buildSceneBackgrounds(keyword, scripts) {
   } catch (err) {
     logger.warn(`[media_generator] Scene background generation failed: ${err.message}. Using defaults.`);
     return {
-      hook:           { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines on screens, no numbers no text, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
-      context:        { bg: 'bright modern newsroom with abstract chart shapes on screens, no numbers no text, cool lighting', pose: 'reading newspaper attentively, calm informative expression' },
-      insight_cause:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text, warm lighting', pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
-      insight_effect: { bg: 'dramatic city skyline at dusk with falling graph silhouette in background, no text', pose: 'concerned expression, hands forward showing impact, serious tone' },
-      close:          { bg: 'cozy library with warm golden sunlight through window, stacked books, no text', pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
+      hook:           { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines, no numbers no text', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open', pose2: 'pointing urgently at screen, leaning forward, eyes wide' },
+      context:        { bg: 'bright modern newsroom with abstract chart shapes on screens, no numbers no text', pose: 'reading newspaper attentively, calm informative expression', pose2: 'explaining with open arms, confident warm expression' },
+      insight_cause:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text', pose: 'pointing confidently with wooden pointer stick, determined expression', pose2: 'holding up index finger making key point, eyebrows raised' },
+      insight_effect: { bg: 'dramatic city skyline at dusk with falling graph silhouette, no text', pose: 'concerned expression, hands forward showing impact', pose2: 'shaking head slowly, worried expression, arms crossed' },
+      close:          { bg: 'cozy library with warm golden sunlight through window, stacked books, no text', pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head', pose2: 'hands clasped, slight bow, gentle reassuring expression' },
     };
   }
 }
@@ -282,6 +282,7 @@ async function buildSceneBackgrounds(keyword, scripts) {
 // 없으면 null 반환 → 기존 generations API 사용
 const REFERENCE_DIR = path.resolve(__dirname, '../../reference');
 const REFERENCE_CANDIDATES = [
+  '매읽남.png', '매읽남.jpg',
   'maeilnamja.png', 'maeilnamja.jpg',
   'character.png',  'character.jpg',
   'ref.png',        'ref.jpg',
@@ -359,8 +360,49 @@ async function generateImageWithReference(imagePrompt, refBuf, refName, imgPath)
  * 각 이미지가 그 시점의 스크립트 내용과 직접 대응하여 영상 몰입감을 높인다.
  * gpt-image-1 → Pexels 순으로 폴백.
  */
+/**
+ * 씬 이미지 생성 헬퍼 — gpt-image-1 edits(레퍼런스 있음) 또는 generations 호출.
+ * 성공 시 로컬 파일 경로 반환, 실패 시 null.
+ */
+async function generateOneSceneImage(imagePrompt, imgPath, refImage) {
+  // 레퍼런스 있음 → edits API
+  if (refImage) {
+    const url = await generateImageWithReference(imagePrompt, refImage.buffer, refImage.name, imgPath);
+    if (url) return url;
+  }
+  // 레퍼런스 없거나 edits 실패 → generations API
+  try {
+    const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
+    const res = await axios.post(
+      'https://api.openai.com/v1/images/generations', body,
+      { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
+    );
+    const item = res.data.data[0];
+    let saved = null;
+    if (item.b64_json) {
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+      saved = imgPath;
+    } else if (item.url) {
+      const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+      saved = imgPath;
+    }
+    return saved;
+  } catch (err) {
+    logger.warn(`[media_generator] gpt-image-1 failed (${path.basename(imgPath)}): ${err.response?.data?.error?.message ?? err.message}`);
+    return null;
+  }
+}
+
+/**
+ * 씬 이미지 5구간 × 포즈 2장 = 최대 10장 생성.
+ * 반환: [[pose0_url, pose1_url], ...] — 길이 5인 배열, 각 요소가 [A, B] 포즈 쌍.
+ * 포즈 A → B 컷 전환으로 캐릭터가 움직이는 느낌을 연출한다.
+ */
 async function generateSceneImages(keyword, scripts, category) {
-  if (!config.openai.apiKey) return [null, null, null, null, null];
+  if (!config.openai.apiKey) return Array(5).fill([null, null]);
 
   const scenes = await buildSceneBackgrounds(keyword, scripts ?? {});
   const sceneList = [
@@ -371,84 +413,68 @@ async function generateSceneImages(keyword, scripts, category) {
     scenes.close,
   ];
 
-  // 레퍼런스 이미지 사전 로딩 (reference/ 폴더)
   const refImage = await loadReferenceImage();
   const useEdits = !!refImage;
   logger.info(
-    `[media_generator] Scene prompts ready (5 cuts) for: ${keyword} | ` +
-    `mode: ${useEdits ? `edits (ref: ${refImage.name})` : 'generations (no ref image)'}`
+    `[media_generator] Scene image generation start (5seg × 2pose = 10) | ` +
+    `mode: ${useEdits ? `edits (${refImage.name})` : 'generations'} | ${keyword}`
   );
 
   const segLabels = ['hook', 'context', 'insight_cause', 'insight_effect', 'close'];
+  const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const results = [];
 
   for (let i = 0; i < 5; i++) {
-    await throttle(300);
-    const cachedUrl = await findSimilarImage(keyword, i);
-    if (cachedUrl) {
-      const isValid = cachedUrl.startsWith('http://') || cachedUrl.startsWith('https://')
-        || await fs.access(cachedUrl).then(() => true).catch(() => false);
-      if (isValid) {
-        logger.info(`[media_generator] Reusing cached scene ${i} (${segLabels[i]}): ${keyword}`);
-        results.push(cachedUrl);
-        continue;
-      }
-      logger.info(`[media_generator] Cached file missing, regenerating scene${i}: ${keyword}`);
-    }
+    const { bg = 'warm indoor office', pose = '', pose2 = '' } = sceneList[i] ?? {};
+    const posePair = [];
 
-    const { pose = '', bg = 'warm indoor office' } = sceneList[i] ?? {};
-    const imagePrompt =
-      `${MAEILNAMJA_BASE}. ` +
-      `Background setting: ${bg}. ` +
-      `Character action: ${pose}. ` +
-      `Full body character centered in foreground, 9:16 portrait composition, high quality.`;
+    for (const [pIdx, poseText] of [[0, pose], [1, pose2 || pose]]) {
+      await throttle(300);
 
-    const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-    const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
-
-    let imageUrl = null;
-
-    // 레퍼런스 이미지 있음 → /images/edits (캐릭터 스타일 일관성 보장)
-    if (useEdits) {
-      imageUrl = await generateImageWithReference(imagePrompt, refImage.buffer, refImage.name, imgPath);
-      if (imageUrl) logger.info(`[media_generator] Scene ${i + 1}/5 done (${segLabels[i]}, edits+ref): ${keyword}`);
-    }
-
-    // 레퍼런스 없거나 edits 실패 → /images/generations (기존 방식)
-    if (!imageUrl) {
-      try {
-        const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
-        const res = await axios.post(
-          'https://api.openai.com/v1/images/generations', body,
-          { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
-        const item = res.data.data[0];
-        if (item.b64_json) {
-          await fs.mkdir(path.dirname(imgPath), { recursive: true });
-          await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
-          imageUrl = imgPath;
-        } else if (item.url) {
-          const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
-          await fs.mkdir(path.dirname(imgPath), { recursive: true });
-          await fs.writeFile(imgPath, Buffer.from(imgRes.data));
-          imageUrl = imgPath;
+      // 캐시 확인 (캐시 키: subAct*2 + poseIdx)
+      const cacheKey = i * 2 + pIdx;
+      const cachedUrl = await findSimilarImage(keyword, cacheKey);
+      if (cachedUrl) {
+        const isValid = cachedUrl.startsWith('http') || await fs.access(cachedUrl).then(() => true).catch(() => false);
+        if (isValid) {
+          logger.info(`[media_generator] Cache hit: ${segLabels[i]} pose${pIdx}`);
+          posePair.push(cachedUrl);
+          continue;
         }
-        if (imageUrl) logger.info(`[media_generator] Scene ${i + 1}/5 done (${segLabels[i]}, generations): ${keyword}`);
-      } catch (err) {
-        logger.warn(`[media_generator] gpt-image-1 scene${i} failed: ${err.response?.data?.error?.message ?? err.message}`);
       }
+
+      const imagePrompt =
+        `${MAEILNAMJA_BASE}. ` +
+        `Background setting: ${bg}. ` +
+        `Character action: ${poseText}. ` +
+        `Full body character centered in foreground, 9:16 portrait composition, high quality.`;
+
+      const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}_p${pIdx}.png`);
+      let imageUrl = await generateOneSceneImage(imagePrompt, imgPath, useEdits ? refImage : null);
+
+      // 이미지 생성 실패 → Pexels 폴백 (pose0만, pose1은 pose0 재사용)
+      if (!imageUrl) {
+        if (pIdx === 0) {
+          const pexels = await searchPexelsImages(keyword, category, 1);
+          imageUrl = pexels[0] || null;
+          if (imageUrl) logger.info(`[media_generator] ${segLabels[i]} p0 → Pexels fallback`);
+        } else {
+          imageUrl = posePair[0] ?? null; // pose1 실패 시 pose0 재사용
+        }
+      }
+
+      if (imageUrl) {
+        logger.info(`[media_generator] ${segLabels[i]} pose${pIdx} done (${useEdits && imageUrl !== posePair[0] ? 'edits' : 'gen'}): ${keyword}`);
+        saveImageToCache(keyword, cacheKey, imageUrl).catch(() => {});
+      }
+      posePair.push(imageUrl ?? null);
     }
 
-    // Pexels 최종 폴백
-    if (!imageUrl) {
-      const pexels = await searchPexelsImages(keyword, category, 1);
-      imageUrl = pexels[0] || null;
-      if (imageUrl) logger.info(`[media_generator] Scene${i} → Pexels fallback`);
-    }
-
-    results.push(imageUrl ?? null);
-    if (imageUrl) saveImageToCache(keyword, i, imageUrl).catch(() => {});
+    results.push(posePair);
   }
+
+  const total = results.flat().filter(Boolean).length;
+  logger.info(`[media_generator] Scene images: ${total}/10 generated`);
   return results;
 }
 
@@ -621,8 +647,12 @@ function buildImageClips(imageUrls, scenes, totalDuration) {
     return [{ asset: { type: 'image', src: FALLBACK }, start: 0, length: totalDuration, fit: 'cover' }];
   }
 
-  // subAct별 이미지 URL 결정 (null이면 FALLBACK)
-  const imgBySubAct = [0, 1, 2, 3, 4].map((i) => imageUrls[i] || FALLBACK);
+  // subAct별 이미지 URL 결정 (2D 배열이면 pose0만 사용, 1D 배열도 허용)
+  const imgBySubAct = [0, 1, 2, 3, 4].map((i) => {
+    const entry = imageUrls[i];
+    const url = Array.isArray(entry) ? (entry[0] ?? null) : (entry ?? null);
+    return url || FALLBACK;
+  });
 
   // subAct 구간 경계를 scene 단위로 병합 → 같은 subAct는 하나의 이미지 클립
   const clips = [];
@@ -1660,27 +1690,26 @@ async function generateMedia(content) {
     content = { ...content, image_prompt: enhancedPrompt };
   }
 
-  // 3. 씬 이미지 5컷 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
+  // 3. 씬 이미지 5구간 × 포즈 2장 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
+  // sceneUrls: [[pose0_url, pose1_url], ...] — 길이 5인 배열
   let sceneUrls;
   try {
-    logger.info(`[media_generator] Generating scene images (5 cuts): ${content.keyword}`);
     sceneUrls = await generateSceneImages(content.keyword, content.shortform_script ?? {}, content.category);
-    const successCount = sceneUrls.filter(Boolean).length;
-    logger.info(`[media_generator] Scene images: ${successCount}/5 generated`);
+    const successCount = sceneUrls.flat().filter(Boolean).length;
 
     if (successCount === 0) {
       logger.warn('[media_generator] All scene images failed. Falling back to Pexels.');
       const pexels = await searchPexelsImages(content.keyword, content.category, 5);
-      sceneUrls = [pexels[0]||null, pexels[1]||null, pexels[2]||null, pexels[3]||null, pexels[4]||null];
+      sceneUrls = pexels.map((u) => [u ?? null, null]);
     }
   } catch (err) {
     logger.warn(`[media_generator] Scene image error: ${err.message}. Falling back to Pexels.`);
     const pexels = await searchPexelsImages(content.keyword, content.category, 5);
-    sceneUrls = [pexels[0]||null, pexels[1]||null, pexels[2]||null, pexels[3]||null, pexels[4]||null];
+    sceneUrls = pexels.map((u) => [u ?? null, null]);
   }
 
   // 4. 썸네일 생성 (16:9) — 반드시 생성 보장
-  const thumbSceneUrl = sceneUrls[0] ?? null;
+  const thumbSceneUrl = sceneUrls[0]?.[0] ?? null;
   if (!thumbSceneUrl) logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 단색 배경으로 썸네일 생성: ${content.keyword}`);
   else                 logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
 
@@ -1712,13 +1741,28 @@ async function generateMedia(content) {
       totalDuration
     );
     const seriesName = content.series_name ?? '매일읽어주는남자';
-    const frames = scenes.map((scene) => ({
-      bgUrl:    sceneUrls[scene.subAct ?? scene.act] ?? null,
-      label:    seriesName,
-      subtitle: scene.text,
-      isKey:    scene.isKey ?? false,
-      duration: scene.duration,
-    }));
+
+    // 포즈 전환 타이밍: 서브액트 시작 기준 POSE_SWITCH_SEC 초마다 pose0↔pose1 교체
+    const POSE_SWITCH_SEC = 4;
+    const subActStartTime = {};
+    for (const scene of scenes) {
+      const sa = scene.subAct ?? scene.act ?? 0;
+      if (!(sa in subActStartTime)) subActStartTime[sa] = scene.start;
+    }
+
+    const frames = scenes.map((scene) => {
+      const sa = scene.subAct ?? scene.act ?? 0;
+      const elapsed = scene.start - (subActStartTime[sa] ?? 0);
+      const poseIdx = Math.floor(elapsed / POSE_SWITCH_SEC) % 2;
+      const urlPair = sceneUrls[sa] ?? [null, null];
+      return {
+        bgUrl:    urlPair[poseIdx] ?? urlPair[0] ?? null,
+        label:    seriesName,
+        subtitle: scene.text,
+        isKey:    scene.isKey ?? false,
+        duration: scene.duration,
+      };
+    });
     await renderFramesWithFfmpeg(frames, result.audio, videoPath, { keyword: content.keyword, seriesName });
     result.video = videoPath;
   } catch (err) {
