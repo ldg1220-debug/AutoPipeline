@@ -351,14 +351,6 @@ async function analyzeAndSuggest(ytMetrics, blogUnderperformers, crossAnalysis) 
   const shortAvgLikes   = avg(shorts, 'likes');
   const longAvgLikes    = avg(longform, 'likes');
 
-  const ytBestStr = ytBest.map((v) =>
-    `  [${v.channel_type}] "${v.title}" — 조회수 ${v.views}, 좋아요 ${v.likes}, 댓글 ${v.comments}`
-  ).join('\n');
-
-  const ytWorstStr = ytWorst.map((v) =>
-    `  [${v.channel_type}] "${v.title}" — 조회수 ${v.views}, 좋아요 ${v.likes}`
-  ).join('\n');
-
   const blogStr = blogUnderperformers.slice(0, 5).map((p) =>
     `  "${p.title}" — 클릭 ${p.clicks}, 노출 ${p.impressions}, ${p.avg_position?.toFixed(1) ?? '-'}위`
   ).join('\n') || '  (데이터 없음)';
