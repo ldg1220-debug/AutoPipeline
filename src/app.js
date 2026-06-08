@@ -187,6 +187,7 @@ const _forceKwIdx = _cliArgs.indexOf('--force-keyword');
 const _forceKeyword = _forceKwIdx !== -1 ? _cliArgs[_forceKwIdx + 1] : null;
 const _forceCatIdx = _cliArgs.indexOf('--force-category');
 const _forceCategory = _forceCatIdx !== -1 ? _cliArgs[_forceCatIdx + 1] : 'economy';
+const _noBlog = _cliArgs.includes('--no-blog');
 
 /**
  * 파이프라인 1회 실행 함수.
@@ -1108,10 +1109,14 @@ if (_isDirectEntry) {
       // 롱폼 unified 파이프라인: 주 1회 (매주 목요일 22:00 KST)
       startScheduler(runUnifiedPipeline, config.runtime.longformCronSchedule);
 
-      // 최초 기동 시 두 파이프라인 모두 순차 실행
+      // 최초 기동 시 두 파이프라인 모두 순차 실행 (--no-blog 시 블로그 생략)
       try {
         const youtubeResult = await runPipeline();
-        await runBlogPipeline(youtubeResult);
+        if (_noBlog) {
+          logger.info('[app] --no-blog 플래그 — 블로그 파이프라인 생략');
+        } else {
+          await runBlogPipeline(youtubeResult);
+        }
       } catch (err) {
         logger.error('[app] Initial run failed', { message: err.message });
       }
