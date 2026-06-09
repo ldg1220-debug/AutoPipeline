@@ -218,6 +218,80 @@ async function checkVideoWithGemini(videoPath) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Gemini 팩트체크 — GPT-4o 와 다른 모델로 교차 검증
+// ─────────────────────────────────────────────────────────────
+const GEMINI_FACTCHECK_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+async function runGeminiFactCheck(content) {
+  if (!config.gemini?.apiKey) return null;
+
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const s = content.shortform_script ?? {};
+  const parts = [];
+
+  if (s.hook || s.insight)
+    parts.push(`[숏폼 스크립트]\n훅: ${s.hook ?? ''}\n컨텍스트: ${s.context ?? ''}\n인사이트: ${s.insight ?? ''}`);
+
+  const longSections = content.long_video?.sections ?? [];
+  if (longSections.length)
+    parts.push(`[롱폼 영상 스크립트]\n${longSections.map((sec) => `${sec.name}: ${sec.script ?? ''}`).join('\n')}`);
+
+  const blogSections = content.blog_draft?.sections ?? [];
+  if (blogSections.length)
+    parts.push(`[블로그 본문]\n${blogSections.map((sec) => `## ${sec.heading}\n${sec.body ?? ''}`).join('\n\n')}`);
+
+  if (parts.length === 0) return null;
+
+  const prompt = `당신은 한국 경제·금융 콘텐츠 팩트체커입니다. 아래 콘텐츠의 사실 정확성을 검수하고 JSON으로만 응답하세요.
+
+오늘 날짜: ${today} (KST)
+
+【반드시 확인할 경제 수치 기준】
+- 달러/원(USD/KRW): 2024년 후반~현재 1,400원 이상. 1,100~1,250원 표현은 오류.
+- 비트코인·암호화폐 가격: 특정 가격 언급 자체가 오류 (실시간 변동).
+- 한국 암호화폐 과세: 2025년부터 시행. 2023년 시행이라고 쓰면 오류.
+- 한국은행 기준금리: 구체적 수치 대신 "금리 변동기" 등 표현 사용해야 함.
+- 2023·2024·2025년 수치를 "올해", "현재", "최신"으로 표현하면 오류 (현재는 2026년).
+
+검수 대상 콘텐츠 (키워드: ${content.keyword}):
+${parts.join('\n\n')}
+
+응답 형식 (JSON만):
+{
+  "gemini_fact_score": 0~100,
+  "issues": ["발견된 오류 1", "발견된 오류 2"],
+  "verdict": "pass" | "warn" | "fail"
+}
+- gemini_fact_score: 100=완전 정확, 오류 1건당 -15~-30점
+- verdict: 90이상=pass, 60~89=warn, 60미만=fail
+- issues: 빈 배열이면 오류 없음`;
+
+  for (const model of GEMINI_FACTCHECK_MODELS) {
+    try {
+      await throttle(2000);
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { timeout: 60000 }
+      );
+      const raw = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const result = JSON.parse(raw);
+      return {
+        gemini_fact_score: result.gemini_fact_score ?? 80,
+        issues: result.issues ?? [],
+        verdict: result.verdict ?? 'pass',
+      };
+    } catch (err) {
+      logger.warn(`[qa_editor] Gemini factcheck (${model}) failed: ${err.message}`);
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────
 // 1단계: 텍스트 QA — 작성 직후, 제작 이전에 실행
 // ─────────────────────────────────────────────────────────────
 
@@ -287,6 +361,26 @@ export async function runTextQA(contentData) {
       logger.warn(`[qa_editor] OPENAI_API_KEY not set. Skipping LLM QA: ${content.keyword}`);
     }
 
+    // ② Gemini 교차 팩트체크 (GPT-4o와 다른 모델로 독립 검증)
+    let geminiFactScore = null;
+    let geminiIssues = [];
+    let geminiVerdict = 'skipped';
+    try {
+      const geminiResult = await runGeminiFactCheck(content);
+      if (geminiResult) {
+        geminiFactScore = geminiResult.gemini_fact_score;
+        geminiIssues = geminiResult.issues ?? [];
+        geminiVerdict = geminiResult.verdict;
+        if (geminiVerdict === 'fail') {
+          logger.warn(`[qa_editor] Gemini 팩트체크 실패 (${content.keyword}): ${geminiIssues.join(' | ')}`);
+        } else {
+          logger.info(`[qa_editor] Gemini 팩트체크 ${geminiVerdict} (${content.keyword})`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`[qa_editor] Gemini factcheck error: ${err.message}`);
+    }
+
     const hookIssues = validateHookQuality(content);
     if (hookIssues.length > 0) {
       logger.warn(`[qa_editor] Hook quality issue: ${content.keyword} | ${hookIssues.join(', ')}`);
@@ -297,6 +391,7 @@ export async function runTextQA(contentData) {
     if (bannedDetected) reasons.push('금지어 감지됨');
     if (grammarCheck === 'FAIL') reasons.push('문법 오류 감지됨');
     if (factScore < 60) reasons.push(`팩트체크 점수 미달 (${factScore}/100)`);
+    if (geminiVerdict === 'fail') reasons.push(`Gemini 팩트체크 실패 (${geminiFactScore}/100): ${geminiIssues.join(', ')}`);
     if (flowScore < 60) reasons.push(`대본 흐름 점수 미달 (${flowScore}/100)`);
     if (hookScore < 60) reasons.push(`훅 흡입력 점수 미달 (${hookScore}/100)`);
     // llmIssues는 참고용으로만 기록 (금융 수치 "확인 필요" 메모로 전량 REJECT되는 문제 방지)
@@ -315,6 +410,9 @@ export async function runTextQA(contentData) {
       cta_score: ctaScore,
       flow_issues: flowIssues,
       flow_suggestions: flowSuggestions,
+      gemini_fact_score: geminiFactScore,
+      gemini_issues: geminiIssues,
+      gemini_verdict: geminiVerdict,
       video_layout_check: 'PENDING',
       audio_sync_check: 'PENDING',
       final_decision: approved ? 'APPROVED' : 'REJECTED',
