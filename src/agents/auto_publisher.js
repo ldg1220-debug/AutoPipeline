@@ -610,9 +610,9 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 2분 미만 시 건너뜀
+    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 3분 미만 시 건너뜀
     if (config.runtime.publishShorts) {
-      // 롱폼 영상 길이 확인 — 2분(120초) 미만이면 영상 자체가 쇼츠급이므로 별도 쇼츠 불필요
+      // 롱폼 영상 길이 확인 — 3분(180초) 미만이면 영상 자체를 Shorts로 업로드하므로 별도 Shorts 불필요
       const safeKw      = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
       const mediaDir_   = path.resolve(__dirname, '../../output/media');
       const longVidPath = path.resolve(mediaDir_, `${safeKw}_long.mp4`);
@@ -621,8 +621,8 @@ export async function publishContents(qaData, contentData) {
       const vidPathForDur = longExists_ ? longVidPath : legacyPath_;
       const longDurSec  = await getVideoDurationSec(vidPathForDur);
 
-      if (longDurSec !== null && longDurSec < 120) {
-        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 2분 → 별도 쇼츠 업로드 건너뜀: ${content.keyword}`);
+      if (longDurSec !== null && longDurSec < 180) {
+        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 3분 → 별도 Shorts 업로드 건너뜀 (영상 자체가 쇼츠 분량): ${content.keyword}`);
         result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped_short_longform' };
       } else {
         await new Promise((r) => setTimeout(r, 8000));
