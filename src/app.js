@@ -392,18 +392,29 @@ async function runPipeline() {
     contents: contentData.contents.filter((c) => approvedKeywords.has(c.keyword)),
   };
 
-  // 롱폼은 runUnifiedPipeline() (목요일 22시 스케줄) 또는 --longform 플래그 시에만 생성.
-  // runPipeline()에서는 long_video 데이터를 무시하고 전체를 숏폼으로 제작한다.
-
+  // 모든 승인 항목에 long_form_creator를 적용하여 2분 30초 영상 구조를 생성한다.
   try {
     if (approvedContentData.contents.length === 0) {
       logger.warn('[app] Agent 2.5 skipped — no text-approved items to produce.');
     } else {
-      // 모든 항목을 숏폼으로 강제 처리 (long_video 무시)
-      const shortsContents = approvedContentData.contents.map((c) => ({ ...c, long_video: undefined }));
-      const mediaResult = await generateAllMedia({ ...approvedContentData, contents: shortsContents });
+      // long_form_creator로 모든 항목의 영상 스크립트 생성 (3섹션, 2분 30초 목표)
+      const longFormContents = [];
+      for (const item of approvedContentData.contents) {
+        logger.info(`[app] 롱폼+쇼츠 생성 시작: "${item.keyword}"`);
+        try {
+          const longForm = await createLongFormAndShorts(item, item.blog_draft ?? null);
+          longFormContents.push({ ...item, long_video: longForm.long_video });
+          logger.info(`[app] 롱폼 생성 완료: "${item.keyword}" (${longForm.long_video?.sections?.length ?? 0}섹션)`);
+        } catch (lfErr) {
+          logger.warn(`[app] 롱폼 생성 실패 "${item.keyword}", content_creator 섹션으로 대체: ${lfErr.message}`);
+          longFormContents.push(item);
+        }
+      }
+
+      const mediaResult = await generateAllMedia({ ...approvedContentData, contents: longFormContents });
       await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
-      logger.info(`[app] Agent 2.5 complete. 숏폼: ${mediaResult.results?.length ?? 0}개`);
+      const longCount = mediaResult.results?.filter((r) => r.video).length ?? 0;
+      logger.info(`[app] Agent 2.5 complete. 롱폼: ${longCount}, 쇼츠: 0`);
     }
   } catch (err) {
     logger.warn('[app] Agent 2.5 (media_generator) failed. Continuing without media.', {
