@@ -5,10 +5,10 @@ import { throttle } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
 
 /**
- * Content triangle: blog draft → long-form video script (10~20 min) + Shorts extraction
+ * Content triangle: blog draft → long-form video script (2분 30초 목표) + Shorts extraction
  *
- * 5단계 스토리텔링 적용: 배경 → 디테일 → 문제 → 반전 → 참여
- * 황금 첫 15초 훅 구조 강화, 자기소개 금지, 10~20분 분량으로 시청 시간 극대화
+ * 3단계 압축 스토리텔링: 훅(45초) → 핵심(60초) → 마무리(45초) = 총 150초
+ * 황금 첫 15초 훅 구조 강화, 자기소개 금지, 절대 2분 30초 초과 금지
  *
  * Returns:
  *   long_video: { title, duration_minutes, sections[{name,duration_seconds,script,key_point}],
@@ -32,13 +32,10 @@ export async function createLongFormAndShorts(item, blogDraft) {
   const prompt =
     `당신은 한국 경제 유튜브 채널 "매일읽어주는남자" 수석 PD입니다.\n\n` +
     `[오늘 날짜] ${today} (KST 기준)\n` +
-    `[🚫 연도 절대 규칙 — 위반 시 전량 재작성]\n` +
-    `  현재는 ${today.slice(0, 4)}년입니다.\n` +
-    `  ✗ 절대 금지: "2023년에", "2024년 현재", "올해 2023", "2025년 기준" — 과거 연도를 현재로 쓰기\n` +
-    `  ✗ 절대 금지: 연도 없이 구체적 수치(금리%, 지수, 정책금액)를 사실처럼 제시\n` +
-    `  ✓ 허용: "○○년 기준 ~였습니다" (연도 명시 + 과거형)\n` +
-    `  ✓ 허용: "최근 몇 년간", "과거에 비해", "당시" 등 시점 비특정 표현\n` +
-    `  ✓ 허용: ${today.slice(0, 4)}년 수치는 확실한 팩트일 때만\n` +
+    `[⚠️ AI 지식 기준점 경고] 학습 데이터는 2023~2024년 기준이지만 지금은 2026년입니다.\n` +
+    `  - 2023·2024·2025년 경제 수치·정책을 "현재" "최신" "올해"로 표현 금지\n` +
+    `  - 시점이 있는 수치는 반드시 "○○년 기준" "당시" 등 연도 명시\n` +
+    `  - 확인 불가한 2026년 수치 창작 금지 — "최근" 등 일반 표현 사용\n` +
     `[키워드] ${item.keyword}\n` +
     `[카테고리] ${item.category ?? '경제'}\n\n` +
     (competitorCtx ? `${competitorCtx}\n\n` : '') +
@@ -54,21 +51,17 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `  5~10초: 이게 왜 나에게 관련 있는지 한 문장 연결 (공감 유발)\n` +
     `  10~15초: 이 영상을 끝까지 봐야 하는 이유 1문장 예고 (호기심 유지)\n` +
     `  → [배경] 섹션 script의 첫 3문장이 이 구조를 반드시 따를 것\n\n` +
-    `【1】 롱폼 영상 스크립트 (5~10분 목표 — 주 1회 정성 제작)\n` +
-    `  ─── 5단계 스토리텔링 구조 필수 ───\n` +
-    `  [배경] 섹션: 왜 지금 이 주제인가? 시청자가 공감할 상황 설정 (훅으로 즉시 시작)\n` +
-    `  [디테일] 섹션×2: 배경의 구체적 데이터, 현황, 수치 심층 전개\n` +
-    `  [문제] 섹션×2: 이 상황이 왜 문제인가? 시청자에게 미치는 구체적 영향\n` +
-    `  [반전] 섹션×1: 시청자가 예상 못 한 사실 or 의외의 해결책/기회\n` +
-    `  [참여] 섹션: 지금 당장 할 수 있는 행동 지침 + 구독/플레이리스트 안내\n` +
-    `  [마무리] 섹션: 핵심 요약 + 다음 영상 예고 (시청 유지)\n\n` +
+    `【1】 롱폼 영상 스크립트 (2분 30초 목표 — 총 150초)\n` +
+    `  ─── 3단계 압축 스토리텔링 구조 필수 ───\n` +
+    `  [훅] 섹션: 충격적 수치 or 반직관적 사실 1문장 → 이 영상을 봐야 하는 이유 연결 (즉시 시작)\n` +
+    `  [핵심] 섹션: 핵심 정보 + 시청자에게 미치는 영향 + 구체적 수치/사례 1개\n` +
+    `  [마무리] 섹션: 핵심 요약 1문장 + 행동 지침 + 다음 영상 예고\n\n` +
     `  세부 조건:\n` +
-    `  - 섹션 6~7개, 각 섹션 60~90초 분량 (총 5~10분)\n` +
-    `  - 각 섹션 시작은 소제목 형식 (시청자가 타임스탬프로 바로 이동 가능)\n` +
+    `  - 섹션 3개, 각 섹션 40~55초 분량 (총 130~160초 — 절대 2분 30초 초과 금지)\n` +
+    `  - 각 섹션 script는 TTS 읽기 기준 40~55초 분량 (한국어 기준 초당 약 5~6자)\n` +
     `  - 전문 용어 사용 즉시 쉬운 말로 풀이\n` +
     `  - 수치는 항상 기준 명시 (예: "1억 원 기준", "서울 평균 기준")\n` +
-    `  - 비유/사례/실생활 예시 섹션당 1개 이상 포함\n` +
-    `  - 중간 CTA (영상 중반부): "이 영상 재생목록에 시리즈 정리해뒀어요" 안내\n\n` +
+    `  - 비유/실생활 예시 1개 이상 포함\n\n` +
     `【2】 숏폼 대본 (55초)\n` +
     `  - 롱폼 중 가장 임팩트 있는 [반전] 섹션에서 추출\n` +
     `  - hook: 최대 12자, ?/!로 끝남, 자기소개 금지\n` +
@@ -85,19 +78,14 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `{\n` +
     `  "long_video": {\n` +
     `    "youtube_title": "유튜브 제목 50자 이내 — 구체적 수치/결과 포함",\n` +
-    `    "duration_minutes": 7,\n` +
+    `    "duration_minutes": 2.5,\n` +
     `    "sections": [\n` +
-    `      {"name":"배경","duration_seconds":75,"script":"훅으로 즉시 시작...","key_point":""},\n` +
-    `      {"name":"디테일1","duration_seconds":80,"script":"...","key_point":""},\n` +
-    `      {"name":"디테일2","duration_seconds":80,"script":"...","key_point":""},\n` +
-    `      {"name":"문제1","duration_seconds":80,"script":"...","key_point":""},\n` +
-    `      {"name":"문제2","duration_seconds":80,"script":"...","key_point":""},\n` +
-    `      {"name":"반전","duration_seconds":90,"script":"...","key_point":""},\n` +
-    `      {"name":"참여","duration_seconds":60,"script":"행동지침 + 재생목록 안내...","key_point":""},\n` +
-    `      {"name":"마무리","duration_seconds":45,"script":"요약 + 다음 영상 예고...","key_point":""}\n` +
+    `      {"name":"훅","duration_seconds":45,"script":"충격적 사실 or 수치로 즉시 시작 (TTS 45초 분량)...","key_point":""},\n` +
+    `      {"name":"핵심","duration_seconds":60,"script":"핵심 정보 + 영향 + 사례 (TTS 60초 분량)...","key_point":""},\n` +
+    `      {"name":"마무리","duration_seconds":45,"script":"요약 1문장 + 행동지침 + 다음 영상 예고 (TTS 45초 분량)...","key_point":""}\n` +
     `    ],\n` +
     `    "youtube_description": "영상 설명 300자 + 타임스탬프 + #해시태그",\n` +
-    `    "timestamps": "00:00 배경\\n01:30 디테일1..."\n` +
+    `    "timestamps": "00:00 훅\\n00:45 핵심\\n01:45 마무리"\n` +
     `  },\n` +
     `  "shorts": {\n` +
     `    "source_section": 6,\n` +
