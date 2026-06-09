@@ -242,9 +242,9 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
   }
 
   if (thumbShortsExists) {
-    // YouTube 처리 대기 후 최대 3회 재시도
-    await new Promise((r) => setTimeout(r, 5000));
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // YouTube Shorts 처리 완료까지 충분히 대기 (5초는 너무 짧아 간헐적 실패 발생)
+    await new Promise((r) => setTimeout(r, 25000));
+    for (let attempt = 1; attempt <= 5; attempt++) {
       try {
         thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbShortsPath, accessToken);
         if (thumbnailUploaded) {
@@ -252,12 +252,12 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
           break;
         }
       } catch (err) {
-        logger.warn(`[auto_publisher] Shorts 썸네일 업로드 실패 (시도 ${attempt}/3): ${err.message}`);
-        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+        logger.warn(`[auto_publisher] Shorts 썸네일 업로드 실패 (시도 ${attempt}/5): ${err.message}`);
+        if (attempt < 5) await new Promise((r) => setTimeout(r, attempt * 10000)); // 10s, 20s, 30s, 40s
       }
     }
     if (!thumbnailUploaded) {
-      logger.warn(`[auto_publisher] Shorts thumbnails.set 3회 모두 실패 → 영상 첫 프레임(2초 인트로)이 커버로 표시됩니다. videoId=${videoId}`);
+      logger.warn(`[auto_publisher] Shorts thumbnails.set 5회 모두 실패 → 영상 첫 프레임이 커버로 표시됩니다. videoId=${videoId}`);
     }
   }
 
