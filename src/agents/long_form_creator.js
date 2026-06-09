@@ -56,9 +56,14 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `  [훅] 섹션: 충격적 수치 or 반직관적 사실 1문장 → 이 영상을 봐야 하는 이유 연결 (즉시 시작)\n` +
     `  [핵심] 섹션: 핵심 정보 + 시청자에게 미치는 영향 + 구체적 수치/사례 1개\n` +
     `  [마무리] 섹션: 핵심 요약 1문장 + 행동 지침 + 다음 영상 예고\n\n` +
-    `  세부 조건:\n` +
-    `  - 섹션 3개, 각 섹션 40~55초 분량 (총 130~160초 — 절대 2분 30초 초과 금지)\n` +
-    `  - 각 섹션 script는 TTS 읽기 기준 40~55초 분량 (한국어 기준 초당 약 5~6자)\n` +
+    `  ⚠️ 분량 필수 조건 (반드시 지킬 것 — 이 기준 미달 시 전체 재작성):\n` +
+    `  - 한국어 TTS 기준: 초당 5~6자 낭독 속도\n` +
+    `  - [훅] script: 최소 230자 이상 (공백 포함) — 45초 분량\n` +
+    `  - [핵심] script: 최소 320자 이상 (공백 포함) — 60초 분량\n` +
+    `  - [마무리] script: 최소 230자 이상 (공백 포함) — 45초 분량\n` +
+    `  - 3섹션 합산 최소 800자 이상 — 총 150초 목표\n` +
+    `  - 글자 수가 기준 미달이면 내용을 추가로 채워 기준을 반드시 충족할 것\n\n` +
+    `  기타 조건:\n` +
     `  - 전문 용어 사용 즉시 쉬운 말로 풀이\n` +
     `  - 수치는 항상 기준 명시 (예: "1억 원 기준", "서울 평균 기준")\n` +
     `  - 비유/실생활 예시 1개 이상 포함\n\n` +
@@ -80,9 +85,9 @@ export async function createLongFormAndShorts(item, blogDraft) {
     `    "youtube_title": "유튜브 제목 50자 이내 — 구체적 수치/결과 포함",\n` +
     `    "duration_minutes": 2.5,\n` +
     `    "sections": [\n` +
-    `      {"name":"훅","duration_seconds":45,"script":"충격적 사실 or 수치로 즉시 시작 (TTS 45초 분량)...","key_point":""},\n` +
-    `      {"name":"핵심","duration_seconds":60,"script":"핵심 정보 + 영향 + 사례 (TTS 60초 분량)...","key_point":""},\n` +
-    `      {"name":"마무리","duration_seconds":45,"script":"요약 1문장 + 행동지침 + 다음 영상 예고 (TTS 45초 분량)...","key_point":""}\n` +
+    `      {"name":"훅","duration_seconds":45,"script":"[반드시 230자 이상] 충격적 사실 or 수치로 즉시 시작. 예: 지금 이 순간에도 많은 직장인들이 매달 자신도 모르게 수십만 원씩 손해를 보고 있습니다. 원인은 단 하나, 환율입니다. 달러가 1,400원을 넘은 지금, 해외 구매 한 번에 내 지갑에서 빠져나가는 금액이 2년 전과 비교해 20% 이상 늘었습니다. 오늘은 실제 숫자와 대처법을 정확히 알려드립니다.","key_point":""},\n` +
+    `      {"name":"핵심","duration_seconds":60,"script":"[반드시 320자 이상] 핵심 정보 + 시청자 영향 + 구체적 수치/사례 포함. 예시와 비유를 곁들여 충분한 분량으로 작성.","key_point":""},\n` +
+    `      {"name":"마무리","duration_seconds":45,"script":"[반드시 230자 이상] 핵심 요약 1문장 + 실천 가능한 행동 지침 + 다음 영상 예고. 충분한 분량으로 마무리.","key_point":""}\n` +
     `    ],\n` +
     `    "youtube_description": "영상 설명 300자 + 타임스탬프 + #해시태그",\n` +
     `    "timestamps": "00:00 훅\\n00:45 핵심\\n01:45 마무리"\n` +
@@ -119,7 +124,20 @@ export async function createLongFormAndShorts(item, blogDraft) {
       }
     );
     const result = JSON.parse(res.data.choices[0].message.content);
-    logger.info(`[long_form_creator] Created long-form + shorts for: "${item.keyword}"`);
+
+    // 섹션 글자 수 검증 — 기준 미달 시 경고 로그
+    const minChars = { '훅': 230, '핵심': 320, '마무리': 230 };
+    const sections = result.long_video?.sections ?? [];
+    let totalChars = 0;
+    for (const sec of sections) {
+      const len = (sec.script ?? '').length;
+      totalChars += len;
+      const min = minChars[sec.name];
+      if (min && len < min) {
+        logger.warn(`[long_form_creator] 섹션 "${sec.name}" 글자 수 미달: ${len}자 < ${min}자 (${item.keyword})`);
+      }
+    }
+    logger.info(`[long_form_creator] Created long-form + shorts for: "${item.keyword}" (스크립트 총 ${totalChars}자)`);
     return result;
   } catch (err) {
     logger.error(`[long_form_creator] Failed for "${item.keyword}": ${err.message}`);
