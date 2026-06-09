@@ -214,9 +214,9 @@ async function pass4FactCheck(keyword, sections) {
 // ── Pass 5: Claude 독립 검수 ──────────────────────────────────────────────
 // GPT가 작성한 글을 다른 모델(Claude)이 교차 검증한다.
 // 같은 모델의 자기 검증 한계를 극복하기 위한 별도 에이전트.
-async function pass5ClaudeReview(keyword, sections, today) {
-  if (!config.anthropic?.apiKey) {
-    logger.warn('[blog_content_enhancer] ANTHROPIC_API_KEY 없음 — Pass 5 건너뜀');
+async function pass5GeminiReview(keyword, sections, today) {
+  if (!config.gemini?.apiKey) {
+    logger.warn('[blog_content_enhancer] GEMINI_API_KEY 없음 — Pass 5 건너뜀');
     return { sections, issues: [], verdict: 'skipped' };
   }
 
@@ -247,49 +247,47 @@ async function pass5ClaudeReview(keyword, sections, today) {
     `  "sections": [{"heading": "섹션 제목", "body": "교정된 본문 또는 원문"}, ...]\n` +
     `}`;
 
-  try {
-    await throttle(2000);
-    const res = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 8000,
-        messages: [{ role: 'user', content: prompt }],
-      },
-      {
-        headers: {
-          'x-api-key': config.anthropic.apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
+  const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      await throttle(2000);
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { response_mime_type: 'application/json' },
         },
-        timeout: 90000,
+        { timeout: 90000 }
+      );
+
+      const text  = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('JSON 파싱 실패');
+      const result = JSON.parse(match[0]);
+
+      if (!Array.isArray(result.sections) || result.sections.length !== sections.length) {
+        throw new Error(`섹션 수 불일치: ${result.sections?.length} vs ${sections.length}`);
       }
-    );
 
-    const text  = res.data.content?.[0]?.text ?? '{}';
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('JSON 파싱 실패');
-    const result = JSON.parse(match[0]);
+      if (result.issues_found?.length > 0) {
+        logger.warn(`[blog_content_enhancer] Pass 5 이슈 발견 (${result.verdict}, ${model}): ${result.issues_found.join(' | ')}`);
+      } else {
+        logger.info(`[blog_content_enhancer] Pass 5 검수 완료 (${result.verdict}, ${model}): ${keyword}`);
+      }
 
-    if (!Array.isArray(result.sections) || result.sections.length !== sections.length) {
-      throw new Error(`섹션 수 불일치: ${result.sections?.length} vs ${sections.length}`);
+      return {
+        sections: result.sections,
+        issues:   result.issues_found ?? [],
+        verdict:  result.verdict,
+      };
+    } catch (err) {
+      logger.warn(`[blog_content_enhancer] Pass 5 ${model} 실패 (${err.message}), 다음 모델 시도`);
     }
-
-    if (result.issues_found?.length > 0) {
-      logger.warn(`[blog_content_enhancer] Pass 5 이슈 발견 (${result.verdict}): ${result.issues_found.join(' | ')}`);
-    } else {
-      logger.info(`[blog_content_enhancer] Pass 5 검수 완료 (${result.verdict}): ${keyword}`);
-    }
-
-    return {
-      sections: result.sections,
-      issues:   result.issues_found ?? [],
-      verdict:  result.verdict,
-    };
-  } catch (err) {
-    logger.warn(`[blog_content_enhancer] Pass 5 실패 (${err.message}), Pass 4 결과 사용`);
-    return { sections, issues: [], verdict: 'skipped' };
   }
+
+  logger.warn('[blog_content_enhancer] Pass 5 모든 Gemini 모델 실패 — Pass 4 결과 사용');
+  return { sections, issues: [], verdict: 'skipped' };
 }
 
 // JSON-LD Article 스키마 생성
@@ -432,7 +430,7 @@ async function enhanceBlogDraft(content) {
   // Pass 5: Claude 교차 검수 — 다른 모델로 독립 팩트체크
   const today5 = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   logger.info(`[blog_content_enhancer] Pass 5 (Claude review): ${keyword}`);
-  const reviewResult = await pass5ClaudeReview(keyword, checkedSections, today5);
+  const reviewResult = await pass5GeminiReview(keyword, checkedSections, today5);
   const finalSections = reviewResult.sections;
 
   const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
