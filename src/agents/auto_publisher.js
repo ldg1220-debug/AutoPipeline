@@ -194,9 +194,10 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
   const shortsCoupangLine = shortsCoupang
     ? `🛒 ${shortsCoupang.url}\n`
     : '';
+  const shortsAiDisclosure = `\n\n⚠️ AI 제작 콘텐츠 (TTS·이미지·스크립트 포함)`;
   const shortsDesc  = description.includes('#Shorts')
-    ? `${shortsCoupangLine}${description}${longFormLine}`
-    : `${shortsCoupangLine}${description}${longFormLine}\n\n#Shorts`;
+    ? `${shortsCoupangLine}${description}${longFormLine}${shortsAiDisclosure}`
+    : `${shortsCoupangLine}${description}${longFormLine}${shortsAiDisclosure}\n\n#Shorts`;
   const shortsTags  = tags.includes('Shorts') ? tags : [...tags, 'Shorts', '쇼츠'];
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
@@ -319,7 +320,11 @@ async function publishToYouTube(content, accessToken, scheduleForTomorrow = true
   const coupangLine = coupangLink
     ? `\n\n🛒 관련 추천: ${coupangLink.url}\n(이 링크는 쿠팡 파트너스 링크로, 구매 시 일정 수수료를 받을 수 있습니다)`
     : '';
-  const finalDescription = description + coupangLine;
+
+  // AI 생성 콘텐츠 고지 (YouTube 정책 준수)
+  const aiDisclosure = `\n\n---\n⚠️ 이 영상은 AI 기술을 활용하여 제작되었습니다.\n음성(TTS), 이미지, 스크립트 등이 AI로 생성된 콘텐츠를 포함합니다.`;
+
+  const finalDescription = description + coupangLine + aiDisclosure;
 
   const metadata = {
     snippet: {
@@ -599,6 +604,15 @@ export async function publishContents(qaData, contentData) {
     const todayCount = await getTodayLongFormCount();
     const scheduleForTomorrow = todayCount > 0;
     logger.info(`[auto_publisher] 오늘(KST) 롱폼 업로드 수: ${todayCount} → ${scheduleForTomorrow ? '다음 날 7:15 예약' : '즉시 공개'}`);
+
+    // 스팸 방지: 예약 포함 하루 최대 2개 업로드 제한
+    const DAILY_UPLOAD_LIMIT = 2;
+    if (todayCount >= DAILY_UPLOAD_LIMIT) {
+      logger.warn(`[auto_publisher] 일일 업로드 한도 도달 (${todayCount}/${DAILY_UPLOAD_LIMIT}), 건너뜀: ${content.keyword}`);
+      result.youtube = { platform: 'youtube', status: 'skipped_daily_limit' };
+      results.push(result);
+      continue;
+    }
 
     // 롱폼 업로드
     try {
