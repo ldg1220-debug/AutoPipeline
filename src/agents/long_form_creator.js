@@ -5,6 +5,9 @@ import { throttle } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt } from './competitor_analyzer.js';
 
 /**
+ * [역할: Writer (롱폼 최종본)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+ * QA를 통과한 항목에만 호출되는 최종 발행본 작가. content_creator.js의 초안과는 다른 단계임.
+ *
  * Content triangle: blog draft → long-form video script (2분 30초 목표) + Shorts extraction
  *
  * 3단계 압축 스토리텔링: 훅(45초) → 핵심(60초) → 마무리(45초) = 총 150초

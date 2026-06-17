@@ -145,4 +145,22 @@
 
 ---
 
+## 2026-06-17
+
+### D-011: 에이전트 역할/워크플로우 문서화 — docs/AGENT_WORKFLOW.md 신설
+- **결정**: 참고한 멀티 에이전트 블로그 제작 스크립트(Researcher→Writer→Image Maker→Assembler,
+  thin orchestrator)의 역할 분리 원칙을 AutoPipeline 기존 에이전트에 매핑한 문서를 추가.
+  각 핵심 에이전트 파일 상단에 `[역할: ...]` 주석 추가.
+- **버린 대안**: `content_creator.js`의 `generateLongVideoScript()`를 제거하고 `long_form_creator.js`로
+  완전히 통합하는 큰 리팩터 — 표면적으로는 중복처럼 보이지만, 실제로는 텍스트 QA 게이트
+  통과 전 저비용 초안(QA 판단용)과 QA 통과 후 최종 발행본(비용이 큼)으로 의도적으로 분리된 구조였음.
+  통합하면 QA 탈락 항목에도 비싼 최종본 생성 비용이 들어가 오히려 비용이 늘어남.
+- **근거**: 코드를 합치는 대신 "왜 두 곳에 롱폼 작가가 있는지"를 문서화하는 쪽이 위험 없이
+  같은 문제(역할 불명확성)를 해결함. 새 에이전트 추가 시 역할 중복 여부를 먼저 표로 확인하게 함.
+- **관련 파일**: `docs/AGENT_WORKFLOW.md`, `src/agents/content_creator.js`,
+  `src/agents/long_form_creator.js`, `src/agents/blog_asset_builder.js`,
+  `src/agents/blog_content_enhancer.js`
+
+---
+
 *새 결정 발생 시 위 포맷에 맞춰 즉시 추가*

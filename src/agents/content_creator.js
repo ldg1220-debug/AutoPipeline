@@ -13,6 +13,10 @@ const __dirname = path.dirname(__filename);
 const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 /**
+ * [역할: Writer (숏폼 + 롱폼 초안)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+ * generateLongVideoScript()의 결과는 QA 게이트 통과 여부 판단용 "초안"이며,
+ * 실제 발행되는 최종 롱폼 대본은 long_form_creator.js가 별도로 생성한다. (의도된 구조 — 합치지 말 것)
+ *
  * 숏폼 대본 구조 (2분 30초 완결형) — 5단계 스토리텔링 적용:
  *   hook     (0~8초)   : 배경(Background) — 최대 12자, ?/!로 끝남. 자기소개/인사 절대 금지.
  *   context  (8~40초)  : 디테일(Detail) — 구체적 수치·상황 전개 (150~200자)

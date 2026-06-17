@@ -8,6 +8,9 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 
+// [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+// 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

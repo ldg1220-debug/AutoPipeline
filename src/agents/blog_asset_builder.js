@@ -8,6 +8,10 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
 
+// [역할: Image Maker] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+// 가이드 파일(prompts/image_guide.md)에 정의된 규칙을 LLM 프롬프트에 주입하고,
+// 자체 검수(Gemini Vision)까지 책임지는 단일 책임 에이전트.
+
 const require = createRequire(import.meta.url);
 const sharp = require('sharp');
 
