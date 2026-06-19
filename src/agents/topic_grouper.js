@@ -266,10 +266,19 @@ export async function groupSimilarTopics(contentData) {
   logger.info(`[topic_grouper] ${keywords.length}개 키워드: [${keywords.join(', ')}]`);
   logger.info(`[topic_grouper] Primary: ${primaryModel} / Reviewer: ${reviewerModel}`);
 
-  // 1차 그룹핑
-  let groups     = await clusterWithModel(primaryModel, keywords);
-  let usedModel  = primaryModel;
-  let escalated  = false;
+  // 1차 그룹핑 — 실패(레이트리밋/결제한도 등) 시에도 다음 사다리 모델로 즉시 폴백
+  let groups, usedModel, escalated = false;
+  try {
+    groups    = await clusterWithModel(primaryModel, keywords);
+    usedModel = primaryModel;
+  } catch (err) {
+    const nextModel = ESCALATION_LADDER[ladderIdx + 1];
+    if (!nextModel || (isAnthropicModel(nextModel) && !config.anthropic.apiKey)) throw err;
+    logger.warn(`[topic_grouper] ${primaryModel} 실패(${err.message}), ${nextModel}로 폴백`);
+    groups    = await clusterWithModel(nextModel, keywords);
+    usedModel = nextModel;
+    escalated = true;
+  }
 
   // 검수
   const review = await reviewGroupings(keywords, groups, reviewerModel);
@@ -282,7 +291,7 @@ export async function groupSimilarTopics(contentData) {
   // 점수 미달 시 에스컬레이션
   if (review.verdict === 'RETRY' || review.score < threshold) {
     const nextModel = ESCALATION_LADDER[ladderIdx + 1];
-    if (nextModel && nextModel !== primaryModel) {
+    if (nextModel && nextModel !== usedModel) {
       logger.info(`[topic_grouper] Escalating to: ${nextModel}`);
       groups    = await clusterWithModel(nextModel, keywords);
       usedModel = nextModel;

@@ -67,51 +67,99 @@ function fillTemplate(template, vars) {
   );
 }
 
-// GPT-4o: 고품질 본문
-async function callGPT4o(prompt, jsonMode = true) {
-  const response = await retryOn429(() =>
-    axios.post(
-      'https://api.openai.com/v1/chat/completions',
+// 보조 모델 — OpenAI 실패(레이트리밋/결제한도) 시 Anthropic Claude로 폴백
+async function callClaudeFallback(prompt, jsonMode) {
+  if (!config.anthropic.apiKey) return null;
+  try {
+    const res = await axios.post(
+      'https://api.anthropic.com/v1/messages',
       {
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: jsonMode ? `${prompt}\n\n반드시 순수 JSON만 응답하세요. 다른 설명 텍스트 없이.` : prompt,
+        }],
       },
       {
         headers: {
-          Authorization: `Bearer ${config.openai.apiKey}`,
+          'x-api-key': config.anthropic.apiKey,
+          'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json',
         },
         timeout: 60000,
       }
-    )
-  );
-  const content = response.data.choices[0].message.content;
-  return jsonMode ? JSON.parse(content) : content;
+    );
+    const text = res.data.content?.[0]?.text ?? '';
+    if (!jsonMode) return text;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Claude 응답에서 JSON을 찾지 못함');
+    return JSON.parse(match[0]);
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] Claude fallback도 실패: ${err.message}`);
+    return null;
+  }
+}
+
+// GPT-4o: 고품질 본문
+async function callGPT4o(prompt, jsonMode = true) {
+  try {
+    const response = await retryOn429(() =>
+      axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${config.openai.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 60000,
+        }
+      )
+    );
+    const content = response.data.choices[0].message.content;
+    return jsonMode ? JSON.parse(content) : content;
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] gpt-4o 실패, Claude로 폴백 시도: ${err.message}`);
+    const fallback = await callClaudeFallback(prompt, jsonMode);
+    if (fallback !== null) return fallback;
+    throw err;
+  }
 }
 
 // GPT-4o-mini: 아웃라인 등 구조 생성 (비용 절감)
 async function callGPT4oMini(prompt) {
-  const response = await retryOn429(() =>
-    axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.5,
-        response_format: { type: 'json_object' },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.openai.apiKey}`,
-          'Content-Type': 'application/json',
+  try {
+    const response = await retryOn429(() =>
+      axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.5,
+          response_format: { type: 'json_object' },
         },
-        timeout: 90000,
-      }
-    )
-  );
-  return JSON.parse(response.data.choices[0].message.content);
+        {
+          headers: {
+            Authorization: `Bearer ${config.openai.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 90000,
+        }
+      )
+    );
+    return JSON.parse(response.data.choices[0].message.content);
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] gpt-4o-mini 실패, Claude로 폴백 시도: ${err.message}`);
+    const fallback = await callClaudeFallback(prompt, true);
+    if (fallback !== null) return fallback;
+    throw err;
+  }
 }
 
 // ── Pass 1: 검색 의도 분석 ──────────────────────────────────────────────────

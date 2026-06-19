@@ -335,3 +335,18 @@
   올리거나 결제수단을 확인해야 하는 문제 — 다음 로그부터는 "rate limit"과 "billing"을
   명확히 구분해서 보여줘야 사용자가 헛수고하지 않음.
 - **관련 파일**: `src/utils/rateLimiter.js`
+
+### D-026: OpenAI 실패 시 Anthropic Claude로 자동 폴백
+- **결정**: 사용자가 "OpenAI 대신 다른 API 쓰면 안 되냐"고 요청 — 이미 `.env.example`에
+  `ANTHROPIC_API_KEY`가 준비돼 있고 `topic_grouper.js`는 검수용 에스컬레이션에 Claude를
+  쓰고 있었지만, 정작 블로그 본문을 생성하는 `blog_content_enhancer.js`(Pass1~3)는
+  OpenAI 전용이라 OpenAI가 막히면(레이트리밋·결제한도) 전체 블로그 파이프라인이 0건
+  생산으로 멈췄음.
+  - `blog_content_enhancer.js`: `callGPT4o`/`callGPT4oMini`가 OpenAI 실패 시
+    `callClaudeFallback()`(claude-sonnet-4-6)으로 자동 전환. JSON 모드는 프롬프트에
+    "순수 JSON만 응답" 지시를 덧붙이고 응답에서 `{...}` 블록을 추출해 파싱.
+  - `topic_grouper.js`: 1차 그룹핑(`clusterWithModel(primaryModel, ...)`)이 실패하면
+    (기존엔 품질 점수 낮을 때만 에스컬레이션) 즉시 다음 사다리 모델(Claude)로 폴백하도록 수정.
+- **트레이드오프**: `ANTHROPIC_API_KEY`가 `.env`에 설정돼 있어야 폴백이 동작함 — 키가 없으면
+  기존과 동일하게 원래 에러를 그대로 던짐(동작 변화 없음, 안전).
+- **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/topic_grouper.js`
