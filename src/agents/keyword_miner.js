@@ -205,10 +205,20 @@ function filterNewKeywords(scored) {
     /edi$/i,          // 국민연금edi, 건강보험edi — 시스템 검색어, 콘텐츠 가치 낮음
   ];
 
+  // 키워드에 박힌 연도가 올해(currentYear)보다 오래된 경우 제외
+  // (네이버 자동완성/데이터랩이 "선스틱 추천 2024" 같은 과거 연도 키워드를 그대로 반환함)
+  const currentYear = new Date().getFullYear();
+
   return scored.filter(({ keyword }) => {
     // 브랜드·고유명사 제외
     if (BRAND_PATTERNS.some((re) => re.test(keyword))) {
       logger.debug(`[keyword_miner] 블랙리스트 제외: "${keyword}"`);
+      return false;
+    }
+
+    const yearMatch = keyword.match(/\b(20\d{2})\b/);
+    if (yearMatch && Number(yearMatch[1]) < currentYear) {
+      logger.debug(`[keyword_miner] 과거 연도 키워드 제외: "${keyword}"`);
       return false;
     }
 
