@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn429 } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -39,21 +39,23 @@ function isAnthropicModel(model) {
 }
 
 async function callOpenAI(model, prompt) {
-  const res = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        'Content-Type': 'application/json',
+  const res = await retryOn429(() =>
+    axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
       },
-      timeout: 25000,
-    }
+      {
+        headers: {
+          Authorization: `Bearer ${config.openai.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 25000,
+      }
+    )
   );
   return JSON.parse(res.data.choices[0].message.content);
 }

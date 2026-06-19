@@ -65,6 +65,15 @@ Blog 파이프라인 (runBlogPipeline):
   대응 — 효과는 신규 발행 누적 후 확인 필요 (기존 발행물 일괄 개선 수단은 없음: 기존
   `identifyUnderperformers`/`rewriteUnderperformers`는 클릭률 기준이라 콘텐츠 깊이와는
   무관함을 확인함).
+- **(2026-06-19)** 사용자 실제 실행 로그에서 발견된 3건 수정 완료(D-020~D-022):
+  YouTube 자동완성 100% 실패 버그, OpenAI 429 캐스케이드로 인한 블로그 QA 100% 탈락,
+  YouTube 계정 삭제로 무효화된 OAuth 토큰이 매번 401/400 에러 발생시키던 것 스킵 처리.
+  남은 미해결: `competitor_analyzer`의 Naver 블로그 검색 401 — Naver Search API
+  client id/secret 자체가 만료/누락된 것으로 보임(코드 버그 아님), 사용자가 `.env`의
+  Naver API 키 재발급/확인 필요.
+- **(2026-06-19)** 사용자가 제공한 티스토리 제품 리스티클(쿠팡 파트너스) 스타일 참고자료를
+  `prompts/blog_pass_product_listicle.md`로 문서화(D-019). 기존 정보형 글과 구조가 달라
+  파이프라인에는 아직 연결 안 함 — 적용 범위(카테고리/콘텐츠 타입) 결정 필요.
 
 ---
 

@@ -245,3 +245,42 @@
   발생. 탈락 항목이 있으면 최종 후보 수가 topN보다 줄어들 수 있음 (재보충 로직은 넣지 않음 —
   과도하게 복잡해질 우려, 콘텐츠 품질이 양보다 중요하다고 판단).
 - **관련 파일**: `src/agents/keyword_miner.js`
+
+### D-019: 티스토리 제품 리스티클 스타일 — 참고 문서로만 추가, 파이프라인 미연결
+- **결정**: 사용자가 제공한 쿠팡 파트너스형 제품 리스티클 글(`tistory_style_1/3.txt`) 패턴을
+  `prompts/blog_pass_product_listicle.md`로 문서화. 기존 정보형 글(blog_pass1~3)과 구조·어조가
+  완전히 달라(3개 제품 고정 포맷, 구매 유도 목적) 그대로 끼워 넣으면 기존 글 형식을 깨뜨릴
+  위험이 있어, 실제 파이프라인 연결은 보류하고 참고 가이드만 작성.
+- **버린 대안**: blog_pass2/3 프롬프트에 바로 병합 — Naver 스타일처럼 톤만 흡수하는 정도가
+  아니라 글 구조 자체(3개 제품+CTA)가 다르므로 잘못 병합하면 기존 경제/시사 카테고리 글이
+  뜬금없이 제품 추천형으로 깨질 위험이 큼.
+- **보류된 결정 사항**: 어느 카테고리에 적용할지, 제품 데이터를 `monetizer.js`의
+  `searchCoupangProducts()`에서 가져올지, 기존 QA 섹션 수 기준을 이 포맷에 맞게 따로 둘지 —
+  세 가지 모두 사용자 확인 필요.
+- **관련 파일**: `prompts/blog_pass_product_listicle.md`
+
+### D-020: YouTube 자동완성 응답 파싱 버그 수정 (`suggestions.map is not a function`)
+- **결정**: `fetchYouTubeSuggest()`에서 `client=youtube` 파라미터만으로는 Google suggest
+  엔드포인트가 JSON 배열이 아닌 문자열을 반환하는 경우가 있어 `res.data?.[1]`이 배열이 아닌
+  단일 문자가 되어 `.map`이 깨지던 버그 수정. `ds=yt` 파라미터 추가 + 응답이 문자열이면
+  `JSON.parse` 시도 + `Array.isArray` 가드 추가.
+- **근거**: 사용자 실행 로그에서 30개 시드 전부 100% 실패로 재현 확인.
+- **관련 파일**: `src/agents/keyword_miner.js`
+
+### D-021: OpenAI 429 캐스케이드 실패 방지 — 공용 재시도 유틸 추가
+- **결정**: `src/utils/rateLimiter.js`에 `retryOn429()` 추가 (지수 백오프, `Retry-After`
+  헤더 우선 사용). `topic_grouper.js`(callOpenAI), `blog_content_enhancer.js`(callGPT4o/
+  callGPT4oMini), `blog_asset_builder.js`(통계 추출/헤드라인 생성) 호출에 적용.
+- **근거**: 사용자 실행 로그에서 16개 토픽 전부가 429로 실패 → QA 100% 탈락(섹션 0개)으로
+  이어짐. 기존엔 429를 그냥 throw해서 해당 토픽 전체를 포기하는 구조였음.
+- **트레이드오프**: 재시도 시 전체 실행 시간이 늘어날 수 있음(최대 3회, 누적 최대 약 21초
+  대기). 그래도 토픽 전체 폐기보다는 낫다고 판단.
+- **관련 파일**: `src/utils/rateLimiter.js`, `src/agents/topic_grouper.js`,
+  `src/agents/blog_content_enhancer.js`, `src/agents/blog_asset_builder.js`
+
+### D-022: competitor_analyzer YouTube 분석을 영상 파이프라인 비활성 시 스킵
+- **결정**: `analyzeCompetitors()`의 `doYoutube` 조건에 `config.runtime.videoPipelineEnabled`
+  추가 — 꺼져 있으면 YouTube 경쟁사 분석 자체를 건너뜀.
+- **근거**: 유튜브 계정 삭제로 OAuth refresh token이 무효화되어 매 실행마다 401/400 에러만
+  반복 발생하고 있었음. 영상 파이프라인이 다시 켜지기 전까지는 분석할 의미도 없음.
+- **관련 파일**: `src/agents/competitor_analyzer.js`

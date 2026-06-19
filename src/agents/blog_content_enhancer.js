@@ -5,7 +5,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn429 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
@@ -69,21 +69,23 @@ function fillTemplate(template, vars) {
 
 // GPT-4o: 고품질 본문
 async function callGPT4o(prompt, jsonMode = true) {
-  const response = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        'Content-Type': 'application/json',
+  const response = await retryOn429(() =>
+    axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
       },
-      timeout: 60000,
-    }
+      {
+        headers: {
+          Authorization: `Bearer ${config.openai.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      }
+    )
   );
   const content = response.data.choices[0].message.content;
   return jsonMode ? JSON.parse(content) : content;
@@ -91,21 +93,23 @@ async function callGPT4o(prompt, jsonMode = true) {
 
 // GPT-4o-mini: 아웃라인 등 구조 생성 (비용 절감)
 async function callGPT4oMini(prompt) {
-  const response = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.5,
-      response_format: { type: 'json_object' },
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        'Content-Type': 'application/json',
+  const response = await retryOn429(() =>
+    axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.5,
+        response_format: { type: 'json_object' },
       },
-      timeout: 90000,
-    }
+      {
+        headers: {
+          Authorization: `Bearer ${config.openai.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 90000,
+      }
+    )
   );
   return JSON.parse(response.data.choices[0].message.content);
 }

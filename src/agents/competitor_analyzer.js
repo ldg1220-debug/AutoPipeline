@@ -492,7 +492,9 @@ export async function analyzeCompetitors(
 
   const cache = await loadCache();
 
-  const doYoutube = forceYoutube || !isYouTubeFresh(cache);
+  // 영상 파이프라인이 꺼져 있으면 (예: 유튜브 계정 삭제) YouTube 경쟁사 분석은
+  // 의미가 없고 만료된 OAuth 토큰으로 401/400 에러만 반복 발생시키므로 스킵한다.
+  const doYoutube = config.runtime.videoPipelineEnabled && (forceYoutube || !isYouTubeFresh(cache));
   const doBlog    = forceBlog    || !isBlogFresh(cache);
 
   if (!doYoutube && !doBlog) {

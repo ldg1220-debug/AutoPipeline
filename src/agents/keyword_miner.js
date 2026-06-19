@@ -81,11 +81,21 @@ async function fetchGoogleSuggest(seed) {
 async function fetchYouTubeSuggest(seed) {
   try {
     const res = await axios.get('https://suggestqueries.google.com/complete/search', {
-      params: { client: 'youtube', hl: 'ko', gl: 'kr', q: seed },
+      // ds=yt 가 없으면 client=youtube 응답이 JSON 배열이 아닌 문자열로 와서
+      // res.data?.[1] 이 배열이 아닌 단일 문자가 되어 .map 호출이 깨지는 경우가 있음
+      params: { client: 'youtube', ds: 'yt', hl: 'ko', gl: 'kr', q: seed },
       headers: { 'User-Agent': 'Mozilla/5.0' },
       timeout: 8000,
     });
-    const suggestions = res.data?.[1] ?? [];
+    let data = res.data;
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        data = null;
+      }
+    }
+    const suggestions = Array.isArray(data?.[1]) ? data[1] : [];
     return suggestions.map((kw, idx) => ({ keyword: kw, rank: idx, source: 'youtube' }));
   } catch (err) {
     logger.warn(`[keyword_miner] YouTube suggest failed for "${seed}": ${err.message}`);

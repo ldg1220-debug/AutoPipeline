@@ -34,3 +34,31 @@ export function withThrottle(fn, minIntervalMs = 1500, namespace = 'default') {
     return fn(...args);
   };
 }
+
+/**
+ * 429(rate limit) 응답을 받으면 지수 백오프 후 재시도한다.
+ * OpenAI 등에서 짧은 시간에 다수 요청이 몰려 전체 파이프라인이
+ * 통째로 실패하는 것을 막기 위한 공용 래퍼.
+ *
+ * @param {Function} fn         - axios 호출 등 Promise를 반환하는 함수
+ * @param {Object}   opts
+ * @param {number}   opts.retries     - 최대 재시도 횟수 (기본 3)
+ * @param {number}   opts.baseDelayMs - 첫 재시도 대기 시간 (기본 3000ms, 이후 2배씩 증가)
+ */
+export async function retryOn429(fn, { retries = 3, baseDelayMs = 3000 } = {}) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status !== 429 || attempt >= retries) throw err;
+      const retryAfterHeader = Number(err.response?.headers?.['retry-after']);
+      const delay = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+        ? retryAfterHeader * 1000
+        : baseDelayMs * 2 ** attempt;
+      attempt += 1;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
