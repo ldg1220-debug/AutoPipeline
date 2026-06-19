@@ -1085,36 +1085,58 @@ if (_isDirectEntry) {
       logger.info(`[app] --force-keyword 모드: "${_forceKeyword}" (카테고리: ${_forceCategory})`);
     }
 
-    const doYouTubeUpload = await askUploadOption();
-    config.runtime.youtubeUpload = doYouTubeUpload;
+    if (config.runtime.videoPipelineEnabled) {
+      const doYouTubeUpload = await askUploadOption();
+      config.runtime.youtubeUpload = doYouTubeUpload;
 
-    if (!doYouTubeUpload) {
-      logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+      if (!doYouTubeUpload) {
+        logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+      }
+    } else {
+      config.runtime.youtubeUpload = false;
+    }
+
+    if (!config.runtime.videoPipelineEnabled) {
+      logger.info('[app] VIDEO_PIPELINE_ENABLED=false — 영상(YouTube) 파이프라인 전체 중단, 블로그만 운영.');
     }
 
     if (config.runtime.dryRun) {
       logger.info('[app] DRY_RUN mode — running once and exiting.');
-      runPipeline().then(() => process.exit(0));
+      if (config.runtime.videoPipelineEnabled) {
+        runPipeline().then(() => process.exit(0));
+      } else {
+        runBlogPipeline().then(() => process.exit(0));
+      }
     } else {
-      // 숏폼 파이프라인: A슬롯(매일 12:00 KST) + B슬롯(매일 14:00 KST)
-      startScheduler(runPipeline, config.runtime.cronSchedule);
-      startScheduler(runPipeline, config.runtime.cronScheduleB);
+      if (config.runtime.videoPipelineEnabled) {
+        // 숏폼 파이프라인: A슬롯(매일 12:00 KST) + B슬롯(매일 14:00 KST)
+        startScheduler(runPipeline, config.runtime.cronSchedule);
+        startScheduler(runPipeline, config.runtime.cronScheduleB);
+        // 롱폼 unified 파이프라인: 주 1회 (매주 목요일 22:00 KST)
+        startScheduler(runUnifiedPipeline, config.runtime.longformCronSchedule);
+      }
       // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
       startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
       startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
-      // 롱폼 unified 파이프라인: 주 1회 (매주 목요일 22:00 KST)
-      startScheduler(runUnifiedPipeline, config.runtime.longformCronSchedule);
       // 실적 검토: 매주 월요일 오전 9시 KST (0 0 * * 1)
       const perfCron = process.env.PERF_REVIEW_CRON || '0 0 * * 1';
       startScheduler(runPerformanceReview, perfCron);
 
-      // 최초 기동 시 두 파이프라인 모두 순차 실행 (--no-blog 시 블로그 생략)
+      // 최초 기동 시 파이프라인 순차 실행 (--no-blog 시 블로그 생략)
       try {
-        const youtubeResult = await runPipeline();
-        if (_noBlog) {
-          logger.info('[app] --no-blog 플래그 — 블로그 파이프라인 생략');
+        if (!config.runtime.videoPipelineEnabled) {
+          if (_noBlog) {
+            logger.info('[app] --no-blog 플래그 — 블로그 파이프라인 생략 (영상도 중단 상태라 실행할 게 없음)');
+          } else {
+            await runBlogPipeline();
+          }
         } else {
-          await runBlogPipeline(youtubeResult);
+          const youtubeResult = await runPipeline();
+          if (_noBlog) {
+            logger.info('[app] --no-blog 플래그 — 블로그 파이프라인 생략');
+          } else {
+            await runBlogPipeline(youtubeResult);
+          }
         }
       } catch (err) {
         logger.error('[app] Initial run failed', { message: err.message });

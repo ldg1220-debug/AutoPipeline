@@ -149,6 +149,9 @@ export const config = {
   },
   runtime: {
     dryRun:           process.env.DRY_RUN === 'true',
+    // YouTube 계정 삭제(2026-06) 이후 false — 영상 제작/업로드 파이프라인 전체 중단, 블로그만 운영
+    // 새 채널 생성 후 true로 되돌리면 영상 파이프라인 재개
+    videoPipelineEnabled: process.env.VIDEO_PIPELINE_ENABLED !== 'false',
     publishShorts:    process.env.PUBLISH_SHORTS !== 'false',  // false로 설정 시 쇼츠 업로드 건너뜀
     youtubeUpload:    process.env.YOUTUBE_UPLOAD !== 'false',  // false로 설정 시 YouTube 업로드 전체 건너뜀
     dailyVideos:      parseInt(process.env.DAILY_VIDEOS || '1', 10), // 하루 최대 롱폼 영상 수 (기본 1)

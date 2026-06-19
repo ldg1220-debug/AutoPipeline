@@ -181,4 +181,17 @@
 
 ---
 
-*새 결정 발생 시 위 포맷에 맞춰 즉시 추가*
+## 2026-06-19 (2)
+
+### D-013: YouTube 계정 삭제 — 영상 파이프라인 전체 중단
+- **결정**: `VIDEO_PIPELINE_ENABLED` 환경변수(기본 true) 추가. false로 설정 시 `src/app.js`에서
+  숏폼(`runPipeline`)·롱폼 unified(`runUnifiedPipeline`) 스케줄러/실행을 전부 건너뛰고
+  블로그 파이프라인(`runBlogPipeline`)만 동작. 업로드 옵션 선택 프롬프트(`askUploadOption`)도
+  비디오 비활성 시 건너뜀.
+- **버린 대안**: `YOUTUBE_UPLOAD=false`만 사용 — 이건 업로드만 막을 뿐 media_generator/
+  long_form_creator의 이미지·TTS 생성(API 비용 발생)은 그대로 실행되어 목적에 안 맞음.
+  코드에서 영상 관련 함수를 삭제하는 방안도 검토했으나, 새 YouTube 채널 생성 후 다시 켤
+  계획이 있어 삭제 대신 토글로 처리.
+- **근거**: 사용자의 기존 YouTube 채널이 삭제되어 영상 제작/업로드가 당장 무의미해짐.
+  블로그 파이프라인은 YouTube와 독립적으로 동작하므로 영상만 끄고 블로그는 유지 가능.
+- **관련 파일**: `src/config/index.js`, `src/app.js`, `.env.example`
