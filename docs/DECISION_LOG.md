@@ -320,3 +320,18 @@
   (`/entry/{slug}` 또는 `/{slug}`) 형태로 나오는지 확인 필요. 안 먹히면 `slogan` 외 다른
   필드명(`url`, `permalink` 등)을 추가로 시도해야 함.
 - **관련 파일**: `src/agents/blog_publisher.js`
+
+### D-025: retryOn429에 결제 한도(quota) vs 진짜 레이트리밋 구분 추가
+- **결정**: 사용자 실행 로그에서 D-021로 추가한 429 재시도가 매번 끝까지 실패(약 21초 소요
+  후 포기)하는 것을 확인. 같은 실행에서 DALL-E가 "Billing hard limit has been reached"로
+  명확히 실패한 것과 시점이 겹쳐, 단순 트래픽 과다가 아니라 **OpenAI 계정 결제 한도 초과로
+  채팅 완성 API까지 막힌 것**으로 추정됨 — 이 경우 재시도는 시간이 지나도 절대 풀리지
+  않으므로 무의미한 대기였음.
+  `retryOn429()`이 OpenAI 에러 응답 본문(`error.type`/`error.code`)을 확인해
+  `insufficient_quota`면 즉시 재시도 없이 throw, 아니면 기존처럼 지수 백오프. 또한 axios의
+  뭉뚱그려진 "Request failed with status code 429" 대신 실제 OpenAI 에러 메시지를
+  `err.message`에 합쳐서 호출부 로그에 원인이 그대로 보이도록 함.
+- **근거**: 결제 한도 문제는 코드로 해결할 수 없고 사용자가 OpenAI 대시보드에서 한도를
+  올리거나 결제수단을 확인해야 하는 문제 — 다음 로그부터는 "rate limit"과 "billing"을
+  명확히 구분해서 보여줘야 사용자가 헛수고하지 않음.
+- **관련 파일**: `src/utils/rateLimiter.js`

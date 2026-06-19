@@ -52,13 +52,24 @@ export async function retryOn429(fn, { retries = 3, baseDelayMs = 3000 } = {}) {
       return await fn();
     } catch (err) {
       const status = err?.response?.status;
-      if (status !== 429 || attempt >= retries) throw err;
-      const retryAfterHeader = Number(err.response?.headers?.['retry-after']);
-      const delay = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
-        ? retryAfterHeader * 1000
-        : baseDelayMs * 2 ** attempt;
-      attempt += 1;
-      await new Promise((r) => setTimeout(r, delay));
+      if (status === 429) {
+        const apiError = err.response?.data?.error;
+        // 실제 OpenAI 에러 본문을 err.message에 합쳐 둔다 — axios는 기본적으로
+        // "Request failed with status code 429"만 남겨서 호출부 로그에서 원인을
+        // 구분할 수 없었음 (rate limit vs 결제 한도 초과는 둘 다 429로 옴).
+        if (apiError?.message) err.message = `${err.message} — ${apiError.message}`;
+        // 결제 한도(quota) 초과는 시간이 지나도 풀리지 않으므로 재시도해도 의미 없음
+        const isQuotaIssue = apiError?.type === 'insufficient_quota' || apiError?.code === 'insufficient_quota';
+        if (isQuotaIssue || attempt >= retries) throw err;
+        const retryAfterHeader = Number(err.response?.headers?.['retry-after']);
+        const delay = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? retryAfterHeader * 1000
+          : baseDelayMs * 2 ** attempt;
+        attempt += 1;
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
     }
   }
 }
