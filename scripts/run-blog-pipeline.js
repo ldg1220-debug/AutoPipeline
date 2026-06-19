@@ -201,8 +201,21 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
   }
 
   console.log('\n' + SEP);
-  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  Enter = 전체 자동 선택)');
+  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  !4 = 4번만 제외하고 전체  /  Enter = 전체 자동 선택)');
   console.log(`⏱  ${timeoutSec}초 내 입력 없으면 자동 선택됩니다.\n`);
+
+  // "1-3" 같은 범위 표기를 개별 번호로 펼친다 (제외 토큰 "!4"는 그대로 둠)
+  const expandRanges = (str) => str.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
+    const from = parseInt(a, 10), to = parseInt(b, 10);
+    return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
+  });
+
+  const toIndices = (str) => new Set(
+    expandRanges(str)
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10) - 1)
+      .filter((n) => Number.isFinite(n) && n >= 0 && n < flatList.length)
+  );
 
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
@@ -227,20 +240,22 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
       const input = line.trim();
       if (!input) return done(items, '→ 전체 자동 선택');
 
-      // 범위 표기 지원 (1-3 → 1,2,3)
-      const rangeExpanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
-        const from = parseInt(a, 10), to = parseInt(b, 10);
-        return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
-      });
+      // "!4" 또는 "!4,!7" — 해당 번호만 제외하고 나머지 전체 선택
+      const tokens = input.split(',').map((s) => s.trim());
+      const excludeTokens = tokens.filter((t) => t.startsWith('!'));
+      const includeTokens = tokens.filter((t) => !t.startsWith('!') && t !== '');
 
-      const indices = rangeExpanded
-        .split(',')
-        .map((s) => parseInt(s.trim(), 10) - 1)
-        .filter((n) => Number.isFinite(n) && n >= 0 && n < flatList.length);
+      if (excludeTokens.length > 0 && includeTokens.length === 0) {
+        const excludeIdx = toIndices(excludeTokens.map((t) => t.slice(1)).join(','));
+        const remaining = flatList.filter((_, i) => !excludeIdx.has(i));
+        if (remaining.length === 0) return done(items, '→ 제외 결과 0개 — 전체 자동 선택');
+        return done(remaining, `→ ${excludeIdx.size}개 제외, 나머지 선택`);
+      }
 
-      if (indices.length === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
+      const indices = toIndices(includeTokens.join(','));
+      if (indices.size === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
 
-      const unique = [...new Set(indices)];
+      const unique = [...indices];
       done(unique.map((i) => flatList[i]), '→ 선택 완료');
     });
   });
