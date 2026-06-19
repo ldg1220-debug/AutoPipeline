@@ -5,7 +5,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle, retryOn429 } from '../utils/rateLimiter.js';
+import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
@@ -68,19 +68,22 @@ function fillTemplate(template, vars) {
 }
 
 // 보조 모델 — OpenAI 실패(레이트리밋/결제한도) 시 Gemini → Anthropic 순서로 폴백
-const FALLBACK_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+// gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+const FALLBACK_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 async function callGeminiFallback(prompt, jsonMode) {
   if (!config.gemini?.apiKey) return null;
   for (const model of FALLBACK_GEMINI_MODELS) {
     try {
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          ...(jsonMode ? { generationConfig: { response_mime_type: 'application/json' } } : {}),
-        },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            ...(jsonMode ? { generationConfig: { response_mime_type: 'application/json' } } : {}),
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+        )
       );
       const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       if (!jsonMode) return text;
@@ -349,18 +352,21 @@ async function pass5GeminiReview(keyword, sections, today) {
     `  "sections": [{"heading": "섹션 제목", "body": "교정된 본문 또는 원문"}, ...]\n` +
     `}`;
 
-  const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+  // gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+  const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
   for (const model of GEMINI_MODELS) {
     try {
       await throttle(2000);
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { response_mime_type: 'application/json' },
-        },
-        { timeout: 90000 }
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { response_mime_type: 'application/json' },
+          },
+          { timeout: 90000 }
+        )
       );
 
       const text  = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';

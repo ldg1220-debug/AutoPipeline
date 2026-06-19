@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
-import { throttle, retryOn429 } from '../utils/rateLimiter.js';
+import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -95,13 +95,15 @@ async function callAnthropic(model, prompt) {
 }
 
 async function callGemini(model, prompt) {
-  const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
-    {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { response_mime_type: 'application/json' },
-    },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 25000 }
+  const res = await retryOn503(() =>
+    axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { response_mime_type: 'application/json' },
+      },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 25000 }
+    )
   );
   const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
   const match = text.match(/\{[\s\S]*\}/);

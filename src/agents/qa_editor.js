@@ -5,7 +5,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -187,18 +187,20 @@ async function checkVideoWithGemini(videoPath) {
 
 출력: { "layout": "PASS", "sync": "PASS", "reason": "" }`;
 
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
-      {
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: 'video/mp4', data: base64Video } },
-          ],
-        }],
-        generationConfig: { response_mime_type: 'application/json' },
-      },
-      { timeout: 60000 }
+    const response = await retryOn503(() =>
+      axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'video/mp4', data: base64Video } },
+            ],
+          }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { timeout: 60000 }
+      )
     );
 
     const raw = response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
@@ -220,7 +222,8 @@ async function checkVideoWithGemini(videoPath) {
 // ─────────────────────────────────────────────────────────────
 // Gemini 팩트체크 — GPT-4o 와 다른 모델로 교차 검증
 // ─────────────────────────────────────────────────────────────
-const GEMINI_FACTCHECK_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+// gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+const GEMINI_FACTCHECK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 async function runGeminiFactCheck(content) {
   if (!config.gemini?.apiKey) return null;
@@ -269,13 +272,15 @@ ${parts.join('\n\n')}
   for (const model of GEMINI_FACTCHECK_MODELS) {
     try {
       await throttle(2000);
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { response_mime_type: 'application/json' },
-        },
-        { timeout: 60000 }
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { response_mime_type: 'application/json' },
+          },
+          { timeout: 60000 }
+        )
       );
       const raw = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
       const result = JSON.parse(raw);

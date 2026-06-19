@@ -364,6 +364,28 @@
   완전히 멈추는 것이 더 나쁨.
 - **관련 파일**: `src/agents/keyword_miner.js`
 
+### D-030: Gemini 폴백 사다리에서 404 모델 제거 + 503 재시도 추가
+- **결정**: 사용자 실행 로그에서 Gemini 폴백이 전부 실패하는 것을 확인 —
+  `gemini-2.5-flash`는 503(일시 과부하), `gemini-2.0-flash`/`gemini-1.5-flash`는
+  404(v1beta에서 모델 자체가 없음)로 응답. 404는 재시도로 해결 안 되는 영구적 오류이므로
+  사다리에서 완전히 제거하고, 503은 일시적 과부하이므로 같은 모델에 짧게 재시도하는
+  `retryOn503()`을 `rateLimiter.js`에 추가해 적용.
+  - 사다리를 `['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']` →
+    `['gemini-2.5-flash', 'gemini-2.5-flash-lite']`로 변경.
+  - 적용 위치: `blog_content_enhancer.js`(callGeminiFallback, pass5GeminiReview),
+    `keyword_miner.js`(filterViaGemini), `topic_grouper.js`(callGemini),
+    `qa_editor.js`(GEMINI_FACTCHECK_MODELS, Vision QA), `blog_asset_builder.js`
+    (썸네일 자가검수 Vision 호출).
+  - 같은 로그에서 OpenAI 429는 텍스트가 "quota exceeded"로 보여도 실제로는 대부분
+    일시적 레이트리밋이라 `retryOn429`가 백오프 재시도로 결국 성공시키는 사례가 다수
+    확인됨(정상 동작) — 단, DALL-E 이미지 생성은 별도의 진짜 결제 한도(400 에러)라
+    코드로 해결 불가, 사용자가 OpenAI 대시보드에서 확인 필요.
+- **버린 대안**: 사다리에 더 많은 모델명을 추측해서 추가 — 채택하지 않음(검증 안 된 모델명
+  추가는 같은 문제 재발 위험). 확인된 404만 제거하고 검증 가능한 최소 사다리로 축소.
+- **관련 파일**: `src/utils/rateLimiter.js`, `src/agents/blog_content_enhancer.js`,
+  `src/agents/keyword_miner.js`, `src/agents/topic_grouper.js`, `src/agents/qa_editor.js`,
+  `src/agents/blog_asset_builder.js`
+
 ### D-029: 정부 지원 제도 운영 상태 단정 방지 — Pass4/Pass5 검수 규칙 추가
 - **결정**: 사용자가 생성된 글에서 "청년도약계좌"를 현재 신청 가능한 상품처럼 서술한 것을
   지적 — 실제로는 판매 종료/개편 가능성이 있는 상품. 근본 원인은 LLM의 학습 데이터 시점이

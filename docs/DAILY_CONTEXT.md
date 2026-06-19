@@ -74,6 +74,13 @@ Blog 파이프라인 (runBlogPipeline):
 - **(2026-06-19)** 사용자가 제공한 티스토리 제품 리스티클(쿠팡 파트너스) 스타일 참고자료를
   `prompts/blog_pass_product_listicle.md`로 문서화(D-019). 기존 정보형 글과 구조가 달라
   파이프라인에는 아직 연결 안 함 — 적용 범위(카테고리/콘텐츠 타입) 결정 필요.
+- **(2026-06-19)** Gemini 폴백 404/503 수정(D-030): 실행 로그에서 Gemini 폴백 전체가
+  실패하는 것을 확인 — `gemini-2.0-flash`/`gemini-1.5-flash`는 v1beta에서 404(모델 없음),
+  `gemini-2.5-flash`는 503(일시 과부하)이었음. 사다리를
+  `['gemini-2.5-flash', 'gemini-2.5-flash-lite']`로 축소, `retryOn503()` 추가해 일시
+  과부하는 같은 모델로 재시도. blog_content_enhancer/keyword_miner/topic_grouper/
+  qa_editor/blog_asset_builder 5개 파일 전부 수정. (OpenAI 429는 대부분 정상적으로
+  백오프 재시도 후 성공 — DALL-E 이미지 생성만 진짜 결제 한도 문제로 사용자 확인 필요)
 - **(2026-06-19)** 정부 지원 제도 운영 상태 단정 방지(D-029): "청년도약계좌"를 현재
   신청 가능한 것처럼 서술한 사용자 지적 — Pass4(GPT)/Pass5(Gemini) 검수 기준에 정부
   제도/금융 상품 운영 상태 단정 금지 + "최신 공고 확인" 문구 권장 규칙 추가.

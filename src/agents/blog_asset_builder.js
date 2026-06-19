@@ -6,7 +6,7 @@ import { createRequire } from 'module';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle, retryOn429 } from '../utils/rateLimiter.js';
+import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 
 // [역할: Image Maker] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 가이드 파일(prompts/image_guide.md)에 정의된 규칙을 LLM 프롬프트에 주입하고,
@@ -378,18 +378,20 @@ async function reviewImageWithGemini(imagePath, guideText) {
       `JSON으로만 응답하세요.\n\n${guideText.slice(0, 1500)}\n\n` +
       `출력: { "pass": true|false, "reason": "FAIL이면 구체적 사유, PASS면 빈 문자열" }`;
 
-    const res = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
-      {
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: 'image/jpeg', data: base64Image } },
-          ],
-        }],
-        generationConfig: { response_mime_type: 'application/json' },
-      },
-      { timeout: 30000 }
+    const res = await retryOn503(() =>
+      axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'image/jpeg', data: base64Image } },
+            ],
+          }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { timeout: 30000 }
+      )
     );
 
     const raw = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';

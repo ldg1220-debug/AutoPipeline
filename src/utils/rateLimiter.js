@@ -36,6 +36,32 @@ export function withThrottle(fn, minIntervalMs = 1500, namespace = 'default') {
 }
 
 /**
+ * 503(모델 과부하) 응답을 받으면 짧게 대기 후 재시도한다.
+ * Gemini API가 일시적으로 과부하 상태(모델은 정상)일 때 곧바로 다음 사다리
+ * 모델로 넘어가 버리는 것을 막기 위한 용도.
+ *
+ * @param {Function} fn         - axios 호출 등 Promise를 반환하는 함수
+ * @param {Object}   opts
+ * @param {number}   opts.retries - 최대 재시도 횟수 (기본 2)
+ * @param {number}   opts.delayMs - 재시도 간 대기 시간 (기본 1500ms)
+ */
+export async function retryOn503(fn, { retries = 2, delayMs = 1500 } = {}) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err?.response?.status === 503 && attempt < retries) {
+        attempt += 1;
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
  * 429(rate limit) 응답을 받으면 지수 백오프 후 재시도한다.
  * OpenAI 등에서 짧은 시간에 다수 요청이 몰려 전체 파이프라인이
  * 통째로 실패하는 것을 막기 위한 공용 래퍼.

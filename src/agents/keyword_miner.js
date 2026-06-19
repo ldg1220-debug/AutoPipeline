@@ -4,7 +4,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -287,19 +287,22 @@ async function filterViaOpenAI(keywords) {
   return Array.isArray(keep_indices) ? keep_indices : null;
 }
 
-const COHERENCE_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+// gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+const COHERENCE_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 async function filterViaGemini(keywords) {
   if (!config.gemini?.apiKey) return null;
   for (const model of COHERENCE_GEMINI_MODELS) {
     try {
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
-        {
-          contents: [{ parts: [{ text: buildCoherencePrompt(keywords) }] }],
-          generationConfig: { response_mime_type: 'application/json' },
-        },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: buildCoherencePrompt(keywords) }] }],
+            generationConfig: { response_mime_type: 'application/json' },
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+        )
       );
       const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       const match = text.match(/\{[\s\S]*\}/);
