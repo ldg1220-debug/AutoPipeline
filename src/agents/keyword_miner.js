@@ -239,6 +239,53 @@ function filterNewKeywords(scored) {
   });
 }
 
+/**
+ * LLM 기반 의미 검증 — 정규식 블랙리스트로 못 거르는 "단어 조합은 멀쩍한데 뜻이 안 통하는"
+ * 자동완성 노이즈(예: "음쓰기 정부지원금", "신도시 배달기사")를 한 번에 걸러낸다.
+ * OPENAI_API_KEY 없으면 조용히 스킵 (전체 통과).
+ */
+async function filterIncoherentKeywords(keywords) {
+  if (!config.openai?.apiKey || keywords.length === 0) return keywords;
+
+  try {
+    await throttle(500);
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content:
+            `다음은 자동완성 API에서 수집한 블로그 키워드 후보 목록이다. ` +
+            `실제 사람이 검색할 만큼 의미가 통하는 키워드만 골라라.\n` +
+            `제외 기준: 서로 무관한 단어가 어색하게 붙어 의미가 안 통하는 것, ` +
+            `오타로 보이는 것, 검색 의도를 알 수 없는 것.\n` +
+            `목록:\n${keywords.map((k, i) => `${i}. ${k}`).join('\n')}\n\n` +
+            `JSON만 응답: {"keep_indices": [의미 통하는 항목의 번호들]}`,
+        }],
+        response_format: { type: 'json_object' },
+        temperature: 0,
+      },
+      {
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 20000,
+      }
+    );
+    const { keep_indices } = JSON.parse(res.data.choices[0].message.content);
+    if (!Array.isArray(keep_indices)) return keywords;
+
+    const kept = keep_indices.filter((i) => Number.isInteger(i) && i >= 0 && i < keywords.length).map((i) => keywords[i]);
+    const dropped = keywords.filter((k) => !kept.includes(k));
+    if (dropped.length > 0) {
+      logger.info(`[keyword_miner] LLM 의미 검증 제외: ${dropped.join(', ')}`);
+    }
+    return kept;
+  } catch (err) {
+    logger.warn(`[keyword_miner] LLM 의미 검증 실패 (전체 통과): ${err.message}`);
+    return keywords;
+  }
+}
+
 function saveKeywords(keywords) {
   const insert = db.prepare(`
     INSERT OR IGNORE INTO keywords (keyword, category, score, commercial, sources)
@@ -293,7 +340,12 @@ export async function mineKeywords(seeds, topN = 30) {
   const datalabScores = await fetchNaverDatalab(candidateKeywords);
 
   const scored = scoreKeywords(allSuggestions, datalabScores);
-  const newKeywords = filterNewKeywords(scored).slice(0, topN);
+  const shortlisted = filterNewKeywords(scored).slice(0, topN);
+
+  // 정규식으로 못 거른 "단어는 멀쩍한데 뜻이 안 통하는" 노이즈를 LLM으로 한 번 더 검증
+  const sane = await filterIncoherentKeywords(shortlisted.map((k) => k.keyword));
+  const saneSet = new Set(sane);
+  const newKeywords = shortlisted.filter((k) => saneSet.has(k.keyword));
 
   saveKeywords(newKeywords);
   logger.info(`[keyword_miner] ${newKeywords.length}개 신규 키워드 저장 (DB 중복 제외)`);
