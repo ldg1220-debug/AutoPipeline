@@ -94,6 +94,16 @@ Blog 파이프라인 (runBlogPipeline):
   추가, OpenAI 실패 시 Gemini → Anthropic(키 있으면) 순서로 폴백하도록 변경.
   `topic_grouper.js` 에스컬레이션 사다리에도 `gemini-2.5-flash` 추가
   (`gpt-4o-mini → gpt-4o → gemini-2.5-flash → claude-sonnet-4-6`).
+- **(2026-06-19)** ⚠️ 저작권 침해 신고 대응(D-032): Google이 `maeilg.com/89`에 탑툰 웹툰
+  "신도시 마사지" 무단 게시로 저작권 침해 신고/검색결과 삭제 통지를 보냄. 원인은
+  `keyword_miner.js` 블랙리스트(이미 "마사지|탑툰" 패턴 포함)가 키워드 *신규 수집* 시점에만
+  적용되고, `app.js`가 DB pending 큐에서 키워드를 꺼내 쓰는 경로는 재검증을 하지 않아 블랙리스트
+  추가 이전에 DB에 적재된 오염 키워드가 그대로 선택된 것. `app.js` DB 큐 조회에
+  `isBlacklisted()` 재검증 추가(걸리면 `rejected` 처리), `scripts/cleanup-blacklist-keywords.js`도
+  자체 구버전 블랙리스트 대신 `keyword_miner.js`의 최신 규칙을 사용하도록 통합.
+  **사용자 후속 조치 필요**: `maeilg.com/89` 게시물 직접 삭제(반론 통지 제출 금지 — 실제
+  침해), 로컬에서 `node scripts/cleanup-blacklist-keywords.js` 1회 실행해 DB 잔여 오염
+  키워드 정리.
 - **(2026-06-19)** FAQ 답변 길이 미달 재시도 추가(D-031): 실제 실행 로그에서 "아파트청약조건"
   글이 QA 단계 "FAQ 답변 너무 짧음: 1개" 사유로 탈락한 것을 확인 — `pass3Faq()`가 길이를
   검증하지 않고 1회성 요청만 하던 문제. 80자 미달 시 강화된 프롬프트로 1회 재시도하도록

@@ -26,7 +26,7 @@ const BLACKLIST_PATTERNS = [
   // 본 키워드와 무관한 커뮤니티명이 혼입된 것으로, 블로그 콘텐츠 키워드로 부적합
 ];
 
-function isBlacklisted(keyword) {
+export function isBlacklisted(keyword) {
   return BLACKLIST_PATTERNS.some((re) => re.test(keyword));
 }
 

@@ -8,20 +8,11 @@
  */
 
 import db from '../src/db/db.js';
-import logger from '../src/utils/logger.js';
+import { isBlacklisted } from '../src/agents/keyword_miner.js';
 
-const BLACKLIST_PATTERNS = [
-  /피부과의원/,
-  /피부과\s*(목동|강남|홍대|신촌|종로|잠실|분당|수원|인천|부산)/,
-  /병원\s*(목동|강남|홍대|신촌|종로|잠실|분당)/,
-  /의원\s*(목동|강남|홍대)/,
-  /edi$/i,
-];
-
-function isBlacklisted(keyword) {
-  return BLACKLIST_PATTERNS.some((re) => re.test(keyword));
-}
-
+// keyword_miner.js의 BLACKLIST_PATTERNS를 그대로 재사용한다 (이중 관리로 인한
+// 불일치 방지 — 과거에는 이 스크립트가 자체 블랙리스트를 따로 들고 있어
+// "신도시 마사지" 같은 새 패턴이 추가돼도 DB에 이미 적재된 행은 정리되지 않았다).
 const allPending = db.prepare("SELECT keyword FROM keywords WHERE status = 'pending'").all();
 const toDelete = allPending.filter((r) => isBlacklisted(r.keyword));
 

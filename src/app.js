@@ -13,7 +13,7 @@ import { runTextQA, runVisionQA, runBlogQA, runContentDirectorQA } from './agent
 import { generateAllMedia, generateLongFormMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
-import { mineKeywords } from './agents/keyword_miner.js';
+import { mineKeywords, isBlacklisted } from './agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from './agents/blog_content_enhancer.js';
 import { buildAllAssets } from './agents/blog_asset_builder.js';
 import { monetizeAll } from './agents/monetizer.js';
@@ -595,11 +595,24 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.info('[app] Blog Part 1: 신규 키워드 없음 → DB pending 키워드 사용');
     try {
       const limit = config.runtime.blogPostsPerDay ?? 5;
-      const rows  = db.prepare(
+      // DB에 오래 전 적재된 키워드는 이후 추가된 블랙리스트 규칙을 거치지 않았을 수 있으므로
+      // 선택 시점에 다시 검증한다 (저작권 침해 등 부적합 키워드의 재유입 차단).
+      const candidateRows = db.prepare(
         `SELECT keyword, category, score, commercial, sources
          FROM keywords WHERE status = 'pending'
          ORDER BY score DESC LIMIT ?`
-      ).all(limit);
+      ).all(limit * 3);
+
+      const rows = [];
+      for (const r of candidateRows) {
+        if (isBlacklisted(r.keyword)) {
+          db.prepare(`UPDATE keywords SET status = 'rejected' WHERE keyword = ?`).run(r.keyword);
+          logger.warn(`[app] Blog Part 1: DB pending 키워드 "${r.keyword}" 블랙리스트 재검출 → rejected 처리`);
+          continue;
+        }
+        rows.push(r);
+        if (rows.length >= limit) break;
+      }
 
       if (!rows.length) {
         logger.warn('[app] Blog Part 1: DB pending 키워드도 없음. Blog Pipeline 종료.');

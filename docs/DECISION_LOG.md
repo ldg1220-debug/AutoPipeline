@@ -428,3 +428,26 @@
 - **버린 대안**: QA 임계값(80자)을 낮춤 — 채택하지 않음(콘텐츠 품질 저하 우려, 근본 원인은
   생성 단계 미준수이므로 생성 단계에서 해결).
 - **관련 파일**: `src/agents/blog_content_enhancer.js` (`pass3Faq`)
+
+### D-032: 저작권 침해 키워드("신도시 마사지" 탑툰 웹툰)가 블랙리스트 우회해 발행됨 — DB 큐 재검증 추가
+- **결정**: Google이 `maeilg.com/89`에 대해 (주)탑코미디어(탑툰)의 저작권 침해 신고로 검색
+  결과 삭제 통지를 보냄. 추적 결과 `keyword_miner.js`의 `BLACKLIST_PATTERNS`에는 이미
+  "마사지|...|탑툰|망가|..." 패턴이 있어 신규 자동완성 키워드는 걸러지지만, 이 필터는
+  **키워드 신규 수집(insert) 시점에만 적용**되고 `app.js`가 "신규 키워드 없을 때 DB
+  pending 큐에서 꺼내 쓰는" 경로(`SELECT ... FROM keywords WHERE status='pending'`)는
+  재검증을 하지 않음. 즉 블랙리스트 규칙이 추가되기 *전에* DB에 적재된 "신도시 마사지" 같은
+  키워드가 큐에 남아있다가 이후 그대로 선택되어 콘텐츠가 생성·발행된 것으로 추정.
+  - `keyword_miner.js`의 `isBlacklisted()`를 export.
+  - `app.js`의 DB pending 큐 조회 시 `isBlacklisted()`로 재검증 — 걸리면 즉시
+    `status='rejected'`로 변경하고 후보에서 제외(여유분 포함해 `limit*3`개를 가져와 필터링).
+  - `scripts/cleanup-blacklist-keywords.js`가 자체 블랙리스트(오래된 병원명 패턴)를 따로
+    들고 있어 `keyword_miner.js`와 불일치하던 문제도 발견 — `isBlacklisted()`를 가져다
+    쓰도록 통합(이제 블랙리스트 규칙 추가 시 이 스크립트도 자동으로 최신 규칙 적용).
+- **버린 대안**: 매 실행 시 전체 DB를 스캔해 블랙리스트 재검증 — 채택하지 않음(비용 대비
+  효과 낮음, 선택 시점 필터링으로 충분). 대신 사용자가 즉시 실행 가능한 정리 스크립트를
+  최신 규칙과 동기화.
+- **후속 조치 필요(사용자)**: `maeilg.com/89` 게시물 직접 삭제, Google 반론 통지는 실제
+  저작권 침해(웹툰 무단 게시)가 맞으므로 제출하지 않는 것을 권장. 로컬에서
+  `node scripts/cleanup-blacklist-keywords.js` 1회 실행해 DB에 남아있는 다른 블랙리스트
+  키워드도 즉시 정리 권장.
+- **관련 파일**: `src/agents/keyword_miner.js`, `src/app.js`, `scripts/cleanup-blacklist-keywords.js`
