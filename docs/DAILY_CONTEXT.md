@@ -94,6 +94,11 @@ Blog 파이프라인 (runBlogPipeline):
   추가, OpenAI 실패 시 Gemini → Anthropic(키 있으면) 순서로 폴백하도록 변경.
   `topic_grouper.js` 에스컬레이션 사다리에도 `gemini-2.5-flash` 추가
   (`gpt-4o-mini → gpt-4o → gemini-2.5-flash → claude-sonnet-4-6`).
+- **(2026-06-19)** FAQ 답변 길이 미달 재시도 추가(D-031): 실제 실행 로그에서 "아파트청약조건"
+  글이 QA 단계 "FAQ 답변 너무 짧음: 1개" 사유로 탈락한 것을 확인 — `pass3Faq()`가 길이를
+  검증하지 않고 1회성 요청만 하던 문제. 80자 미달 시 강화된 프롬프트로 1회 재시도하도록
+  수정. (직전 로그 기준 12/13 발행 성공, Gemini 404/503 수정(D-030) 효과 확인됨. 남은
+  DALL-E 결제 한도/OpenAI 요청 속도 등급 이슈는 사용자가 OpenAI 대시보드에서 조치 필요.)
 - **(2026-06-19)** 정보형 블로그 Tistory SEO 재검토(D-023): `monetizer.js`의 hero 배너가
   본문에 `<h1>{title}</h1>`을 직접 삽입해 Tistory 제목란이 만드는 페이지 실제 H1과 중복되던
   문제 수정(`<p class="hero-title">`로 변경). 제목/H2 헤딩 키워드 배치 규칙, 첫 섹션 도입부

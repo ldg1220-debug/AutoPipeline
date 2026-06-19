@@ -251,7 +251,17 @@ async function pass3Faq(keyword, faqItem, targetReader) {
 힌트: ${faqItem.a_hint}
 답변 텍스트만 반환:`;
   await throttle(1000);
-  return callGPT4o(prompt, false);
+  const answer = await callGPT4o(prompt, false);
+
+  if ((answer ?? '').length < 80) {
+    // 모델이 길이 지침을 따르지 않은 경우(특히 폴백 모델) 한 번 더 강하게 요청
+    const retryPrompt = `다음 FAQ 항목의 답변을 반드시 80자 이상(최대 120자)으로 작성하세요. 이전 답변(${(answer ?? '').length}자)이 너무 짧았습니다. 배경 설명이나 구체적인 예시를 덧붙여 분량을 채우세요.\n키워드: ${keyword}, 독자: ${targetReader}\n질문: ${faqItem.q}\n힌트: ${faqItem.a_hint}\n답변 텍스트만 반환:`;
+    await throttle(1000);
+    const retryAnswer = await callGPT4o(retryPrompt, false);
+    if ((retryAnswer ?? '').length >= (answer ?? '').length) return retryAnswer;
+  }
+
+  return answer;
 }
 
 // ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
