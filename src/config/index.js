@@ -161,6 +161,7 @@ export const config = {
     longformCronSchedule: process.env.LONGFORM_CRON_SCHEDULE || '0 13 * * 4',
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
-    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '15', 10),
+    // AdSense 콘텐츠 가치 경고(2026-06) 이후 8로 하향 — .env.example 참고
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '8', 10),
   },
 };

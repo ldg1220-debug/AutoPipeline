@@ -58,6 +58,13 @@ Blog 파이프라인 (runBlogPipeline):
 - `NAVER_CLOVA_CLIENT_ID` 미설정 시 TTS는 OpenAI TTS로 폴백
 - Shotstack `stage` 환경은 워터마크 포함 — 실제 배포 전 `production`으로 전환 필요 (M8)
 - 롱폼 Shotstack 렌더링은 섹션 수×TTS 업로드가 많아 시간 소요 큼 (폴링 120회 유지)
+- **(2026-06-19, 수동 조치 필요)** AdSense에서 `maeilg.com`/`ggoondaeng.tistory.com` 둘 다 "주의 필요"
+  (각각 "가치가 별로 없는 콘텐츠" / "복제된 콘텐츠+가치가 별로 없는 콘텐츠"). 두 도메인이 같은
+  티스토리 블로그를 가리켜서 발생하는 중복으로 추정됨 — 티스토리 블로그 관리 화면에서 기본
+  `ggoondaeng.tistory.com` 접속 시 `maeilg.com`으로 301 리다이렉트되는지 확인하고, AdSense
+  사이트 목록에서는 `maeilg.com` 하나만 남겨 검토 요청할 것. 파이프라인 쪽은 `BLOG_POSTS_PER_DAY`
+  8로 하향 + `prompts/blog_pass2_outline.md`에 헤딩 획일화 방지 규칙 추가로 대응함 (콘텐츠 가치 개선은
+  발행 누적 후 효과 확인 필요).
 
 ---
 
