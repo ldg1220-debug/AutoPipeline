@@ -142,7 +142,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
 }
 
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
-async function pass3Body(keyword, section, targetReader, outlineContext) {
+async function pass3Body(keyword, section, targetReader, outlineContext, isFirstSection = false) {
   const template = await loadPrompt('blog_pass3_body.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt = fillTemplate(template, {
@@ -152,6 +152,9 @@ async function pass3Body(keyword, section, targetReader, outlineContext) {
     target_reader: targetReader,
     context:       outlineContext,
     today,
+    first_section_note: isFirstSection
+      ? `【검색엔진 노출 — 이 섹션은 글의 첫 번째 섹션입니다】\n첫 1~2문장 안에 키워드("${keyword}")를 그대로, 자연스럽게 포함하세요. Tistory/검색결과 미리보기는 본문 앞부분을 그대로 발췌해 보여주므로, 키워드 없이 도입부를 시작하면 검색 노출에서 손해를 봅니다.`
+      : '',
   });
   await throttle(2000);
   // 본문은 자유 텍스트 반환 (JSON 아님)
@@ -418,8 +421,9 @@ async function enhanceBlogDraft(content) {
     (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
   const completedSections = [];
-  for (const section of bodySections) {
-    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext);
+  for (let i = 0; i < bodySections.length; i++) {
+    const section = bodySections[i];
+    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0);
     completedSections.push({ level: section.level, heading: section.heading, body });
   }
 

@@ -91,7 +91,7 @@ function buildBlogStyles(category) {
 .mae-hero{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#fff;border-radius:14px;padding:28px 24px 22px;margin:0 0 28px;position:relative;overflow:hidden}
 .mae-hero::before{content:'';position:absolute;right:-20px;top:-20px;width:160px;height:160px;background:rgba(255,255,255,.04);border-radius:50%}
 .mae-hero .hero-tag{font-size:12px;background:rgba(255,255,255,.18);padding:3px 12px;border-radius:20px;display:inline-block;margin-bottom:10px;letter-spacing:.5px}
-.mae-hero h1{margin:0 0 8px;font-size:22px;font-weight:700;line-height:1.4}
+.mae-hero .hero-title{margin:0 0 8px;font-size:22px;font-weight:700;line-height:1.4}
 .mae-hero p{margin:0;font-size:14px;opacity:.85;line-height:1.7}
 /* 소개 */
 .blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:0 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
@@ -539,7 +539,9 @@ async function monetizeBlogDraft(content) {
   const heroHtml =
     `<div class="mae-hero">` +
     `<span class="hero-tag">${getCategoryIcon(content.category)} ${CATEGORY_KR[content.category] ?? '경제·이슈'}</span>` +
-    `<h1>${blog_draft.title ?? keyword}</h1>` +
+    // Tistory 제목 입력란(#post-title-inp)이 스킨에서 페이지 실제 <h1>으로 렌더링되므로
+    // 본문에 또 <h1>을 넣으면 한 페이지에 H1이 2개가 되어 SEO 감점 요인이 됨 → 비-헤딩 태그로 처리
+    `<p class="hero-title">${blog_draft.title ?? keyword}</p>` +
     `<p>${blog_draft.meta_description ?? ''}</p>` +
     `</div>`;
 

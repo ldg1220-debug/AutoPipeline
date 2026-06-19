@@ -284,3 +284,26 @@
 - **근거**: 유튜브 계정 삭제로 OAuth refresh token이 무효화되어 매 실행마다 401/400 에러만
   반복 발생하고 있었음. 영상 파이프라인이 다시 켜지기 전까지는 분석할 의미도 없음.
 - **관련 파일**: `src/agents/competitor_analyzer.js`
+
+### D-023: 정보형 블로그 글 Tistory SEO 점검 — 중복 H1 제거 + 키워드 배치 강화
+- **결정**: 사용자 요청으로 현재 정보형 블로그(blog_pass1~3 + monetizer.js 렌더링)를 Tistory
+  SEO 기준으로 재검토. 이미 잘 되어 있던 것: FAQ JSON-LD 스키마, OG/Twitter 메타태그,
+  TL;DR 박스, 내부 링크(`internalLinks.js`), 이미지 alt 텍스트, meta_description을 본문 리드
+  문단으로 실제 노출. 새로 고친 것 2가지:
+  1. `monetizer.js`의 `mae-hero` 배너가 `<h1>{title}</h1>`을 본문에 직접 삽입하고 있었는데,
+     Tistory 제목 입력란(`#post-title-inp`)이 스킨에서 페이지의 실제 H1으로 렌더링되는 게
+     일반적이라 **한 페이지에 H1이 2개**가 되는 구조였음 → `<p class="hero-title">`로 변경해
+     중복 H1 제거 (SEO 감점 요인 차단).
+  2. 제목/H2 헤딩에 키워드가 실제로 들어가는지 보장하는 규칙이 없었음(기존엔 "획일적 헤딩
+     금지"만 강하게 강조되어 있어 자칫 키워드 자체도 회피하게 될 위험) → 제목 앞쪽 1/3 안에
+     키워드 배치 규칙, H2 중 최소 2개는 키워드 핵심 단어 포함 규칙을 `blog_pass2_outline.md`에
+     추가. 첫 섹션 첫 1~2문장에 키워드를 그대로 포함하라는 지시를 `blog_pass3_body.md` +
+     `blog_content_enhancer.js`(`isFirstSection` 플래그)에 추가 — 검색결과 미리보기가 본문
+     앞부분을 발췌하는 경우가 많아 도입부 키워드 노출이 CTR에 직접 영향.
+- **검토했으나 보류한 항목**: 슬러그(`outline.slug`)를 Tistory 글 URL에 실제로 적용하는 것 —
+  현재 Tistory 자동화 발행 플로우(Playwright)에서 커스텀 URL 입력 필드를 다룬 적이 없고,
+  실제 지원 여부가 라이브 테스트 없이는 불확실해 추측성 DOM 자동화를 추가하지 않음. 슬러그는
+  현재 로컬 DB 저장용으로만 쓰이고 있다는 한계를 기록해 둠 — 추후 실제 발행 화면에서
+  "주소(고유 URL)" 필드 존재 여부 확인 후 연결 검토.
+- **관련 파일**: `src/agents/monetizer.js`, `prompts/blog_pass2_outline.md`,
+  `prompts/blog_pass3_body.md`, `src/agents/blog_content_enhancer.js`
