@@ -16,6 +16,8 @@ const BLACKLIST_PATTERNS = [
   /[가-힣]{2,4}(구|시|군|동|로|역|읍|면|리)\s*(피부|스킨|뷰티|헬스)/,  // 지역+카테고리
   /^[가-힣]{2,6}(피부과|피부관리실|피부샵|뷰티샵|헤어샵)$/,            // 상호명 전체
   /rpg|게임|공략|패치|업데이트|캐릭터/i,                              // 게임 관련
+  /^https?:\/\//i,                                                  // URL 그대로 — 콘텐츠 가치 없음
+  /\.(co\.kr|com|or\.kr|net|kr)(\/|$)/i,                             // 도메인 형태 — 시스템 검색어
 ];
 
 function isBlacklisted(keyword) {
@@ -50,7 +52,8 @@ async function fetchNaverSuggest(seed) {
     });
     const items = res.data?.items?.[0] ?? [];
     return items.map((item, idx) => ({ keyword: Array.isArray(item) ? item[0] : item, rank: idx, source: 'naver' }));
-  } catch {
+  } catch (err) {
+    logger.warn(`[keyword_miner] Naver suggest failed for "${seed}": ${err.message}`);
     return [];
   }
 }
@@ -65,7 +68,8 @@ async function fetchGoogleSuggest(seed) {
     });
     const suggestions = res.data?.[1] ?? [];
     return suggestions.map((kw, idx) => ({ keyword: kw, rank: idx, source: 'google' }));
-  } catch {
+  } catch (err) {
+    logger.warn(`[keyword_miner] Google suggest failed for "${seed}": ${err.message}`);
     return [];
   }
 }
@@ -80,7 +84,8 @@ async function fetchYouTubeSuggest(seed) {
     });
     const suggestions = res.data?.[1] ?? [];
     return suggestions.map((kw, idx) => ({ keyword: kw, rank: idx, source: 'youtube' }));
-  } catch {
+  } catch (err) {
+    logger.warn(`[keyword_miner] YouTube suggest failed for "${seed}": ${err.message}`);
     return [];
   }
 }
@@ -123,7 +128,8 @@ async function fetchNaverDatalab(keywords) {
       result[group.title] = avg / 100; // 0~1 정규화
     }
     return result;
-  } catch {
+  } catch (err) {
+    logger.warn(`[keyword_miner] Naver datalab failed: ${err.message}`);
     return {};
   }
 }
