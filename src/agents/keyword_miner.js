@@ -21,6 +21,9 @@ const BLACKLIST_PATTERNS = [
   /마사지|출장|op\b|오피|풀싸롱|콜걸|애인대행|만남|토렌트|토토|먹튀|탑툰|망가|일본망가|av\s*다시보기|성인용품/i,
   // 위 단어들은 부동산·금융 등 무관한 키워드 뒤에 스팸 SEO 목적으로 붙는 경우가 많음
   // (예: "신도시 마사지 탑툰") — 자동완성 어뷰징 패턴, 콘텐츠 가치 없고 광고성/성인 콘텐츠 혼입
+  /디시(인사이드)?$|갤러리$|커뮤니티$|블라인드$|에펨코리아|펨코|루리웹/,
+  // 커뮤니티/갤러리 사이트명이 검색어 뒤에 붙는 자동완성 — "코인투자 방법 디시"처럼
+  // 본 키워드와 무관한 커뮤니티명이 혼입된 것으로, 블로그 콘텐츠 키워드로 부적합
 ];
 
 function isBlacklisted(keyword) {
@@ -254,46 +257,93 @@ function filterNewKeywords(scored) {
  * 자동완성 노이즈(예: "음쓰기 정부지원금", "신도시 배달기사")를 한 번에 걸러낸다.
  * OPENAI_API_KEY 없으면 조용히 스킵 (전체 통과).
  */
-async function filterIncoherentKeywords(keywords) {
-  if (!config.openai?.apiKey || keywords.length === 0) return keywords;
+function buildCoherencePrompt(keywords) {
+  return (
+    `다음은 자동완성 API에서 수집한 블로그 키워드 후보 목록이다. ` +
+    `실제 사람이 검색할 만큼 의미가 통하는 키워드만 골라라.\n` +
+    `제외 기준: 서로 무관한 단어가 어색하게 붙어 의미가 안 통하는 것, ` +
+    `오타로 보이는 것, 검색 의도를 알 수 없는 것, 커뮤니티/갤러리 사이트명이 혼입된 것.\n` +
+    `목록:\n${keywords.map((k, i) => `${i}. ${k}`).join('\n')}\n\n` +
+    `JSON만 응답: {"keep_indices": [의미 통하는 항목의 번호들]}`
+  );
+}
 
+async function filterViaOpenAI(keywords) {
+  if (!config.openai?.apiKey) return null;
+  const res = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: buildCoherencePrompt(keywords) }],
+      response_format: { type: 'json_object' },
+      temperature: 0,
+    },
+    {
+      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 20000,
+    }
+  );
+  const { keep_indices } = JSON.parse(res.data.choices[0].message.content);
+  return Array.isArray(keep_indices) ? keep_indices : null;
+}
+
+const COHERENCE_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+async function filterViaGemini(keywords) {
+  if (!config.gemini?.apiKey) return null;
+  for (const model of COHERENCE_GEMINI_MODELS) {
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{ parts: [{ text: buildCoherencePrompt(keywords) }] }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+      );
+      const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) continue;
+      const { keep_indices } = JSON.parse(match[0]);
+      if (Array.isArray(keep_indices)) return keep_indices;
+    } catch (err) {
+      logger.warn(`[keyword_miner] Gemini 의미 검증(${model}) 실패: ${err.message}`);
+    }
+  }
+  return null;
+}
+
+/**
+ * LLM 기반 의미 검증 — 정규식 블랙리스트로 못 거르는 "단어 조합은 멀쩍한데 뜻이 안 통하는"
+ * 자동완성 노이즈(예: "음쓰기 정부지원금", "신도시 배달기사")를 한 번에 걸러낸다.
+ * OpenAI 실패(레이트리밋·결제한도) 시 Gemini로 폴백. 둘 다 없으면/실패하면 전체 통과.
+ */
+async function filterIncoherentKeywords(keywords) {
+  if (keywords.length === 0) return keywords;
+
+  let keepIndices = null;
   try {
     await throttle(500);
-    const res = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4o-mini',
-        messages: [{
-          role: 'user',
-          content:
-            `다음은 자동완성 API에서 수집한 블로그 키워드 후보 목록이다. ` +
-            `실제 사람이 검색할 만큼 의미가 통하는 키워드만 골라라.\n` +
-            `제외 기준: 서로 무관한 단어가 어색하게 붙어 의미가 안 통하는 것, ` +
-            `오타로 보이는 것, 검색 의도를 알 수 없는 것.\n` +
-            `목록:\n${keywords.map((k, i) => `${i}. ${k}`).join('\n')}\n\n` +
-            `JSON만 응답: {"keep_indices": [의미 통하는 항목의 번호들]}`,
-        }],
-        response_format: { type: 'json_object' },
-        temperature: 0,
-      },
-      {
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 20000,
-      }
-    );
-    const { keep_indices } = JSON.parse(res.data.choices[0].message.content);
-    if (!Array.isArray(keep_indices)) return keywords;
-
-    const kept = keep_indices.filter((i) => Number.isInteger(i) && i >= 0 && i < keywords.length).map((i) => keywords[i]);
-    const dropped = keywords.filter((k) => !kept.includes(k));
-    if (dropped.length > 0) {
-      logger.info(`[keyword_miner] LLM 의미 검증 제외: ${dropped.join(', ')}`);
-    }
-    return kept;
+    keepIndices = await filterViaOpenAI(keywords);
   } catch (err) {
-    logger.warn(`[keyword_miner] LLM 의미 검증 실패 (전체 통과): ${err.message}`);
+    logger.warn(`[keyword_miner] OpenAI 의미 검증 실패, Gemini로 폴백 시도: ${err.message}`);
+  }
+
+  if (keepIndices === null) {
+    keepIndices = await filterViaGemini(keywords);
+  }
+
+  if (keepIndices === null) {
+    logger.warn('[keyword_miner] LLM 의미 검증 모두 실패/미설정 (전체 통과)');
     return keywords;
   }
+
+  const kept = keepIndices.filter((i) => Number.isInteger(i) && i >= 0 && i < keywords.length).map((i) => keywords[i]);
+  const dropped = keywords.filter((k) => !kept.includes(k));
+  if (dropped.length > 0) {
+    logger.info(`[keyword_miner] LLM 의미 검증 제외: ${dropped.join(', ')}`);
+  }
+  return kept;
 }
 
 function saveKeywords(keywords) {

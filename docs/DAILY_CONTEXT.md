@@ -74,6 +74,10 @@ Blog 파이프라인 (runBlogPipeline):
 - **(2026-06-19)** 사용자가 제공한 티스토리 제품 리스티클(쿠팡 파트너스) 스타일 참고자료를
   `prompts/blog_pass_product_listicle.md`로 문서화(D-019). 기존 정보형 글과 구조가 달라
   파이프라인에는 아직 연결 안 함 — 적용 범위(카테고리/콘텐츠 타입) 결정 필요.
+- **(2026-06-19)** 키워드 의미 검증 Gemini 폴백 + 커뮤니티명 블랙리스트(D-028): "코인투자
+  방법 디시"처럼 OpenAI 429로 LLM 의미 검증이 전체 통과되면서 디시인사이드 등 커뮤니티명이
+  섞인 자동완성이 그대로 통과된 버그 수정. `keyword_miner.js`에 `filterViaGemini` 폴백 추가,
+  `BLACKLIST_PATTERNS`에 디시/갤러리/커뮤니티/펨코/루리웹 등 정규식 추가.
 - **(2026-06-19)** OpenAI 폴백 우선순위를 Gemini로 변경(D-027): 사용자가 보유한 API 키가
   Anthropic이 아닌 Gemini라는 점을 확인 — `blog_content_enhancer.js`에 `callGeminiFallback`
   추가, OpenAI 실패 시 Gemini → Anthropic(키 있으면) 순서로 폴백하도록 변경.

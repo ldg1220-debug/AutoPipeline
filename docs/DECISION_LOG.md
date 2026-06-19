@@ -351,6 +351,19 @@
   기존과 동일하게 원래 에러를 그대로 던짐(동작 변화 없음, 안전).
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/topic_grouper.js`
 
+### D-028: 키워드 의미 검증(filterIncoherentKeywords)도 Gemini 폴백 추가 + 커뮤니티명 블랙리스트
+- **결정**: 사용자가 결과물에서 "코인투자 방법 디시" 같은 이상한 키워드를 발견 — 원인은
+  `keyword_miner.js`의 LLM 의미 검증이 OpenAI 429로 실패하면 "전체 통과" 처리되어
+  "디시"(디시인사이드) 같은 커뮤니티명 혼입 자동완성이 그대로 살아남은 것.
+  - `BLACKLIST_PATTERNS`에 `디시|갤러리|커뮤니티|블라인드|펨코|루리웹` 등 커뮤니티/갤러리
+    사이트명 접미사 패턴 추가 — 정규식 1차 방어선.
+  - `filterIncoherentKeywords()`를 OpenAI 실패 시 Gemini로 폴백하도록 재구성
+    (`filterViaOpenAI` → 실패 시 `filterViaGemini`, 둘 다 실패해야 전체 통과).
+- **버린 대안**: "전체 통과" 폴백 자체를 제거하고 실패 시 빈 배열 반환 — 채택하지 않음.
+  의미 검증은 보조 필터일 뿐이라 LLM 둘 다 불가할 때 키워드를 통째로 버리면 파이프라인이
+  완전히 멈추는 것이 더 나쁨.
+- **관련 파일**: `src/agents/keyword_miner.js`
+
 ### D-027: 폴백 우선순위를 Gemini 먼저로 변경 (Anthropic API 미보유, Gemini API 보유)
 - **결정**: D-026에서 Anthropic Claude를 폴백으로 추가했으나, 사용자가 "앤트로픽 api 말고
   구글 api 제공된게 있다"고 정정 — 실제로 보유한 키는 `GEMINI_API_KEY`이고
