@@ -9,7 +9,7 @@
  *   3. 점수 < TOPIC_GROUPER_THRESHOLD(기본 70)이면 상위 모델로 재그룹핑
  *   4. 결과를 output/feedback/grouper_feedback.json에 누적
  *
- * 에스컬레이션 사다리: gpt-4o-mini → gpt-4o → claude-sonnet-4-6
+ * 에스컬레이션 사다리: gpt-4o-mini → gpt-4o → gemini-2.5-flash → claude-sonnet-4-6
  */
 
 import path from 'path';
@@ -29,6 +29,7 @@ const FEEDBACK_PATH = path.resolve(__dirname, '../../output/feedback/grouper_fee
 const ESCALATION_LADDER = [
   'gpt-4o-mini',
   'gpt-4o',
+  'gemini-2.5-flash',
   'claude-sonnet-4-6',
 ];
 
@@ -36,6 +37,16 @@ const ESCALATION_LADDER = [
 
 function isAnthropicModel(model) {
   return model.startsWith('claude-');
+}
+
+function isGeminiModel(model) {
+  return model.startsWith('gemini-');
+}
+
+function hasKeyFor(model) {
+  if (isAnthropicModel(model)) return Boolean(config.anthropic.apiKey);
+  if (isGeminiModel(model)) return Boolean(config.gemini?.apiKey);
+  return Boolean(config.openai.apiKey);
 }
 
 async function callOpenAI(model, prompt) {
@@ -83,6 +94,21 @@ async function callAnthropic(model, prompt) {
   return JSON.parse(match[0]);
 }
 
+async function callGemini(model, prompt) {
+  const res = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { response_mime_type: 'application/json' },
+    },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 25000 }
+  );
+  const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON found in Gemini response');
+  return JSON.parse(match[0]);
+}
+
 async function callModel(model, prompt) {
   if (isAnthropicModel(model)) {
     if (!config.anthropic.apiKey) {
@@ -90,6 +116,13 @@ async function callModel(model, prompt) {
       return callOpenAI('gpt-4o', prompt);
     }
     return callAnthropic(model, prompt);
+  }
+  if (isGeminiModel(model)) {
+    if (!config.gemini?.apiKey) {
+      logger.warn(`[topic_grouper] GEMINI_API_KEY not set. Falling back to gpt-4o.`);
+      return callOpenAI('gpt-4o', prompt);
+    }
+    return callGemini(model, prompt);
   }
   if (!config.openai.apiKey) throw new Error('OPENAI_API_KEY not set');
   return callOpenAI(model, prompt);
@@ -249,7 +282,7 @@ export async function groupSimilarTopics(contentData) {
   }
   if (contents.length === 0) return { ...contentData, contents: [] };
 
-  if (!config.openai.apiKey && !config.anthropic.apiKey) {
+  if (!config.openai.apiKey && !config.anthropic.apiKey && !config.gemini?.apiKey) {
     logger.warn('[topic_grouper] No API key. Skipping grouping.');
     return { ...contentData, contents };
   }
@@ -273,7 +306,7 @@ export async function groupSimilarTopics(contentData) {
     usedModel = primaryModel;
   } catch (err) {
     const nextModel = ESCALATION_LADDER[ladderIdx + 1];
-    if (!nextModel || (isAnthropicModel(nextModel) && !config.anthropic.apiKey)) throw err;
+    if (!nextModel || !hasKeyFor(nextModel)) throw err;
     logger.warn(`[topic_grouper] ${primaryModel} 실패(${err.message}), ${nextModel}로 폴백`);
     groups    = await clusterWithModel(nextModel, keywords);
     usedModel = nextModel;

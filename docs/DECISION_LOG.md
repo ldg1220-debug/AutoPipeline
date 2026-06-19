@@ -350,3 +350,21 @@
 - **트레이드오프**: `ANTHROPIC_API_KEY`가 `.env`에 설정돼 있어야 폴백이 동작함 — 키가 없으면
   기존과 동일하게 원래 에러를 그대로 던짐(동작 변화 없음, 안전).
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/topic_grouper.js`
+
+### D-027: 폴백 우선순위를 Gemini 먼저로 변경 (Anthropic API 미보유, Gemini API 보유)
+- **결정**: D-026에서 Anthropic Claude를 폴백으로 추가했으나, 사용자가 "앤트로픽 api 말고
+  구글 api 제공된게 있다"고 정정 — 실제로 보유한 키는 `GEMINI_API_KEY`이고
+  `ANTHROPIC_API_KEY`는 없을 가능성이 높음. 이미 같은 파일(`blog_content_enhancer.js`)의
+  `pass5GeminiReview()`에 검증된 Gemini 호출 패턴(모델 사다리
+  `gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash`, JSON 응답 모드,
+  정규식 기반 JSON 추출)이 이미 있어 이를 재사용.
+  - `blog_content_enhancer.js`: `callGeminiFallback()` 추가, `callFallbackChain()`이
+    Gemini를 먼저 시도하고 실패 시 Claude로 폴백(둘 다 키가 없으면 그대로 원래 에러 던짐).
+    `callGPT4o`/`callGPT4oMini`는 `callClaudeFallback` 대신 `callFallbackChain` 호출.
+  - `topic_grouper.js`: 에스컬레이션 사다리에 `gemini-2.5-flash`를 `gpt-4o`와
+    `claude-sonnet-4-6` 사이에 추가(`gpt-4o-mini → gpt-4o → gemini-2.5-flash →
+    claude-sonnet-4-6`). `callModel()`에 `callGemini()` 분기 추가, 키 존재 여부 확인을
+    위한 `hasKeyFor()` 헬퍼로 폴백 가능 여부 판단 로직 통일.
+- **버린 대안**: Anthropic 폴백을 완전히 제거 — 채택하지 않음. 사용자가 나중에 Anthropic
+  키를 추가할 가능성을 열어두기 위해 Gemini 다음 단계로 유지(순서만 변경).
+- **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/topic_grouper.js`

@@ -67,7 +67,33 @@ function fillTemplate(template, vars) {
   );
 }
 
-// 보조 모델 — OpenAI 실패(레이트리밋/결제한도) 시 Anthropic Claude로 폴백
+// 보조 모델 — OpenAI 실패(레이트리밋/결제한도) 시 Gemini → Anthropic 순서로 폴백
+const FALLBACK_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+async function callGeminiFallback(prompt, jsonMode) {
+  if (!config.gemini?.apiKey) return null;
+  for (const model of FALLBACK_GEMINI_MODELS) {
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          ...(jsonMode ? { generationConfig: { response_mime_type: 'application/json' } } : {}),
+        },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+      );
+      const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (!jsonMode) return text;
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('Gemini 응답에서 JSON을 찾지 못함');
+      return JSON.parse(match[0]);
+    } catch (err) {
+      logger.warn(`[blog_content_enhancer] Gemini fallback(${model}) 실패: ${err.message}`);
+    }
+  }
+  return null;
+}
+
 async function callClaudeFallback(prompt, jsonMode) {
   if (!config.anthropic.apiKey) return null;
   try {
@@ -101,6 +127,13 @@ async function callClaudeFallback(prompt, jsonMode) {
   }
 }
 
+// OpenAI 실패 시 Gemini → Anthropic 순서로 시도
+async function callFallbackChain(prompt, jsonMode) {
+  const gemini = await callGeminiFallback(prompt, jsonMode);
+  if (gemini !== null) return gemini;
+  return callClaudeFallback(prompt, jsonMode);
+}
+
 // GPT-4o: 고품질 본문
 async function callGPT4o(prompt, jsonMode = true) {
   try {
@@ -125,8 +158,8 @@ async function callGPT4o(prompt, jsonMode = true) {
     const content = response.data.choices[0].message.content;
     return jsonMode ? JSON.parse(content) : content;
   } catch (err) {
-    logger.warn(`[blog_content_enhancer] gpt-4o 실패, Claude로 폴백 시도: ${err.message}`);
-    const fallback = await callClaudeFallback(prompt, jsonMode);
+    logger.warn(`[blog_content_enhancer] gpt-4o 실패, Gemini/Claude로 폴백 시도: ${err.message}`);
+    const fallback = await callFallbackChain(prompt, jsonMode);
     if (fallback !== null) return fallback;
     throw err;
   }
@@ -155,8 +188,8 @@ async function callGPT4oMini(prompt) {
     );
     return JSON.parse(response.data.choices[0].message.content);
   } catch (err) {
-    logger.warn(`[blog_content_enhancer] gpt-4o-mini 실패, Claude로 폴백 시도: ${err.message}`);
-    const fallback = await callClaudeFallback(prompt, true);
+    logger.warn(`[blog_content_enhancer] gpt-4o-mini 실패, Gemini/Claude로 폴백 시도: ${err.message}`);
+    const fallback = await callFallbackChain(prompt, true);
     if (fallback !== null) return fallback;
     throw err;
   }

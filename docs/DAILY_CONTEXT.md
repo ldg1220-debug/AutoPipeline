@@ -74,6 +74,11 @@ Blog 파이프라인 (runBlogPipeline):
 - **(2026-06-19)** 사용자가 제공한 티스토리 제품 리스티클(쿠팡 파트너스) 스타일 참고자료를
   `prompts/blog_pass_product_listicle.md`로 문서화(D-019). 기존 정보형 글과 구조가 달라
   파이프라인에는 아직 연결 안 함 — 적용 범위(카테고리/콘텐츠 타입) 결정 필요.
+- **(2026-06-19)** OpenAI 폴백 우선순위를 Gemini로 변경(D-027): 사용자가 보유한 API 키가
+  Anthropic이 아닌 Gemini라는 점을 확인 — `blog_content_enhancer.js`에 `callGeminiFallback`
+  추가, OpenAI 실패 시 Gemini → Anthropic(키 있으면) 순서로 폴백하도록 변경.
+  `topic_grouper.js` 에스컬레이션 사다리에도 `gemini-2.5-flash` 추가
+  (`gpt-4o-mini → gpt-4o → gemini-2.5-flash → claude-sonnet-4-6`).
 - **(2026-06-19)** 정보형 블로그 Tistory SEO 재검토(D-023): `monetizer.js`의 hero 배너가
   본문에 `<h1>{title}</h1>`을 직접 삽입해 Tistory 제목란이 만드는 페이지 실제 H1과 중복되던
   문제 수정(`<p class="hero-title">`로 변경). 제목/H2 헤딩 키워드 배치 규칙, 첫 섹션 도입부
