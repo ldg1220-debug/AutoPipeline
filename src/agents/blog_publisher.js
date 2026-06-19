@@ -368,6 +368,22 @@ async function publishPost(page, content, blogName, context) {
     logger.info(`[blog_publisher] API intercept keys: ${Object.keys(data).join(', ') || '(파싱 실패)'}`);
     data.visibility = 20;
     data.content = html;
+    // 커스텀 URL(슬러그) — Tistory 발행 레이어의 "URL" 입력란과 동일한 필드.
+    // Tistory Open API 시절부터 이 필드명은 'slogan' (실제 페이지 슬러그, 블로그 소개와 무관).
+    // 필드명이 다르더라도 API가 모르는 키는 무시하므로 부작용 없음 — 실패해도 기본 동작 유지.
+    const rawSlug = blog_draft?.slug;
+    if (rawSlug) {
+      const safeSlug = String(rawSlug)
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9가-힣-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+      if (safeSlug) {
+        data.slogan = safeSlug;
+        logger.info(`[blog_publisher] Slug injected: ${safeSlug}`);
+      }
+    }
     if (bestCategory?.id) {
       const catId = Number(bestCategory.id) || bestCategory.id;
       data.categoryId = catId;  // 내부 API 필드명

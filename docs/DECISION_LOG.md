@@ -307,3 +307,16 @@
   "주소(고유 URL)" 필드 존재 여부 확인 후 연결 검토.
 - **관련 파일**: `src/agents/monetizer.js`, `prompts/blog_pass2_outline.md`,
   `prompts/blog_pass3_body.md`, `src/agents/blog_content_enhancer.js`
+
+### D-024: 슬러그를 실제 Tistory 발행 URL에 연결
+- **결정**: 사용자가 Tistory 발행(공개 발행) 화면 스크린샷을 확인해 줌 — "URL" 필드가
+  `https://블로그.tistory.com/entry/{텍스트}` 형태로 **실제로 편집 가능한 입력란**임을 확인.
+  `blog_publisher.js`의 `manage/post.json` 인터셉트에 `data.slogan = {sanitizeSlug(blog_draft.slug)}`
+  주입 추가 — Tistory Open API 시절부터 커스텀 URL alias 필드명이 `slogan`이었던 것에 근거.
+- **리스크 관리**: 필드명이 현재 웹 에디터 API와 다를 가능성을 감안해, 실패해도 기존 발행
+  흐름을 막지 않도록 단순 주입만 하고 별도 검증/재시도 로직은 넣지 않음 (모르는 키는 API가
+  무시할 뿐 에러가 나지 않는다는 전제).
+- **확인 필요**: 다음 실제 발행 후 게시물 URL이 숫자(`/482`)가 아니라 슬러그
+  (`/entry/{slug}` 또는 `/{slug}`) 형태로 나오는지 확인 필요. 안 먹히면 `slogan` 외 다른
+  필드명(`url`, `permalink` 등)을 추가로 시도해야 함.
+- **관련 파일**: `src/agents/blog_publisher.js`
