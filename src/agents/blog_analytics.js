@@ -469,7 +469,7 @@ export async function runBlogAnalytics() {
   // 성과 하위 포스트 식별
   const underperformers = identifyUnderperformers();
   if (underperformers.length > 0) {
-    logger.info(`[blog_analytics] ${underperformers.length} underperforming posts found (impression≥100, CTR<2%, position≤20).`);
+    logger.info(`[blog_analytics] ${underperformers.length} underperforming posts found (발행 60일+, impressions≥10, clicks<3).`);
   }
 
   // 주간 요약
