@@ -10,6 +10,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import db from '../db/db.js';
 import { generateYouTubeDescription, generateYouTubeTags, generateYouTubeTitle } from '../utils/youtubeSEO.js';
 import { getManualCoupangLink } from './monetizer.js';
+import { refreshYouTubeAccessToken } from '../utils/youtubeAuth.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -68,24 +69,7 @@ function getYouTubeChannelConfig(category) {
   return config.youtube;
 }
 
-/**
- * refresh_token으로 YouTube access_token을 갱신한다.
- * google-auth-library 없이 axios 직접 호출 방식을 사용한다.
- * 토큰 값은 로그에 절대 출력하지 않는다.
- */
-async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
-  const response = await axios.post(
-    'https://oauth2.googleapis.com/token',
-    new URLSearchParams({
-      client_id:     channelConfig.clientId,
-      client_secret: channelConfig.clientSecret,
-      refresh_token: channelConfig.refreshToken,
-      grant_type:    'refresh_token',
-    }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
-  );
-  return response.data.access_token;
-}
+// refreshYouTubeAccessToken은 src/utils/youtubeAuth.js에서 import
 
 /**
  * 오늘(KST) 롱폼 업로드 수를 로컬 파일로 추적.
@@ -266,9 +250,9 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
   }
 
   if (thumbShortsExists) {
-    // YouTube 처리 대기 후 최대 3회 재시도
-    await new Promise((r) => setTimeout(r, 5000));
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // YouTube Shorts 처리 완료까지 충분히 대기 (5초는 너무 짧아 간헐적 실패 발생)
+    await new Promise((r) => setTimeout(r, 25000));
+    for (let attempt = 1; attempt <= 5; attempt++) {
       try {
         thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbShortsPath, accessToken);
         if (thumbnailUploaded) {
@@ -276,12 +260,12 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
           break;
         }
       } catch (err) {
-        logger.warn(`[auto_publisher] Shorts 썸네일 업로드 실패 (시도 ${attempt}/3): ${err.message}`);
-        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+        logger.warn(`[auto_publisher] Shorts 썸네일 업로드 실패 (시도 ${attempt}/5): ${err.message}`);
+        if (attempt < 5) await new Promise((r) => setTimeout(r, attempt * 10000)); // 10s, 20s, 30s, 40s
       }
     }
     if (!thumbnailUploaded) {
-      logger.warn(`[auto_publisher] Shorts thumbnails.set 3회 모두 실패 → 영상 첫 프레임(2초 인트로)이 커버로 표시됩니다. videoId=${videoId}`);
+      logger.warn(`[auto_publisher] Shorts thumbnails.set 5회 모두 실패 → 영상 첫 프레임이 커버로 표시됩니다. videoId=${videoId}`);
     }
   }
 
@@ -644,9 +628,9 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 2분 미만 시 건너뜀
+    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 3분 미만 시 건너뜀
     if (config.runtime.publishShorts) {
-      // 롱폼 영상 길이 확인 — 2분(120초) 미만이면 영상 자체가 쇼츠급이므로 별도 쇼츠 불필요
+      // 롱폼 영상 길이 확인 — 3분(180초) 미만이면 영상 자체를 Shorts로 업로드하므로 별도 Shorts 불필요
       const safeKw      = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
       const mediaDir_   = path.resolve(__dirname, '../../output/media');
       const longVidPath = path.resolve(mediaDir_, `${safeKw}_long.mp4`);
@@ -655,8 +639,8 @@ export async function publishContents(qaData, contentData) {
       const vidPathForDur = longExists_ ? longVidPath : legacyPath_;
       const longDurSec  = await getVideoDurationSec(vidPathForDur);
 
-      if (longDurSec !== null && longDurSec < 120) {
-        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 2분 → 별도 쇼츠 업로드 건너뜀: ${content.keyword}`);
+      if (longDurSec !== null && longDurSec < 180) {
+        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 3분 → 별도 Shorts 업로드 건너뜀 (영상 자체가 쇼츠 분량): ${content.keyword}`);
         result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped_short_longform' };
       } else {
         await new Promise((r) => setTimeout(r, 8000));

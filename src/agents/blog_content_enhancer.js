@@ -165,8 +165,16 @@ async function pass4FactCheck(keyword, sections) {
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
 
-  const prompt = `아래 블로그 본문에서 허구·검증 불가 인용과 시제 오류를 수정하세요.\n\n` +
-    `오늘 날짜: ${today}\n\n` +
+  const prompt =
+    `아래 블로그 본문에서 허구·검증 불가 인용, 시제 오류, 경제 수치 오류를 수정하세요.\n\n` +
+    `오늘 날짜: ${today} (AI 학습 데이터는 2023~2024년 기준 — 지금은 2026년임)\n\n` +
+    `【⚠️ 경제 수치 기준값 — 반드시 이 범위로 교정】\n` +
+    `- 달러/원(USD/KRW) 환율: 2024년 하반기~2025년 1,300원 중반, 2026년 현재 1,400~1,500원대\n` +
+    `  → 본문에 1,100~1,250원 등 낮은 환율이 등장하면 "최근 1,400원대 이상"으로 교체\n` +
+    `  → 특정 수치 대신 "최근 1,400원대 이상" 등 범위 표현 사용\n` +
+    `- 비트코인·코인 가격: 실시간 변동 — 특정 가격 절대 언급 금지, "시장 가격 기준" 표현 사용\n` +
+    `- 한국은행 기준금리: "최근 조정 기준" 등 일반 표현 사용 (특정 수치 지양)\n` +
+    `- 2023년 암호화폐 과세 시행: 실제로 2025년부터 시행 (2023년 시행이라고 쓰여있으면 교정)\n\n` +
     `【검토 대상 1 — 허구 인용】\n` +
     `1. 특정 책 제목 (따옴표로 감싼 것)\n` +
     `2. 저자 이름 직접 언급\n` +
@@ -174,13 +182,16 @@ async function pass4FactCheck(keyword, sections) {
     `4. 출처 불명의 구체적 통계 수치\n\n` +
     `【검토 대상 2 — 시제 오류】\n` +
     `5. 2023년·2024년 데이터를 "최신", "현재", "올해" 등으로 표현한 경우\n` +
-    `   → "최근 몇 년간", "과거 데이터 기준", "2023~2024년 당시" 등으로 수정\n\n` +
+    `   → "최근 몇 년간", "과거 데이터 기준", "2023~2024년 당시" 등으로 수정\n` +
+    `6. 환율 수치가 1,000~1,250원 범위로 등장하는 경우 → 위 기준값으로 교정\n\n` +
     `【수정 규칙】\n` +
     `- 허구 인용 → 일반적 표현으로 교체\n` +
     `  예) "『부의 추월차선』에서는" → "여러 재테크 전문 서적에서는"\n` +
     `  예) "2023년 조사에 따르면 73%" → "최근 조사에 따르면"\n` +
     `- 시제 오류 → 날짜 맥락을 명확히\n` +
     `  예) "현재 기준금리는 3.5%" → "2024년 기준금리는 3.5%였으며"\n` +
+    `- 경제 수치 오류 → 위 기준값 또는 일반 표현으로 교체\n` +
+    `  예) "달러 환율 1,200원" → "달러 환율 1,400원대 이상 (최근 기준)"\n` +
     `- 수정 불필요한 섹션은 원문 그대로 반환\n` +
     `- 내용의 의미와 흐름은 유지\n\n` +
     `키워드: ${keyword}\n\n` +
@@ -198,6 +209,85 @@ async function pass4FactCheck(keyword, sections) {
     logger.warn(`[blog_content_enhancer] Pass 4 fact-check failed (${err.message}), using original`);
   }
   return sections;
+}
+
+// ── Pass 5: Claude 독립 검수 ──────────────────────────────────────────────
+// GPT가 작성한 글을 다른 모델(Claude)이 교차 검증한다.
+// 같은 모델의 자기 검증 한계를 극복하기 위한 별도 에이전트.
+async function pass5GeminiReview(keyword, sections, today) {
+  if (!config.gemini?.apiKey) {
+    logger.warn('[blog_content_enhancer] GEMINI_API_KEY 없음 — Pass 5 건너뜀');
+    return { sections, issues: [], verdict: 'skipped' };
+  }
+
+  const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
+
+  const prompt =
+    `당신은 한국 경제·생활 블로그의 팩트체크 전문 편집자입니다.\n` +
+    `아래 블로그 본문은 GPT-4o가 자동 작성했습니다. 당신의 역할은 독립적으로 검수하는 것입니다.\n\n` +
+    `오늘 날짜: ${today}\n` +
+    `키워드: ${keyword}\n\n` +
+    `【검수 기준】\n` +
+    `1. 경제 수치 오류: 달러/원 환율 1,400원 이상이 정상 (1,100~1,250원 등 낮은 수치 = 오류)\n` +
+    `2. 연도·시제 오류: 2023~2024년 수치를 "현재" "올해"로 표현\n` +
+    `3. 법·제도 오류: 암호화폐 과세는 2025년 시행 (2023년 시행이라 쓰면 오류)\n` +
+    `4. 검증 불가 수치: "○○%가 ~~한다"처럼 출처 없는 구체적 통계\n` +
+    `5. 허구 제품명/브랜드명: 실존 여부 불명확한 구체적 제품\n` +
+    `6. 논리 모순: 앞뒤 내용이 충돌하는 주장\n\n` +
+    `【처리 규칙】\n` +
+    `- 오류 발견 시: 해당 문장을 교정하거나 일반 표현으로 대체\n` +
+    `- 확인 불가 수치: 구체적 숫자 제거 후 "최근 추세" "전문가 권고" 등 일반 표현으로\n` +
+    `- 문제없는 섹션: 원문 그대로 반환\n` +
+    `- 내용·흐름·분량은 유지 (단순 수치 교정·표현 수정만)\n\n` +
+    `본문:\n${fullText}\n\n` +
+    `JSON으로만 응답:\n` +
+    `{\n` +
+    `  "verdict": "pass" | "corrected" | "major_issues",\n` +
+    `  "issues_found": ["발견된 문제 1줄 요약", ...],\n` +
+    `  "sections": [{"heading": "섹션 제목", "body": "교정된 본문 또는 원문"}, ...]\n` +
+    `}`;
+
+  const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      await throttle(2000);
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { timeout: 90000 }
+      );
+
+      const text  = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('JSON 파싱 실패');
+      const result = JSON.parse(match[0]);
+
+      if (!Array.isArray(result.sections) || result.sections.length !== sections.length) {
+        throw new Error(`섹션 수 불일치: ${result.sections?.length} vs ${sections.length}`);
+      }
+
+      if (result.issues_found?.length > 0) {
+        logger.warn(`[blog_content_enhancer] Pass 5 이슈 발견 (${result.verdict}, ${model}): ${result.issues_found.join(' | ')}`);
+      } else {
+        logger.info(`[blog_content_enhancer] Pass 5 검수 완료 (${result.verdict}, ${model}): ${keyword}`);
+      }
+
+      return {
+        sections: result.sections,
+        issues:   result.issues_found ?? [],
+        verdict:  result.verdict,
+      };
+    } catch (err) {
+      logger.warn(`[blog_content_enhancer] Pass 5 ${model} 실패 (${err.message}), 다음 모델 시도`);
+    }
+  }
+
+  logger.warn('[blog_content_enhancer] Pass 5 모든 Gemini 모델 실패 — Pass 4 결과 사용');
+  return { sections, issues: [], verdict: 'skipped' };
 }
 
 // JSON-LD Article 스키마 생성
@@ -333,11 +423,17 @@ async function enhanceBlogDraft(content) {
     faqSections.push({ q: faqItem.q, a: answer });
   }
 
-  // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등)
+  // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등) — GPT 자기 검증
   logger.info(`[blog_content_enhancer] Pass 4 (fact-check): ${keyword}`);
   const checkedSections = await pass4FactCheck(keyword, completedSections);
 
-  const wordCount = checkedSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  // Pass 5: Claude 교차 검수 — 다른 모델로 독립 팩트체크
+  const today5 = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  logger.info(`[blog_content_enhancer] Pass 5 (Claude review): ${keyword}`);
+  const reviewResult = await pass5GeminiReview(keyword, checkedSections, today5);
+  const finalSections = reviewResult.sections;
+
+  const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);
 
   return {
@@ -348,7 +444,9 @@ async function enhanceBlogDraft(content) {
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
       seo_keywords:     blog_draft?.seo_keywords ?? [keyword],
-      sections:         checkedSections,
+      sections:         finalSections,
+      review_verdict:   reviewResult.verdict,
+      review_issues:    reviewResult.issues,
       faq:              faqSections,
       affiliate_hooks:  buildAffiliateHooks(completedSections, intent.affiliate_category),
       json_ld:          buildJsonLd(outline.title || keyword, keyword, outline.slug || ''),

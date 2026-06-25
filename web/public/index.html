@@ -434,12 +434,22 @@
     <div class="step-body" id="body2">
       <div class="flex gap-8 mt-12" style="margin-bottom:8px;flex-wrap:wrap">
         <input type="text" id="video-search-q" placeholder="제품명 입력 (예: 무기자차 선스틱)..." style="min-width:200px" />
-        <button class="btn btn-primary" onclick="searchVideos('taobao')">
-          <span id="video-spinner"></span> 🛒 타오바오
+        <button class="btn btn-primary" onclick="searchVideos('xiaohongshu')" title="샤오홍슈(중국 인스타그램)에서 제품 리뷰 영상 검색">
+          <span id="video-spinner"></span> 📕 샤오홍슈
+        </button>
+        <button class="btn btn-secondary" onclick="searchVideos('taobao')" title="타오바오 상품 페이지 영상 검색">
+          🛒 타오바오
         </button>
         <button class="btn btn-secondary" onclick="searchVideos('bilibili')" title="빌리빌리(중국 유튜브)에서 제품 영상 검색">
           📺 빌리빌리
         </button>
+      </div>
+      <!-- 샤오홍슈 로그인 상태 -->
+      <div id="xhs-login-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:7px 12px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:0.78rem">
+        <span id="xhs-login-dot" style="width:8px;height:8px;border-radius:50%;background:#4a5568;flex-shrink:0"></span>
+        <span id="xhs-login-label" style="color:var(--text-muted)">샤오홍슈 로그인 상태 확인 중...</span>
+        <button id="xhs-login-btn" onclick="startXhsLogin()" class="btn btn-secondary btn-sm" style="margin-left:auto;padding:3px 10px;font-size:0.72rem">🔑 로그인</button>
+        <button id="xhs-logout-btn" onclick="clearXhsSession()" class="btn btn-secondary btn-sm" style="display:none;padding:3px 10px;font-size:0.72rem;color:var(--danger)">로그아웃</button>
       </div>
       <!-- 타오바오 로그인 상태 -->
       <div id="taobao-login-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:0.78rem">
@@ -838,6 +848,70 @@ function goToStep2() {
   unlockStep('step2');
 }
 
+// ─── 샤오홍슈 로그인 관리 ────────────────────────────────────────────────
+async function checkXhsLogin() {
+  try {
+    const res  = await fetch('/api/xhs/status');
+    const data = await res.json();
+    const dot      = document.getElementById('xhs-login-dot');
+    const lbl      = document.getElementById('xhs-login-label');
+    const loginBtn  = document.getElementById('xhs-login-btn');
+    const logoutBtn = document.getElementById('xhs-logout-btn');
+    if (data.loggedIn) {
+      dot.style.background    = '#10b981';
+      lbl.textContent         = `샤오홍슈 로그인됨 ✅  쿠키 ${data.cookieCount}개 · ${data.expiresIn} 후 만료`;
+      lbl.style.color         = '#10b981';
+      loginBtn.style.display  = 'none';
+      logoutBtn.style.display = '';
+    } else {
+      dot.style.background    = '#ef4444';
+      lbl.textContent         = '샤오홍슈 미로그인 — 로그인 시 검색 품질 향상';
+      lbl.style.color         = 'var(--text-muted)';
+      loginBtn.style.display  = '';
+      logoutBtn.style.display = 'none';
+    }
+  } catch { /* 무시 */ }
+}
+
+async function startXhsLogin() {
+  const loginBtn = document.getElementById('xhs-login-btn');
+  const lbl      = document.getElementById('xhs-login-label');
+  loginBtn.disabled    = true;
+  loginBtn.textContent = '⏳ 진행 중...';
+  lbl.textContent      = '로그인 브라우저 열는 중...';
+  lbl.style.color      = 'var(--text-muted)';
+
+  const evtSource = new EventSource('/api/xhs/login');
+  evtSource.onmessage = async (e) => {
+    const data = JSON.parse(e.data);
+    lbl.textContent = data.message;
+    if (data.status === 'success') {
+      evtSource.close();
+      await checkXhsLogin();
+      loginBtn.disabled    = false;
+      loginBtn.textContent = '🔑 로그인';
+    } else if (data.status === 'error') {
+      lbl.style.color      = '#ef4444';
+      evtSource.close();
+      loginBtn.disabled    = false;
+      loginBtn.textContent = '🔑 로그인';
+    }
+  };
+  evtSource.onerror = () => {
+    if (!lbl.textContent.includes('완료')) {
+      lbl.textContent = '연결 오류 — 서버 상태를 확인하세요.';
+    }
+    evtSource.close();
+    loginBtn.disabled    = false;
+    loginBtn.textContent = '🔑 로그인';
+  };
+}
+
+async function clearXhsSession() {
+  await fetch('/api/xhs/clear-session', { method: 'POST' });
+  await checkXhsLogin();
+}
+
 // ─── 타오바오 로그인 관리 ──────────────────────────────────────────────────
 async function checkTaobaoLogin() {
   try {
@@ -940,6 +1014,7 @@ async function importCookies() {
 }
 
 checkTaobaoLogin();
+checkXhsLogin();
 
 // =============================================
 // STEP 2 — 영상 소스 검색
@@ -954,6 +1029,7 @@ async function searchVideos(source = 'taobao') {
   errBanner.style.display = 'none';
 
   const sourceMessages = {
+    xiaohongshu: '🔍 샤오홍슈 검색 중... (세션 없으면 타오바오로 자동 전환)',
     taobao:   '🔍 타오바오 시도 중... (세션 없으면 빌리빌리로 자동 전환)',
     bilibili:  '🔍 빌리빌리 검색 중...',
   };
@@ -965,9 +1041,9 @@ async function searchVideos(source = 'taobao') {
     const data = await res.json();
 
     const sourceLabel = {
+      xiaohongshu: '📕 샤오홍슈',
       taobao:   '🛒 타오바오',
       bilibili:  '📺 빌리빌리',
-      pexels:   '📸 Pexels',
       mock:     '🔧 mock (오프라인)',
     }[data.source] || data.source;
 
@@ -989,10 +1065,10 @@ async function searchVideos(source = 'taobao') {
       card.className = 'video-card';
 
       // 소스별 링크 텍스트
-      const linkText = { taobao: '타오바오↗', bilibili: '빌리빌리↗', pexels: '보기↗' }[v.source] || '열기↗';
+      const linkText = { xiaohongshu: '샤오홍슈↗', taobao: '타오바오↗', bilibili: '빌리빌리↗' }[v.source] || '열기↗';
       // 소스 배지 색상
-      const badgeColor = { taobao: '#e53935', bilibili: '#00a1d6', pexels: '#07c160' }[v.source] || 'var(--accent)';
-      const badgeText  = { taobao: '🛒', bilibili: '📺', pexels: '📸' }[v.source] || '▶';
+      const badgeColor = { xiaohongshu: '#ff2442', taobao: '#e53935', bilibili: '#00a1d6' }[v.source] || 'var(--accent)';
+      const badgeText  = { xiaohongshu: '📕', taobao: '🛒', bilibili: '📺' }[v.source] || '▶';
 
       // 조회수 표시 (Bilibili)
       const playInfo = v.play_count ? ` · 조회 ${(v.play_count/10000).toFixed(1)}만` : '';
@@ -1051,9 +1127,19 @@ async function openVideoModal(v) {
   actions.innerHTML = '';
   modal.classList.add('show');
 
-  // Pexels: 직접 mp4 URL
-  if (v.video_url && v.source === 'pexels') {
-    playVideoInModal(v.video_url, v.page_url, v.title);
+  // 샤오홍슈: 서버에서 영상 URL 추출
+  if (v.source === 'xiaohongshu' && v.page_url) {
+    try {
+      const res  = await fetch(`/api/videos/fetch-video?url=${encodeURIComponent(v.page_url)}&source=xiaohongshu`);
+      const data = await res.json();
+      if (data.video_url) {
+        playVideoInModal(data.video_url, v.page_url, v.title);
+      } else {
+        showModalExternalLink(v.page_url, v.title, '샤오홍슈에서 시청 (로그인 필요할 수 있음)');
+      }
+    } catch {
+      showModalExternalLink(v.page_url, v.title, '샤오홍슈에서 시청');
+    }
     return;
   }
 

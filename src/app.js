@@ -25,6 +25,7 @@ import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
 import { runProjectManagerReview } from './agents/project_manager.js';
+import { runPerformanceReview } from './agents/performance_reviewer.js';
 import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -390,39 +391,27 @@ async function runPipeline() {
     contents: contentData.contents.filter((c) => approvedKeywords.has(c.keyword)),
   };
 
-  // ── 최상위 키워드 롱폼 생성 (score 1위 또는 --force-keyword) ─────────────
-  // 나머지 키워드는 standalone 쇼츠(최대 59초, 완전한 한 편)로 유지
-  const _bestKeyword = trendData.selected_items[0]?.keyword;
-  if (_bestKeyword && approvedKeywords.has(_bestKeyword)) {
-    try {
-      const _bestContent = approvedContentData.contents.find((c) => c.keyword === _bestKeyword);
-      if (_bestContent) {
-        logger.info(`[app] 최상위 키워드 롱폼 생성 시작: "${_bestKeyword}"`);
-        const _lfResult = await createLongFormAndShorts(
-          trendData.selected_items[0],
-          _bestContent.blog_draft ?? null
-        );
-        if (_lfResult.long_video?.sections?.length) {
-          const _lfIdx = approvedContentData.contents.findIndex((c) => c.keyword === _bestKeyword);
-          if (_lfIdx !== -1) {
-            approvedContentData.contents[_lfIdx] = {
-              ...approvedContentData.contents[_lfIdx],
-              long_video: _lfResult.long_video,
-            };
-          }
-          logger.info(`[app] 롱폼 생성 완료: "${_bestKeyword}" (${_lfResult.long_video.sections.length}섹션)`);
-        }
-      }
-    } catch (err) {
-      logger.warn(`[app] 롱폼 생성 실패 ("${_bestKeyword}"): ${err.message}. 쇼츠만 진행.`);
-    }
-  }
-
+  // 모든 승인 항목에 long_form_creator를 적용하여 2분 30초 영상 구조를 생성한다.
   try {
     if (approvedContentData.contents.length === 0) {
       logger.warn('[app] Agent 2.5 skipped — no text-approved items to produce.');
     } else {
-      // 롱폼 항목(최상위 키워드)과 쇼츠 전용 항목 분리
+      // long_form_creator로 모든 항목의 영상 스크립트 생성 (3섹션, 2분 30초 목표)
+      for (let i = 0; i < approvedContentData.contents.length; i++) {
+        const item = approvedContentData.contents[i];
+        logger.info(`[app] 롱폼+쇼츠 생성 시작: "${item.keyword}"`);
+        try {
+          const lfResult = await createLongFormAndShorts(item, item.blog_draft ?? null);
+          if (lfResult.long_video?.sections?.length) {
+            approvedContentData.contents[i] = { ...item, long_video: lfResult.long_video };
+            logger.info(`[app] 롱폼 생성 완료: "${item.keyword}" (${lfResult.long_video.sections.length}섹션)`);
+          }
+        } catch (err) {
+          logger.warn(`[app] 롱폼 생성 실패 ("${item.keyword}"): ${err.message}. content_creator 섹션으로 대체.`);
+        }
+      }
+
+      // 롱폼 항목 미디어 생성
       const _longformItems   = approvedContentData.contents.filter((c) => c.long_video?.sections?.length);
       const _shortsOnlyItems = approvedContentData.contents.filter((c) => !c.long_video?.sections?.length);
 
@@ -1112,6 +1101,9 @@ if (_isDirectEntry) {
       // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
       startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
       startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+      // 실적 검토: 매주 월요일 오전 9시 KST (0 0 * * 1)
+      const perfCron = process.env.PERF_REVIEW_CRON || '0 0 * * 1';
+      startScheduler(runPerformanceReview, perfCron);
 
       // 최초 기동 시 두 파이프라인 모두 순차 실행
       try {

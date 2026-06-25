@@ -15,8 +15,8 @@ const router = Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 출력 디렉토리
-const OUTPUT_DIR = path.resolve(__dirname, '../../output/web-pipeline');
+// 출력 디렉토리 — web/uploads/ 하위에 저장해야 Express 정적 서빙이 가능
+const OUTPUT_DIR = path.resolve(__dirname, '../uploads/web-pipeline');
 
 /**
  * 디렉토리 초기화
@@ -271,9 +271,9 @@ router.post('/tts', async (req, res) => {
       return res.json({
         success: true,
         mp3_path: mp3Path,
-        mp3_url: `/uploads/${path.basename(mp3Path)}`,
+        mp3_url: `/uploads/web-pipeline/${path.basename(mp3Path)}`,
         srt_path: srtPath,
-        srt_url: `/uploads/${path.basename(srtPath)}`,
+        srt_url: `/uploads/web-pipeline/${path.basename(srtPath)}`,
         source: 'clova',
       });
     } catch (err) {

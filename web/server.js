@@ -16,6 +16,7 @@ import videosRouter from './routes/videos.js';
 import scriptRouter from './routes/script.js';
 import publishRouter from './routes/publish.js';
 import taobaoRouter from './routes/taobao.js';
+import xhsRouter from './routes/xhs.js';
 import logger from '../src/utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -51,8 +52,9 @@ const jobStore = new Map();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// 정적 파일 서빙 (public 디렉토리)
+// 정적 파일 서빙
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // API 라우터
 app.use('/api/trending', trendingRouter);
@@ -60,6 +62,7 @@ app.use('/api/videos', videosRouter);
 app.use('/api/script', scriptRouter);
 app.use('/api/publish', publishRouter);
 app.use('/api/taobao', taobaoRouter);
+app.use('/api/xhs', xhsRouter);
 
 /**
  * 완성 영상 업로드
@@ -122,6 +125,7 @@ const ALLOWED_IMAGE_HOSTS = [
   'i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com',  // Bilibili CDN
   'images.pexels.com',
   'img.alicdn.com', 'gw.alicdn.com',                 // Taobao
+  'sns-img-hw.xhscdn.com', 'sns-img-bd.xhscdn.com', // XHS
   'via.placeholder.com',
 ];
 app.get('/api/proxy-image', async (req, res) => {
@@ -129,7 +133,9 @@ app.get('/api/proxy-image', async (req, res) => {
   if (!url) return res.status(400).send('url 파라미터 필요');
   try {
     const parsed = new URL(url);
-    const allowed = ALLOWED_IMAGE_HOSTS.some(h => parsed.hostname.endsWith(h));
+    const allowed = ALLOWED_IMAGE_HOSTS.some(h =>
+      parsed.hostname === h || parsed.hostname.endsWith('.' + h)
+    );
     if (!allowed) return res.status(403).send('허용되지 않은 이미지 호스트');
 
     const referer = parsed.hostname.includes('hdslb') ? 'https://www.bilibili.com/'
@@ -143,7 +149,9 @@ app.get('/api/proxy-image', async (req, res) => {
         ...(referer && { Referer: referer }),
       },
     });
-    const ct = imgRes.headers['content-type'] || 'image/jpeg';
+    const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+    const ct = (imgRes.headers['content-type'] || 'image/jpeg').split(';')[0].trim();
+    if (!ALLOWED_MIME.includes(ct)) return res.status(400).send('허용되지 않은 콘텐츠 타입');
     res.set('Content-Type', ct);
     res.set('Cache-Control', 'public, max-age=3600');
     res.send(Buffer.from(imgRes.data));
