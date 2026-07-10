@@ -145,7 +145,7 @@ async function askBlogTopicSelection(items, timeoutSec = 120) {
   console.log(`⏱  ${timeoutSec}초 내 입력 없으면 자동 선택됩니다.\n`);
 
   // "1-3" 같은 범위 표기를 개별 번호로 펼친다 (제외 토큰 "!4"는 그대로 둠)
-  const expandRanges = (str) => str.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
+  const expandRanges = (str) => str.replace(/(\d+)\s*[-~]\s*(\d+)/g, (_, a, b) => {
     const from = parseInt(a, 10), to = parseInt(b, 10);
     return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
   });
