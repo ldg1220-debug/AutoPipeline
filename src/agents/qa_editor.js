@@ -481,9 +481,10 @@ export async function runVisionQA(textQaData) {
 // ─────────────────────────────────────────────────────────────
 // ③ 블로그 본문 QA — blog_content_enhancer 완료 후 실행
 // ─────────────────────────────────────────────────────────────
-const BLOG_MIN_SECTION_CHARS = 400;   // 섹션당 최소 글자 수 (500~800자 목표, 400자 미만 탈락)
-const BLOG_MIN_FAQ_CHARS     = 80;    // FAQ 답변 최소 글자 수
+const BLOG_MIN_SECTION_CHARS = 600;   // 섹션당 최소 글자 수 (700~1200자 목표, 600자 미만 탈락 — AdSense 얕은 콘텐츠 방어)
+const BLOG_MIN_FAQ_CHARS     = 150;   // FAQ 답변 최소 글자 수 (Featured Snippet 최소 기준)
 const BLOG_MIN_SECTION_COUNT = 4;     // 최소 섹션 수
+const BLOG_MIN_TOTAL_CHARS   = 4000;  // 글 전체 최소 글자 수 (AdSense 콘텐츠 가치 판단 기준)
 
 /**
  * LLM으로 블로그 본문 SEO 품질을 평가한다.
@@ -554,6 +555,12 @@ function validateBlogStructure(content) {
   const shortFaq = faq.filter((f) => (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
   if (shortFaq.length > 0) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
+  }
+
+  const totalChars = sections.reduce((sum, s) => sum + (s.body ?? '').length, 0)
+    + faq.reduce((sum, f) => sum + (f.a ?? '').length, 0);
+  if (totalChars < BLOG_MIN_TOTAL_CHARS) {
+    issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${BLOG_MIN_TOTAL_CHARS}자 — AdSense 콘텐츠 가치 기준)`);
   }
 
   // SEO 키워드 포함 여부 — 공백 제거 후 토큰 단위 검사 (한국어 복합어 대응)
