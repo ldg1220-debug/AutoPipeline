@@ -308,7 +308,11 @@ async function pass4FactCheck(keyword, sections) {
 
   try {
     await throttle(2000);
-    const result = await callGPT4oMini(prompt);
+    let result = await callGeminiFallback(prompt, true);
+    if (!result || !Array.isArray(result?.sections) || result.sections.length !== sections.length) {
+      logger.warn('[blog_content_enhancer] Pass 4 Gemini failed, trying OpenAI fallback');
+      result = await callGPT4oMini(prompt);
+    }
     if (Array.isArray(result?.sections) && result.sections.length === sections.length) {
       return result.sections;
     }
