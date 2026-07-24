@@ -547,6 +547,17 @@ function validateBlogStructure(content) {
     issues.push(`섹션 수 부족 (${sections.length}개, 최소 ${BLOG_MIN_SECTION_COUNT}개)`);
   }
 
+  // 제목에 현재 연도보다 2년 이상 오래된 연도가 있으면 탈락 (예: 2026년에 "2023년 정책 총정리")
+  const title = draft.title ?? '';
+  const currentYear = new Date().getFullYear();
+  const staleYearMatch = title.match(/20\d{2}/g);
+  if (staleYearMatch) {
+    const staleYears = staleYearMatch.filter((y) => Number(y) <= currentYear - 2);
+    if (staleYears.length > 0) {
+      issues.push(`제목에 오래된 연도 포함: "${staleYears.join(', ')}" — 현재(${currentYear})와 맞지 않아 신뢰도 저하`);
+    }
+  }
+
   const shortSections = sections.filter((s) => (s.body ?? '').length < BLOG_MIN_SECTION_CHARS);
   if (shortSections.length > 0) {
     issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${BLOG_MIN_SECTION_CHARS}자)`);

@@ -143,7 +143,7 @@ async function fetchPexelsImages(keyword, category, count, destDir) {
 
   const query = PEXELS_QUERY[category] ?? `${keyword} korea`;
   const res = await axios.get('https://api.pexels.com/v1/search', {
-    params: { query, per_page: count + 2, orientation: 'landscape' },
+    params: { query, per_page: count + 5, orientation: 'landscape', page: Math.floor(Math.random() * 4) + 1 },
     headers: { Authorization: apiKey },
     timeout: 10000,
   });
