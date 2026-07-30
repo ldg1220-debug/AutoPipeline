@@ -1093,12 +1093,14 @@ async function askUploadOption() {
     rl.question(
       '\n실행 옵션을 선택하세요:\n' +
       '  1. 전체 플로우  (영상 제작 + 블로그 + YouTube 업로드)\n' +
-      '  2. 업로드 전까지 (영상 제작 + 블로그만, 업로드는 나중에)\n\n' +
-      '선택 [1/2] (기본값 1, 30초 후 자동 선택): ',
+      '  2. 업로드 전까지 (영상 제작 + 블로그만, 업로드는 나중에)\n' +
+      '  3. 블로그만    (영상 제작 없이 블로그만 생성)\n\n' +
+      '선택 [1/2/3] (기본값 1, 30초 후 자동 선택): ',
       (answer) => {
         clearTimeout(timer);
         rl.close();
-        resolve(answer.trim() !== '2');
+        const choice = answer.trim();
+        resolve(choice === '3' ? 'blog-only' : choice !== '2');
       }
     );
   });
@@ -1115,11 +1117,16 @@ if (_isDirectEntry) {
     }
 
     if (config.runtime.videoPipelineEnabled) {
-      const doYouTubeUpload = await askUploadOption();
-      config.runtime.youtubeUpload = doYouTubeUpload;
-
-      if (!doYouTubeUpload) {
-        logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+      const uploadChoice = await askUploadOption();
+      if (uploadChoice === 'blog-only') {
+        config.runtime.youtubeUpload = false;
+        config.runtime.videoPipelineEnabled = false;
+        logger.info('[app] 옵션 3 — 영상 제작 없이 블로그만 생성.');
+      } else {
+        config.runtime.youtubeUpload = uploadChoice;
+        if (!uploadChoice) {
+          logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+        }
       }
     } else {
       config.runtime.youtubeUpload = false;
