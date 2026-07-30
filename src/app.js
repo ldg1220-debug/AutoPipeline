@@ -681,7 +681,17 @@ async function runBlogPipeline(youtubeResults = null) {
   }
 
   // ── Topic Grouper: 같은 주제 키워드 묶기 ─────────────────────────────
-  // 주제가 다르면 각각 별도 포스트, 겹치면 합쳐서 하나의 풍부한 포스트로
+  // force-keyword는 단독 포스트로 확정 — 그룹핑에서 제외 후 복원
+  let forcedItem = null;
+  if (_forceKeyword) {
+    const fidx = keywordData.contents.findIndex(
+      (c) => c.keyword.toLowerCase() === _forceKeyword.toLowerCase()
+    );
+    if (fidx !== -1) {
+      [forcedItem] = keywordData.contents.splice(fidx, 1);
+    }
+  }
+
   try {
     keywordData = await groupSimilarTopics(keywordData);
     logger.info(
@@ -691,6 +701,11 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.warn('[app] Topic grouping failed. Continuing with original keywords.', {
       message: err.message,
     });
+  }
+
+  // force-keyword를 단독 포스트로 맨 앞에 복원
+  if (forcedItem) {
+    keywordData.contents.unshift(forcedItem);
   }
 
   // ── 주제 확장 + 사용자 선택 ─────────────────────────────────────────────
