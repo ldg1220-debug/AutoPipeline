@@ -634,6 +634,31 @@ async function runBlogPipeline(youtubeResults = null) {
     }
   }
 
+  // ── --force-keyword: 블로그 파이프라인에서도 강제 키워드를 맨 앞에 삽입 ──
+  if (_forceKeyword) {
+    const alreadyIn = keywordData.contents.some(
+      (c) => c.keyword.toLowerCase() === _forceKeyword.toLowerCase()
+    );
+    if (!alreadyIn) {
+      keywordData.contents.unshift({
+        keyword:  _forceKeyword,
+        category: _forceCategory,
+        score:    100,
+        commercial: 1,
+        sources:  'forced',
+        forced:   true,
+      });
+    } else {
+      // 이미 있으면 맨 앞으로 이동
+      const idx = keywordData.contents.findIndex(
+        (c) => c.keyword.toLowerCase() === _forceKeyword.toLowerCase()
+      );
+      const [item] = keywordData.contents.splice(idx, 1);
+      keywordData.contents.unshift(item);
+    }
+    logger.info(`[app] Blog --force-keyword: "${_forceKeyword}" → 최우선 처리`);
+  }
+
   // YouTube 발행 결과 로드 — 직접 전달 우선, 없으면 오늘 저장 파일에서 읽기
   if (!youtubeResults?.results?.length) {
     try {
