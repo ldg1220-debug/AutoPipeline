@@ -67,7 +67,7 @@ async function fetchCourseBrief(region, days) {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
     const res = await axios.get(`${apiBase}${COURSE_BRIEF_PATH}`, {
       params: { region, days },
-      timeout: 8000,
+      timeout: 15000,
     });
     return res.data ?? null;
   } catch (err) {
