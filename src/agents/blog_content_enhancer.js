@@ -226,9 +226,9 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
 }
 
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
-// tripData: 트레쥴 코스 API의 spots 배열 (C-1 스펙). Part 1.7(tradule_source.js)이
-// 아직 없으므로 기본값 []. 붙는 즉시 실제 데이터가 프롬프트에 주입된다.
-async function pass3Body(keyword, section, targetReader, outlineContext, isFirstSection = false, tripData = []) {
+// tripData: 트레쥴 코스 API 응답 { region, days, totalDistanceKm, spots, appUrl } (C-1 스펙).
+// tradule_source.js(Part 1.7)가 채운다 — 없으면 null, 프롬프트에는 빈 배열로 대체 표기.
+async function pass3Body(keyword, section, targetReader, outlineContext, isFirstSection = false, tripData = null) {
   const template = await loadPrompt('blog_pass3_body.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt = fillTemplate(template, {
@@ -531,8 +531,9 @@ async function enhanceBlogDraft(content) {
   const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
     (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
-  // 트레쥴 코스 데이터 (Part 1.7이 keywordData.contents[].trip_data로 주입 예정 — 아직 없으면 [])
-  const tripData = content.trip_data ?? [];
+  // 트레쥴 코스 데이터 — tradule_source.js(Part 1.7)가 keywordData.contents[].trip_data에
+  // { region, days, totalDistanceKm, spots, appUrl } 형태로 주입한다. 없으면 null.
+  const tripData = content.trip_data ?? null;
 
   const completedSections = [];
   for (let i = 0; i < bodySections.length; i++) {

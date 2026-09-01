@@ -16,6 +16,18 @@ function buildSignature(timestamp, method, uri, secretKey) {
   return crypto.createHmac('sha256', secretKey).update(message).digest('base64');
 }
 
+/**
+ * monthlyPcQcCnt/monthlyMobileQcCnt 파싱.
+ * 네이버는 검색량이 매우 적은 키워드를 숫자가 아닌 "< 10" 문자열로 반환한다.
+ * Number("< 10")은 NaN이 되어 그대로 두면 0으로 떨어져 실제보다 과소평가된다("< 10"은
+ * 0이 아니라 "10 미만"이라는 뜻) → 문자열에서 숫자만 추출해 사용한다.
+ */
+function parseQcCnt(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const match = String(value ?? '').match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
 function buildHeaders() {
   const { apiKey, secretKey, customerId } = config.naverSearchAd ?? {};
   const timestamp = String(Date.now());
@@ -64,9 +76,8 @@ export async function fetchMonthlyVolumeMap(keywords) {
     const list = await fetchKeywordVolume(chunk);
     for (const item of list) {
       const norm = (item.relKeyword ?? '').replace(/\s+/g, '');
-      const pc     = Number(item.monthlyPcQcCnt)     || 0;
-      const mobile = Number(item.monthlyMobileQcCnt) || 0;
-      // "< 10" 같은 특수 표기가 문자열로 오는 경우가 있어 NaN이면 0 취급하지 않고 낮은 값으로 처리
+      const pc     = parseQcCnt(item.monthlyPcQcCnt);
+      const mobile = parseQcCnt(item.monthlyMobileQcCnt);
       volumeMap[norm] = pc + mobile;
     }
   }

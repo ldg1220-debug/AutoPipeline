@@ -156,7 +156,7 @@ async function applySearchVolumeGate(candidates) {
   }
 
   if (dropped.length > 0) {
-    logger.info(`[keyword_miner] 검색량 게이트 탈락 (월 ${minVolume}건 미만): ${dropped.join(', ')}`);
+    logger.info(`[keyword_miner] 검색량 게이트 탈락 (임계값 ${minVolume}): ${dropped.join(', ')}`);
   }
 
   return passed;

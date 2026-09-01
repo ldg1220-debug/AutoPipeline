@@ -105,7 +105,8 @@ export const config = {
   // B-2-1: 반자동 운용 — blog_publisher.js가 원고를 output/blog/naver_*.md 로 별도 저장,
   // 사람이 수동으로 네이버 블로그에 복사·붙여넣기 한다.
   tradule: {
-    apiUrl: process.env.TRADULE_API_URL || 'https://www.tradule.co.kr/api/content/course-brief',
+    // 베이스 도메인만 (엔드포인트 경로는 tradule_source.js가 붙임) — 지시서 3-1 기준
+    apiBase: process.env.TRADULE_API_BASE || 'https://www.tradule.co.kr',
   },
   travelpayouts: {
     partnerId: process.env.TRAVELPAYOUTS_PARTNER_ID,

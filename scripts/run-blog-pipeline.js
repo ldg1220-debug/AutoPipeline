@@ -16,6 +16,7 @@ import { runBlogQA } from '../src/agents/qa_editor.js';
 import { runProjectManagerReview } from '../src/agents/project_manager.js';
 import { groupSimilarTopics } from '../src/agents/topic_grouper.js';
 import { analyzeCompetitors } from '../src/agents/competitor_analyzer.js';
+import { attachTripData } from '../src/agents/tradule_source.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -713,6 +714,29 @@ async function main() {
     logger.info('[blog:pipeline] Part 1.6 완료 (경쟁 채널 분석).');
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.6 Competitor Analyzer 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.7: Tradule Source — 여행 코스 실데이터(평점·리뷰수·동선) 주입
+  try {
+    contentData.contents = (await attachTripData(contentData)).contents;
+    const skipped = contentData.contents.filter((c) => c.skip_reason);
+    if (skipped.length > 0) {
+      logger.info(
+        `[blog:pipeline] Part 1.7: 트레쥴 데이터 부족으로 ${skipped.length}개 스킵: ` +
+        skipped.map((c) => `"${c.keyword}"(${c.skip_reason})`).join(', ')
+      );
+    }
+    // C-2 계약: 스팟 3개 미만(=trip_data 없이 skip_reason만 있는 항목)은 글을 쓰지 않는다.
+    // 단, 지역 매칭 자체가 안 된 키워드(여행 코스가 아닌 일반 키워드)는 trip_data 없이도 통과시킨다.
+    contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+    logger.info(`[blog:pipeline] Part 1.7 완료. 진행 대상: ${contentData.contents.length}개`);
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.7 Tradule Source 실패 (계속 진행, trip_data 없이): ${err.message}`);
+  }
+
+  if (!contentData.contents.length) {
+    logger.warn('[blog:pipeline] Part 1.7 이후 남은 키워드 없음. 종료.');
+    process.exit(0);
   }
 
   // Part 2: Content Enhancer
