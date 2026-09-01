@@ -106,14 +106,14 @@ async function fetchYouTubeSuggest(seed) {
   }
 }
 
-// 네이버 데이터랩 트렌드 API (API 키 있을 때만)
-async function fetchNaverDatalab(keywords) {
+// 네이버 데이터랩 트렌드 API (API 키 있을 때만) — 최대 5개씩 배치 요청
+async function fetchNaverDatalabBatch(keywords) {
   const clientId = config.naverDatalab?.clientId;
   const clientSecret = config.naverDatalab?.clientSecret;
   if (!clientId || !clientSecret || keywords.length === 0) return {};
 
   try {
-    const keywordGroups = keywords.slice(0, 5).map((kw) => ({
+    const keywordGroups = keywords.map((kw) => ({
       groupName: kw,
       keywords: [kw],
     }));
@@ -148,6 +148,52 @@ async function fetchNaverDatalab(keywords) {
     logger.warn(`[keyword_miner] Naver datalab failed: ${err.message}`);
     return {};
   }
+}
+
+// 후보 키워드 전체를 5개씩 나눠 데이터랩 점수를 조회한다 (API 그룹당 최대 5개 제한).
+async function fetchNaverDatalab(keywords) {
+  if (!config.naverDatalab?.clientId || !config.naverDatalab?.clientSecret || keywords.length === 0) {
+    return {};
+  }
+
+  const result = {};
+  for (let i = 0; i < keywords.length; i += 5) {
+    const chunk = keywords.slice(i, i + 5);
+    await throttle(300);
+    Object.assign(result, await fetchNaverDatalabBatch(chunk));
+  }
+  return result;
+}
+
+/**
+ * 데이터랩 검색량 게이트 — 상대 검색 비율이 임계값 미만인 키워드는 탈락시킨다.
+ * (194편 실패 원인: 검색량이 사실상 없는 주제로 글을 써서 노출이 안 됨)
+ * API 키 미설정 시 게이트를 적용하지 않고 전체 통과(fail-open).
+ */
+function applySearchVolumeGate(candidates, datalabScores) {
+  if (!config.naverDatalab?.clientId || !config.naverDatalab?.clientSecret) {
+    return candidates; // 데이터랩 미설정 — 게이트 스킵
+  }
+
+  const minScore = config.naverDatalab.minScore ?? 0.05;
+  const passed = [];
+  const dropped = [];
+
+  for (const c of candidates) {
+    const score = datalabScores[c.keyword];
+    // 데이터가 아예 없는 경우(신조어 등)는 판단 불가 — fail-open으로 통과시킴
+    if (score === undefined || score >= minScore) {
+      passed.push(c);
+    } else {
+      dropped.push(c.keyword);
+    }
+  }
+
+  if (dropped.length > 0) {
+    logger.info(`[keyword_miner] 검색량 게이트 탈락 (임계값 ${minScore}): ${dropped.join(', ')}`);
+  }
+
+  return passed;
 }
 
 function classifyCategory(keyword) {
@@ -398,17 +444,18 @@ export async function mineKeywords(seeds, topN = 30) {
     logger.info(`[keyword_miner] "${seed}" → ${seedSuggestions.length}개 제안 수집`);
   }
 
-  // 데이터랩 트렌드 보정 (상위 후보만, API 키 있을 때)
-  const candidateKeywords = [...new Set(allSuggestions.map((s) => s.keyword))].slice(0, 20);
-  const datalabScores = await fetchNaverDatalab(candidateKeywords);
+  // 1차 점수 계산 — 데이터랩 트렌드 보정은 아직 전체 후보 대상으로 못 함 (배치 전이므로 스킵)
+  const scored = scoreKeywords(allSuggestions, {});
+  const shortlisted = filterNewKeywords(scored).slice(0, topN * 2); // 게이트 탈락분 감안해 여유 있게 추출
 
-  const scored = scoreKeywords(allSuggestions, datalabScores);
-  const shortlisted = filterNewKeywords(scored).slice(0, topN);
+  // 데이터랩 검색량 게이트 — 실제로 글로 쓸 후보만 대상으로 조회 (여기서 걸러야 197편 같은 실패가 안 남)
+  const datalabScores = await fetchNaverDatalab(shortlisted.map((k) => k.keyword));
+  const gated = applySearchVolumeGate(shortlisted, datalabScores).slice(0, topN);
 
   // 정규식으로 못 거른 "단어는 멀쩍한데 뜻이 안 통하는" 노이즈를 LLM으로 한 번 더 검증
-  const sane = await filterIncoherentKeywords(shortlisted.map((k) => k.keyword));
+  const sane = await filterIncoherentKeywords(gated.map((k) => k.keyword));
   const saneSet = new Set(sane);
-  const newKeywords = shortlisted.filter((k) => saneSet.has(k.keyword));
+  const newKeywords = gated.filter((k) => saneSet.has(k.keyword));
 
   saveKeywords(newKeywords);
   logger.info(`[keyword_miner] ${newKeywords.length}개 신규 키워드 저장 (DB 중복 제외)`);

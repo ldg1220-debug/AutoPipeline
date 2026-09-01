@@ -86,8 +86,23 @@ export const config = {
     accessToken: process.env.TIKTOK_ACCESS_TOKEN,
   },
   naverDatalab: {
+    // 검색량 게이트 전용 앱 — 네이버 블로그 발행용 NAVER_CLIENT_ID/SECRET과는 별개 앱으로 등록할 것
+    clientId:     process.env.NAVER_DATALAB_CLIENT_ID ?? process.env.NAVER_CLIENT_ID,
+    clientSecret: process.env.NAVER_DATALAB_CLIENT_SECRET ?? process.env.NAVER_CLIENT_SECRET,
+    minScore:     Number(process.env.NAVER_DATALAB_MIN_SCORE ?? 0.05),
+  },
+  naverPublisher: {
     clientId:     process.env.NAVER_CLIENT_ID,
     clientSecret: process.env.NAVER_CLIENT_SECRET,
+    accessToken:  process.env.NAVER_ACCESS_TOKEN,
+    refreshToken: process.env.NAVER_REFRESH_TOKEN,
+  },
+  tradule: {
+    apiUrl: process.env.TRADULE_API_URL || 'https://www.tradule.co.kr/api/content/course-brief',
+  },
+  travelpayouts: {
+    partnerId: process.env.TRAVELPAYOUTS_PARTNER_ID,
+    marker:    process.env.TRAVELPAYOUTS_MARKER,
   },
   coupang: {
     accessKey:  process.env.COUPANG_ACCESS_KEY,
