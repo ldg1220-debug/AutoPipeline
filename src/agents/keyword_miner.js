@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
+import { fetchMonthlyVolumeMap } from '../utils/naverSearchAd.js';
 import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -106,68 +107,14 @@ async function fetchYouTubeSuggest(seed) {
   }
 }
 
-// 네이버 데이터랩 트렌드 API (API 키 있을 때만) — 최대 5개씩 배치 요청
-async function fetchNaverDatalabBatch(keywords) {
-  const clientId = config.naverDatalab?.clientId;
-  const clientSecret = config.naverDatalab?.clientSecret;
-  if (!clientId || !clientSecret || keywords.length === 0) return {};
-
-  try {
-    const keywordGroups = keywords.map((kw) => ({
-      groupName: kw,
-      keywords: [kw],
-    }));
-
-    const res = await axios.post(
-      'https://openapi.naver.com/v1/datalab/search',
-      {
-        startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-        endDate: new Date().toISOString().slice(0, 10),
-        timeUnit: 'week',
-        keywordGroups,
-      },
-      {
-        headers: {
-          'X-Naver-Client-Id': clientId,
-          'X-Naver-Client-Secret': clientSecret,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
-      }
-    );
-
-    // 최근 1개월 평균 트렌드 점수 (0~100) 반환
-    const result = {};
-    for (const group of res.data?.results ?? []) {
-      const data = group.data ?? [];
-      const avg = data.reduce((s, d) => s + d.ratio, 0) / (data.length || 1);
-      result[group.title] = avg / 100; // 0~1 정규화
-    }
-    return result;
-  } catch (err) {
-    logger.warn(`[keyword_miner] Naver datalab failed: ${err.message}`);
-    return {};
-  }
-}
-
-// 후보 키워드 전체를 5개씩 나눠 데이터랩 점수를 조회한다 (API 그룹당 최대 5개 제한).
-async function fetchNaverDatalab(keywords) {
-  if (!config.naverDatalab?.clientId || !config.naverDatalab?.clientSecret || keywords.length === 0) {
-    return {};
-  }
-
-  const result = {};
-  for (let i = 0; i < keywords.length; i += 5) {
-    const chunk = keywords.slice(i, i + 5);
-    await throttle(300);
-    Object.assign(result, await fetchNaverDatalabBatch(chunk));
-  }
-  return result;
-}
-
 /**
- * 데이터랩 검색량 게이트 — 상대 검색 비율이 임계값 미만인 키워드는 탈락시킨다.
+ * 검색량 게이트 — 네이버 검색광고 키워드도구의 절대 월간 검색수(PC+모바일)가
+ * 임계값(NAVER_MIN_MONTHLY_VOLUME, 기본 300) 미만인 키워드는 탈락시킨다.
  * (194편 실패 원인: 검색량이 사실상 없는 주제로 글을 써서 노출이 안 됨)
+ *
+ * 데이터랩(2026-08-27 확인: 앱 등록 화면에 데이터랩·검색 API 자체가 없어 발급 불가)을
+ * 대체해 검색광고 API(searchad.naver.com, 별개 시스템)를 쓴다 — 상대 비율이 아닌
+ * 절대 검색수를 반환하므로 "월 300건 이상" 같은 의미 있는 기준을 세울 수 있다.
  *
  * 키 미설정 시 동작:
  *   - autoMode(스케줄 트리거 / --auto) → fail-closed: 에러를 던져 파이프라인을 중단한다.
@@ -175,37 +122,41 @@ async function fetchNaverDatalab(keywords) {
  *     조용히 스킵되는 것이 가장 위험하다.
  *   - 수동 실행(기본값, --dry 포함) → fail-open: 경고만 남기고 통과시킨다.
  */
-function applySearchVolumeGate(candidates, datalabScores) {
-  if (!config.naverDatalab?.clientId || !config.naverDatalab?.clientSecret) {
+async function applySearchVolumeGate(candidates) {
+  const { apiKey, secretKey, customerId } = config.naverSearchAd ?? {};
+  if (!apiKey || !secretKey || !customerId) {
     if (config.runtime.autoMode) {
       throw new Error(
-        '[keyword_miner] NAVER_DATALAB_CLIENT_ID/SECRET 미설정 — 자동 실행(autoMode)에서는 ' +
-        '검색량 게이트 없이 발행할 수 없습니다. .env에 데이터랩 키를 설정하거나 ' +
+        '[keyword_miner] NAVER_SEARCHAD_API_KEY/SECRET_KEY/CUSTOMER_ID 미설정 — 자동 실행(autoMode)에서는 ' +
+        '검색량 게이트 없이 발행할 수 없습니다. searchad.naver.com에서 키를 발급해 .env에 설정하거나 ' +
         '수동 실행(--auto 없이)으로 진행하세요.'
       );
     }
     logger.warn(
-      '[keyword_miner] NAVER_DATALAB_CLIENT_ID/SECRET 미설정 — 검색량 게이트 스킵(수동 실행이라 통과).'
+      '[keyword_miner] NAVER_SEARCHAD_API_KEY 미설정 — 검색량 게이트 스킵(수동 실행이라 통과).'
     );
     return candidates;
   }
 
-  const minScore = config.naverDatalab.minScore ?? 0.05;
+  const minVolume = config.naverSearchAd.minMonthlyVolume ?? 300;
+  const volumeMap = await fetchMonthlyVolumeMap(candidates.map((c) => c.keyword));
+
   const passed = [];
   const dropped = [];
 
   for (const c of candidates) {
-    const score = datalabScores[c.keyword];
-    // 데이터가 아예 없는 경우(신조어 등)는 판단 불가 — fail-open으로 통과시킴
-    if (score === undefined || score >= minScore) {
+    const norm = c.keyword.replace(/\s+/g, '');
+    const volume = volumeMap[norm];
+    // 데이터가 아예 없는 경우(API가 해당 키워드를 인식 못함)는 판단 불가 — fail-open으로 통과
+    if (volume === undefined || volume >= minVolume) {
       passed.push(c);
     } else {
-      dropped.push(c.keyword);
+      dropped.push(`${c.keyword}(${volume})`);
     }
   }
 
   if (dropped.length > 0) {
-    logger.info(`[keyword_miner] 검색량 게이트 탈락 (임계값 ${minScore}): ${dropped.join(', ')}`);
+    logger.info(`[keyword_miner] 검색량 게이트 탈락 (월 ${minVolume}건 미만): ${dropped.join(', ')}`);
   }
 
   return passed;
@@ -233,7 +184,7 @@ function hasCommercialIntent(keyword) {
  *   competition_proxy    = keyword.length < 6 ? 0.8 : 0.3  (단어 짧을수록 경쟁 높음)
  *   commercial_intent    = 상업적 단어 포함 시 1.3, 아니면 1.0
  */
-function scoreKeywords(allSuggestions, datalabScores = {}) {
+function scoreKeywords(allSuggestions) {
   // keyword → { sources: Set, rankSum, count } 집계
   const map = new Map();
 
@@ -256,9 +207,8 @@ function scoreKeywords(allSuggestions, datalabScores = {}) {
     const rankScore = Math.max(0, 1 - avgRank / 10);
     const competition = keyword.replace(/\s/g, '').length < 6 ? 0.8 : 0.3;
     const commercial = hasCommercialIntent(keyword) ? 1.3 : 1.0;
-    const trendBonus = datalabScores[keyword] ?? 0;
-
-    const searchVolumeProxy = sourceDiversity * 0.5 + rankScore * 0.5 + trendBonus * 0.2;
+    // 실제 검색량 반영은 이후 applySearchVolumeGate(검색광고 API)가 하드 게이트로 처리한다.
+    const searchVolumeProxy = sourceDiversity * 0.5 + rankScore * 0.5;
     const score = Math.log1p(searchVolumeProxy * 10) * (1 - competition) * commercial;
 
     scored.push({
@@ -459,13 +409,12 @@ export async function mineKeywords(seeds, topN = 30) {
     logger.info(`[keyword_miner] "${seed}" → ${seedSuggestions.length}개 제안 수집`);
   }
 
-  // 1차 점수 계산 — 데이터랩 트렌드 보정은 아직 전체 후보 대상으로 못 함 (배치 전이므로 스킵)
-  const scored = scoreKeywords(allSuggestions, {});
+  // 1차 점수 계산
+  const scored = scoreKeywords(allSuggestions);
   const shortlisted = filterNewKeywords(scored).slice(0, topN * 2); // 게이트 탈락분 감안해 여유 있게 추출
 
-  // 데이터랩 검색량 게이트 — 실제로 글로 쓸 후보만 대상으로 조회 (여기서 걸러야 197편 같은 실패가 안 남)
-  const datalabScores = await fetchNaverDatalab(shortlisted.map((k) => k.keyword));
-  const gated = applySearchVolumeGate(shortlisted, datalabScores).slice(0, topN);
+  // 검색광고 API 검색량 게이트 — 실제로 글로 쓸 후보만 대상으로 조회 (여기서 걸러야 194편 같은 실패가 안 남)
+  const gated = (await applySearchVolumeGate(shortlisted)).slice(0, topN);
 
   // 정규식으로 못 거른 "단어는 멀쩍한데 뜻이 안 통하는" 노이즈를 LLM으로 한 번 더 검증
   const sane = await filterIncoherentKeywords(gated.map((k) => k.keyword));

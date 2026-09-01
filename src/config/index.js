@@ -85,18 +85,25 @@ export const config = {
   tiktok: {
     accessToken: process.env.TIKTOK_ACCESS_TOKEN,
   },
+  // 검색량 게이트용으로는 폐기(2026-08-27 확인: 앱 등록 화면에 데이터랩·검색 API 없음 — 발급 불가).
+  // 아래 naverSearchAd로 대체. 이 블록은 competitor_analyzer.js(searchNaverBlogs)가
+  // 여전히 참조하므로 하위 호환을 위해 남겨둠 — 키가 없으면 해당 함수가 빈 배열을 반환하며
+  // 조용히 스킵되도록 이미 방어돼 있음(B-4: competitor_analyzer.js는 그대로 둔다).
   naverDatalab: {
-    // 검색량 게이트 전용 앱 — 네이버 블로그 발행용 NAVER_CLIENT_ID/SECRET과는 별개 앱으로 등록할 것
-    clientId:     process.env.NAVER_DATALAB_CLIENT_ID ?? process.env.NAVER_CLIENT_ID,
-    clientSecret: process.env.NAVER_DATALAB_CLIENT_SECRET ?? process.env.NAVER_CLIENT_SECRET,
-    minScore:     Number(process.env.NAVER_DATALAB_MIN_SCORE ?? 0.05),
+    clientId:     process.env.NAVER_DATALAB_CLIENT_ID,
+    clientSecret: process.env.NAVER_DATALAB_CLIENT_SECRET,
   },
-  naverPublisher: {
-    clientId:     process.env.NAVER_CLIENT_ID,
-    clientSecret: process.env.NAVER_CLIENT_SECRET,
-    accessToken:  process.env.NAVER_ACCESS_TOKEN,
-    refreshToken: process.env.NAVER_REFRESH_TOKEN,
+  // 검색량 게이트는 네이버 검색광고 키워드도구(searchad.naver.com, 별개 시스템)로 대체.
+  // 절대 월간 검색수(PC+모바일)를 반환하므로 "월 300건 이상" 같은 의미 있는 기준을 쓸 수 있음.
+  naverSearchAd: {
+    apiKey:      process.env.NAVER_SEARCHAD_API_KEY,
+    secretKey:   process.env.NAVER_SEARCHAD_SECRET_KEY,
+    customerId:  process.env.NAVER_SEARCHAD_CUSTOMER_ID,
+    minMonthlyVolume: Number(process.env.NAVER_MIN_MONTHLY_VOLUME ?? 300),
   },
+  // 네이버 블로그 글쓰기 API는 2020-05-06 종료됨(광고성 글 대량 게재 방지) — 자동 발행 불가.
+  // B-2-1: 반자동 운용 — blog_publisher.js가 원고를 output/blog/naver_*.md 로 별도 저장,
+  // 사람이 수동으로 네이버 블로그에 복사·붙여넣기 한다.
   tradule: {
     apiUrl: process.env.TRADULE_API_URL || 'https://www.tradule.co.kr/api/content/course-brief',
   },
