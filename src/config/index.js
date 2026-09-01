@@ -164,6 +164,11 @@ export const config = {
   },
   runtime: {
     dryRun:           process.env.DRY_RUN === 'true',
+    // true = 무인 자동 발행(스케줄러 트리거 또는 --auto 플래그). 이 모드에서는
+    // 검색량 게이트 같은 안전장치가 fail-closed로 동작한다(설정 누락 시 파이프라인 중단).
+    // false(기본, 수동 실행/--dry)에서는 안전장치가 경고 후 통과(fail-open)한다.
+    // scheduler.js가 스케줄 트리거 시점에 true로 전환한다.
+    autoMode:         process.argv.includes('--auto'),
     // YouTube 계정 삭제(2026-06) 이후 false — 영상 제작/업로드 파이프라인 전체 중단, 블로그만 운영
     // 새 채널 생성 후 true로 되돌리면 영상 파이프라인 재개
     videoPipelineEnabled: process.env.VIDEO_PIPELINE_ENABLED !== 'false',

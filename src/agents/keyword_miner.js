@@ -168,11 +168,26 @@ async function fetchNaverDatalab(keywords) {
 /**
  * 데이터랩 검색량 게이트 — 상대 검색 비율이 임계값 미만인 키워드는 탈락시킨다.
  * (194편 실패 원인: 검색량이 사실상 없는 주제로 글을 써서 노출이 안 됨)
- * API 키 미설정 시 게이트를 적용하지 않고 전체 통과(fail-open).
+ *
+ * 키 미설정 시 동작:
+ *   - autoMode(스케줄 트리거 / --auto) → fail-closed: 에러를 던져 파이프라인을 중단한다.
+ *     게이트 없는 자동 발행은 이 게이트를 만들기 이전과 결과가 같아지므로,
+ *     조용히 스킵되는 것이 가장 위험하다.
+ *   - 수동 실행(기본값, --dry 포함) → fail-open: 경고만 남기고 통과시킨다.
  */
 function applySearchVolumeGate(candidates, datalabScores) {
   if (!config.naverDatalab?.clientId || !config.naverDatalab?.clientSecret) {
-    return candidates; // 데이터랩 미설정 — 게이트 스킵
+    if (config.runtime.autoMode) {
+      throw new Error(
+        '[keyword_miner] NAVER_DATALAB_CLIENT_ID/SECRET 미설정 — 자동 실행(autoMode)에서는 ' +
+        '검색량 게이트 없이 발행할 수 없습니다. .env에 데이터랩 키를 설정하거나 ' +
+        '수동 실행(--auto 없이)으로 진행하세요.'
+      );
+    }
+    logger.warn(
+      '[keyword_miner] NAVER_DATALAB_CLIENT_ID/SECRET 미설정 — 검색량 게이트 스킵(수동 실행이라 통과).'
+    );
+    return candidates;
   }
 
   const minScore = config.naverDatalab.minScore ?? 0.05;
