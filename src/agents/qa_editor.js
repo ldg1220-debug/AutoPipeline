@@ -485,6 +485,10 @@ const BLOG_MIN_SECTION_CHARS = 600;   // 섹션당 최소 글자 수 (700~1200�
 const BLOG_MIN_FAQ_CHARS     = 150;   // FAQ 답변 최소 글자 수 (Featured Snippet 최소 기준)
 const BLOG_MIN_SECTION_COUNT = 4;     // 최소 섹션 수
 const BLOG_MIN_TOTAL_CHARS   = 4000;  // 글 전체 최소 글자 수 (AdSense 콘텐츠 가치 판단 기준)
+// 여행 코스 콘텐츠(트레쥴 연동) 대상 — 섹션당 최소 구체 수치 언급 개수.
+// "많은 사람들이 찾는 곳" 같은 막연한 서술만 있는 섹션은 탈락시킨다.
+// 평점(4.2), 리뷰수(7,845개), 거리(12.4km), 이동시간(8분) 등 숫자 형태로 카운트.
+const BLOG_MIN_NUMBERS_PER_SECTION = 2;
 
 /**
  * LLM으로 블로그 본문 SEO 품질을 평가한다.
@@ -561,6 +565,19 @@ function validateBlogStructure(content) {
   const shortSections = sections.filter((s) => (s.body ?? '').length < BLOG_MIN_SECTION_CHARS);
   if (shortSections.length > 0) {
     issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${BLOG_MIN_SECTION_CHARS}자)`);
+  }
+
+  // 구체 수치 검사 — FAQ가 아닌 본문 섹션만 대상 (막연한 일반론 방어)
+  const numericPattern = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
+  const thinSections = sections.filter((s) => {
+    const matches = (s.body ?? '').match(numericPattern) ?? [];
+    return matches.length < BLOG_MIN_NUMBERS_PER_SECTION;
+  });
+  if (thinSections.length > 0) {
+    issues.push(
+      `구체 수치 부족: [${thinSections.map((s) => s.heading).join(', ')}] ` +
+      `(섹션당 최소 ${BLOG_MIN_NUMBERS_PER_SECTION}개 — 평점·리뷰수·거리·시간 등 실제 수치 인용 필요)`
+    );
   }
 
   const shortFaq = faq.filter((f) => (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);

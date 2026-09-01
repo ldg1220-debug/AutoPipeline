@@ -226,7 +226,9 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
 }
 
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
-async function pass3Body(keyword, section, targetReader, outlineContext, isFirstSection = false) {
+// tripData: 트레쥴 코스 API의 spots 배열 (C-1 스펙). Part 1.7(tradule_source.js)이
+// 아직 없으므로 기본값 []. 붙는 즉시 실제 데이터가 프롬프트에 주입된다.
+async function pass3Body(keyword, section, targetReader, outlineContext, isFirstSection = false, tripData = []) {
   const template = await loadPrompt('blog_pass3_body.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt = fillTemplate(template, {
@@ -236,6 +238,7 @@ async function pass3Body(keyword, section, targetReader, outlineContext, isFirst
     target_reader: targetReader,
     context:       outlineContext,
     today,
+    trip_data:     JSON.stringify(tripData ?? []),
     first_section_note: isFirstSection
       ? `【검색엔진 노출 — 이 섹션은 글의 첫 번째 섹션입니다】\n첫 1~2문장 안에 키워드("${keyword}")를 그대로, 자연스럽게 포함하세요. Tistory/검색결과 미리보기는 본문 앞부분을 그대로 발췌해 보여주므로, 키워드 없이 도입부를 시작하면 검색 노출에서 손해를 봅니다.`
       : '',
@@ -528,10 +531,13 @@ async function enhanceBlogDraft(content) {
   const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
     (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
+  // 트레쥴 코스 데이터 (Part 1.7이 keywordData.contents[].trip_data로 주입 예정 — 아직 없으면 [])
+  const tripData = content.trip_data ?? [];
+
   const completedSections = [];
   for (let i = 0; i < bodySections.length; i++) {
     const section = bodySections[i];
-    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0);
+    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, tripData);
     completedSections.push({ level: section.level, heading: section.heading, body });
   }
 
