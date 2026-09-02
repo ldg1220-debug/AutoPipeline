@@ -600,9 +600,11 @@ async function runBlogPipeline(youtubeResults = null) {
       const limit = config.runtime.blogPostsPerDay ?? 5;
       // DB에 오래 전 적재된 키워드는 이후 추가된 블랙리스트 규칙을 거치지 않았을 수 있으므로
       // 선택 시점에 다시 검증한다 (저작권 침해 등 부적합 키워드의 재유입 차단).
+      // 여행 채널 전환 이전(경제·부동산·뷰티 등) DB pending 잔여물이 다시 섞여 나오는
+      // 문제 방지 — category = 'travel'인 것만 후보로 삼는다.
       const candidateRows = db.prepare(
         `SELECT keyword, category, score, commercial, sources
-         FROM keywords WHERE status = 'pending'
+         FROM keywords WHERE status = 'pending' AND category = 'travel'
          ORDER BY score DESC LIMIT ?`
       ).all(limit * 3);
 

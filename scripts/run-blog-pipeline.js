@@ -443,21 +443,27 @@ async function main() {
   if (rawKeywords.length < targetCount) {
     const need = targetCount - rawKeywords.length;
     const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
+    // 여행 채널 전환 이전(경제·부동산·뷰티 등)에 쌓인 DB pending 잔여물이 계속 섞여 나오는
+    // 문제 방지 — category = 'travel'인 것만 보충 대상으로 삼는다.
     const dbKeywords = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT ?`)
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' ORDER BY score DESC LIMIT ?`)
       .all(need * 2);  // 중복 제거 여분 확보
     const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
     if (fillKws.length > 0) {
-      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending ${fillKws.length}개 보충`);
+      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending(travel) ${fillKws.length}개 보충`);
       rawKeywords = [...rawKeywords, ...fillKws];
+    } else {
+      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족하지만 DB pending에 travel 카테고리 후보가 없음 (${rawKeywords.length}개로 진행)`);
     }
   }
 
   // ── 예고(promised) 키워드 최우선 배치 ──────────────────────────────────
   // 이전 영상 대본에서 "다음 영상 예고"로 추출된 키워드를 가장 앞에 배치한다.
+  // VIDEO_PIPELINE_ENABLED=false(영상 중단) 이후로는 새로 생성될 일이 없고,
+  // 여행 채널 전환 이전 경제 채널 시절 잔여물만 남아있을 수 있으므로 travel만 채택한다.
   try {
     const promisedRows = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' ORDER BY score DESC`)
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' AND category = 'travel' ORDER BY score DESC`)
       .all();
     if (promisedRows.length > 0) {
       const promisedSet = new Set(promisedRows.map((r) => r.keyword.toLowerCase()));
@@ -582,8 +588,10 @@ async function main() {
 
   // Part 1.55: 이미 발행된 포스트와 중복 주제 제거 (21일 이내, 6글자 공통 부분문자열 기준)
   try {
+    // blog_posts에는 used_at 컬럼이 없음(published_at만 존재) — 잘못된 컬럼명으로
+    // 매 실행마다 이 단계 전체가 예외로 죽어 중복 제거가 조용히 스킵되고 있었음.
     const published = db
-      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published' AND used_at >= datetime('now', '-21 days')`)
+      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published' AND published_at >= datetime('now', '-21 days')`)
       .all()
       .map((r) => r.keyword.replace(/[\s&]/g, '').toLowerCase());
 
