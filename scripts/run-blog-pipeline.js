@@ -6,7 +6,7 @@
 import readline from 'readline';
 import axios from 'axios';
 import fs from 'fs';
-import { mineKeywords } from '../src/agents/keyword_miner.js';
+import { mineKeywords, generateTravelSeeds } from '../src/agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll, reloadCoupangLinks } from '../src/agents/monetizer.js';
@@ -425,7 +425,10 @@ async function main() {
   if (forceKeyword) logger.info(`[blog:pipeline] --force-keyword: "${forceKeyword}" (카테고리: ${forceCategory})`);
 
   // Part 1: Keyword Miner
-  const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
+  // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
+  const seeds = process.env.KEYWORD_SEEDS
+    ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
+    : generateTravelSeeds(30);
   const keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
   await writeJSON(`${outDir}/keywords/keywords_${date}.json`, keywordData);
 

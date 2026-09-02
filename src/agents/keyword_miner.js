@@ -6,6 +6,7 @@ import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import { fetchMonthlyVolumeMap } from '../utils/naverSearchAd.js';
+import { REGION_TREE, extractRegion } from './tradule_source.js';
 import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +30,72 @@ const BLACKLIST_PATTERNS = [
 
 export function isBlacklisted(keyword) {
   return BLACKLIST_PATTERNS.some((re) => re.test(keyword));
+}
+
+// ── 여행 채널 전환: 시드를 트레쥴 지역 트리 × 코스 패턴에서 생성 ───────────────
+// (기존 경제·부동산·뷰티 하드코딩 시드는 채널 전환 후에도 남아있었음 — 여기서 대체)
+const TRAVEL_SEED_PATTERNS = [
+  '{지역} 1박2일 코스',
+  '{지역} 당일치기',
+  '{지역} 여행 코스',
+  '{지역} 가볼만한곳',
+  '{지역} 카페거리',
+  '{지역} 맛집 코스',
+];
+
+/** 오늘의 1년 중 며칠째인지 (지역 로테이션 오프셋으로 사용). */
+function dayOfYear(date = new Date()) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const diff = date - start;
+  return Math.floor(diff / 86400000);
+}
+
+/**
+ * 최근 N일 이내 발행(status='used')된 키워드에서 지역명을 뽑아 후순위로 미룰 지역 집합을 만든다.
+ * (완전히 제외하지는 않음 — 로테이션이 한 바퀴 돌면 다시 나올 수 있어야 하므로 순서만 뒤로 미룸)
+ */
+function getRecentlyUsedRegions(withinDays = 21) {
+  const cutoff = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const rows = db.prepare(
+      `SELECT keyword FROM keywords WHERE status = 'used' AND used_at IS NOT NULL AND used_at >= ?`
+    ).all(cutoff);
+    const used = new Set();
+    for (const { keyword } of rows) {
+      const region = extractRegion(keyword);
+      if (region) used.add(region);
+    }
+    return used;
+  } catch (err) {
+    logger.warn(`[keyword_miner] 최근 발행 지역 조회 실패 (계속 진행): ${err.message}`);
+    return new Set();
+  }
+}
+
+/**
+ * 트레쥴 지역 트리 × 코스 패턴으로 시드 키워드를 생성한다.
+ * 매 실행마다 day-of-year 기준으로 지역 목록을 로테이션하고, 최근 발행된 지역은 후순위로 민다.
+ * @param {number} count - 생성할 시드 개수 (기본 30, 6개 패턴이므로 지역 5개 사용)
+ */
+export function generateTravelSeeds(count = 30) {
+  const usedRegions = getRecentlyUsedRegions();
+
+  const offset = dayOfYear() % REGION_TREE.length;
+  const rotated = [...REGION_TREE.slice(offset), ...REGION_TREE.slice(0, offset)];
+  // 최근 발행된 지역은 뒤로 밀되, 로테이션 순서 자체는 유지 (완전 제외 아님)
+  const prioritized = rotated.filter((r) => !usedRegions.has(r));
+  const deprioritized = rotated.filter((r) => usedRegions.has(r));
+  const orderedRegions = [...prioritized, ...deprioritized];
+
+  const regionsNeeded = Math.ceil(count / TRAVEL_SEED_PATTERNS.length);
+  const pickedRegions = orderedRegions.slice(0, regionsNeeded);
+
+  const seeds = pickedRegions.flatMap((region) =>
+    TRAVEL_SEED_PATTERNS.map((pattern) => pattern.replace('{지역}', region))
+  );
+
+  logger.info(`[keyword_miner] 여행 시드 생성: 지역 ${pickedRegions.length}개(${pickedRegions.join(', ')}) × 패턴 ${TRAVEL_SEED_PATTERNS.length}개`);
+  return seeds.slice(0, count);
 }
 
 // 상업적 의도 키워드 — 이 단어가 포함된 롱테일은 전환율이 높다
@@ -437,10 +504,11 @@ export async function mineKeywords(seeds, topN = 30) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {
-      const seeds = (config.keywordMiner?.seeds ?? '재테크,부동산,경기침체,금리,주식투자')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+      // KEYWORD_SEEDS 환경변수로 명시적 오버라이드한 경우만 그 값을 쓰고,
+      // 그 외에는 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
+      const seeds = process.env.KEYWORD_SEEDS
+        ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
+        : generateTravelSeeds(30);
 
       const result = await mineKeywords(seeds);
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');

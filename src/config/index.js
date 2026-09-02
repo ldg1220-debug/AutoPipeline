@@ -128,16 +128,9 @@ export const config = {
     credentials: process.env.GOOGLE_SC_CREDENTIALS,  // JSON 키 파일 경로
   },
   keywordMiner: {
-    // 카테고리 비율 목표: 경제/부동산 40% · 복지/사회 30% · 뷰티/건강 20% · 연예 10%
-    seeds:  process.env.KEYWORD_SEEDS ||
-      // 경제·금융 (10개)
-      '재테크,금리,주식투자,코인투자,ETF,달러환율,인플레이션,가계부채,경기침체,소득공제,' +
-      // 부동산 (8개)
-      '아파트청약,전세사기,재건축,부동산세금,임대차,갭투자,경매부동산,신도시,' +
-      // 복지·사회 (8개)
-      '노후준비,연금저축,실업급여,정부지원금,국민연금,복지혜택,청년지원,건강보험,' +
-      // 뷰티·건강 (4개 — 의도적으로 적게)
-      '스킨케어루틴,여드름피부,선스틱추천,수분크림추천',
+    // 시드는 기본적으로 keyword_miner.js의 generateTravelSeeds()가 트레쥴 지역 트리 ×
+    // 코스 패턴으로 매 실행마다 생성한다 (여행 채널 전환). 경제 채널 시절 하드코딩 시드는
+    // 폐기 — KEYWORD_SEEDS 환경변수를 명시적으로 설정했을 때만 그 값으로 오버라이드된다.
     topN:   parseInt(process.env.KEYWORD_TOP_N || '20', 10),
     // 카테고리별 하루 최대 발행 수 (0 = 무제한)
     categoryDailyLimit: {

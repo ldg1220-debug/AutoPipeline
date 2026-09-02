@@ -13,7 +13,7 @@ import { runTextQA, runVisionQA, runBlogQA, runContentDirectorQA } from './agent
 import { generateAllMedia, generateLongFormMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
-import { mineKeywords, isBlacklisted } from './agents/keyword_miner.js';
+import { mineKeywords, isBlacklisted, generateTravelSeeds } from './agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from './agents/blog_content_enhancer.js';
 import { buildAllAssets } from './agents/blog_asset_builder.js';
 import { monetizeAll } from './agents/monetizer.js';
@@ -580,7 +580,10 @@ async function runBlogPipeline(youtubeResults = null) {
   // ── Part 1: Keyword Miner ──────────────────────────────────────────────
   let keywordData;
   try {
-    const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
+    // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
+    const seeds = process.env.KEYWORD_SEEDS
+      ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
+      : generateTravelSeeds(30);
     keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
     await writeJSON(path.resolve(__dirname, `../output/keywords/keywords_${date}.json`), keywordData);
     logger.info(`[app] Blog Part 1 complete. Keywords: ${keywordData.contents?.length ?? 0}`);

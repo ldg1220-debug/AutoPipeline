@@ -31,10 +31,11 @@ const MIN_REVIEW_COUNT_FOR_RATING = 30;
 
 // ── 트레쥴 지역 트리 — 임의 파싱 대신 이 목록으로만 매칭한다 ──────────────────
 // 매칭 실패 시 스킵. 트레쥴 쪽 지역 목록이 늘어나면 여기 추가한다.
-const REGION_TREE = [
+// keyword_miner.js의 generateTravelSeeds()가 시드 키워드 생성에도 그대로 재사용한다.
+export const REGION_TREE = [
   '경주', '강릉', '후쿠오카',
   '서울', '부산', '제주', '전주', '여수', '통영', '속초', '춘천', '양양',
-  '대구', '인천', '수원', '전주', '군산', '목포', '거제', '남해', '담양',
+  '대구', '인천', '수원', '군산', '목포', '거제', '남해', '담양',
   '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '나트랑',
   '치앙마이', '싱가포르', '홍콩', '타이베이', '상하이', '괌', '세부',
 ];
@@ -62,12 +63,18 @@ function extractDays(keyword) {
   return 1;
 }
 
+// 첫 호출은 콜드 스타트 + 캐시 미스 + Google 라이브 조회가 겹치면 8초를 넘길 수 있음(실측:
+// 1차 실행 timeout×2 → 2분 뒤 재실행 시 캐시 히트로 즉시 응답). API 문제가 아니라 타임아웃
+// 설정 문제이므로 30초로 넉넉히 잡는다.
+const COURSE_BRIEF_TIMEOUT_MS = 30000;
+const RETRY_GAP_MS = 3000; // 콜드 스타트 회복 시간을 두고 재시도
+
 async function fetchCourseBrief(region, days) {
   try {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
     const res = await axios.get(`${apiBase}${COURSE_BRIEF_PATH}`, {
       params: { region, days },
-      timeout: 15000,
+      timeout: COURSE_BRIEF_TIMEOUT_MS,
     });
     return res.data ?? null;
   } catch (err) {
@@ -79,7 +86,7 @@ async function fetchCourseBrief(region, days) {
 async function fetchCourseBriefWithRetry(region, days) {
   let result = await fetchCourseBrief(region, days);
   if (!result) {
-    // 실패 시 1회만 재시도
+    await new Promise((r) => setTimeout(r, RETRY_GAP_MS));
     result = await fetchCourseBrief(region, days);
   }
   return result;
