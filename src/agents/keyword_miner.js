@@ -106,7 +106,10 @@ const COMMERCIAL_WORDS = [
 ];
 
 // 카테고리 분류 키워드 매핑
+// travel을 맨 앞에 둔다 — 여행 채널 전환 이후 기본 카테고리이며,
+// classifyCategory는 첫 매치를 반환하므로 순서가 우선순위다.
 const CATEGORY_MAP = {
+  travel:      ['여행', '코스', '당일치기', '1박', '2박', '가볼만한곳', '가볼 만한', '카페거리', '맛집', '관광', '스팟', '일정', '동선', '숙소', '펜션', '게스트하우스', '항공권', '패키지여행', '자유여행', '드라이브코스'],
   finance:     ['주식', '펀드', '투자', '금리', '대출', '예금', '적금', '채권', '코인', 'ETF', '배당', '증권', '재테크'],
   economy:     ['경제', 'GDP', '인플레', '물가', '환율', '무역', '수출', '수입', '경기', '금융', '한은', '기준금리'],
   realestate:  ['부동산', '아파트', '전세', '월세', '청약', '분양', '임대', '집값', '매매', '갭투자', '빌라', '오피스텔'],
@@ -233,7 +236,9 @@ function classifyCategory(keyword) {
   for (const [category, words] of Object.entries(CATEGORY_MAP)) {
     if (words.some((w) => keyword.includes(w))) return category;
   }
-  return 'economy';
+  // 여행 채널 전환 이후 기본 카테고리 — 지역명만 있고 위 키워드가 안 붙은 경우
+  // (예: "경주 1박2일 코스"에서 패턴 치환이 예상과 다르게 온 경우 등) 대비용 폴백
+  return 'travel';
 }
 
 function hasCommercialIntent(keyword) {
