@@ -103,7 +103,13 @@ const PIPELINE_STAGES = [
 
 async function reviewOutputFiles(date) {
   const results = [];
-  for (const stage of PIPELINE_STAGES) {
+  // 영상 파이프라인이 꺼져 있으면(VIDEO_PIPELINE_ENABLED=false) 스크립트/미디어 단계는
+  // 애초에 실행되지 않으므로 검수 대상에서 제외한다 (그래야 "N/전체" 비율과 이상 감지가
+  // 정확해진다 — 아래 anomaly 판정에서도 동일하게 제외).
+  const stagesToCheck = config.runtime.videoPipelineEnabled
+    ? PIPELINE_STAGES
+    : PIPELINE_STAGES.filter((s) => s.dir !== 'scripts');
+  for (const stage of stagesToCheck) {
     const filePath = path.join(OUTPUT_DIR, stage.dir, `${stage.prefix}_${date}.json`);
     const exists   = await fileExists(filePath);
     if (!exists) {
@@ -230,7 +236,8 @@ function detectAnomalies(dbStats, stageResults, qualityResults) {
   if (postFail > 3)   anomalies.push({ level: 'WARN',  area: 'blog_posts',  msg: `최근 7일 블로그 발행 실패 ${postFail}건 누적.` });
   if (stale > 50)     anomalies.push({ level: 'INFO',  area: 'image_cache', msg: `30일 미사용 이미지 캐시 ${stale}개 — 정리 권장.` });
 
-  // 파이프라인 단계 이상
+  // 파이프라인 단계 이상 — reviewOutputFiles가 영상 비활성 시 스크립트/미디어를 이미
+  // 검수 대상에서 뺐으므로, 여기 남은 MISSING은 전부 진짜 이상 신호다.
   const missingStages = stageResults.filter((s) => s.status === 'MISSING').map((s) => s.stage);
   if (missingStages.length > 0) {
     anomalies.push({ level: 'ERROR', area: 'pipeline', msg: `단계 출력 파일 없음: ${missingStages.join(', ')}` });
