@@ -14,11 +14,12 @@ import { config } from '../src/config/index.js';
 
 // 생성할 카테고리 목록 (pipeline category → Tistory 카테고리명)
 // 순서대로 생성됨. 이미 존재하는 이름은 스킵.
+// 여행 채널 전환(2026-08) 이후 카테고리. 예전 경제 채널 카테고리(경제·금융/부동산/건강/
+// 연예·사회)는 이미 만들어져 TISTORY_CATEGORY_MAP에도 등록돼 있어 그대로 두되,
+// 새 여행 콘텐츠가 갈 곳이 없어 엉뚱한 카테고리로 분류되는 문제가 있었으므로 여기 추가한다.
 const CATEGORIES_TO_CREATE = [
-  { name: '경제·금융',  description: '경제, 금리, 환율, 주식, 재테크' },
-  { name: '부동산',     description: '아파트, 전세, 청약, 분양' },
-  { name: '건강',       description: '건강, 의료, 다이어트, 운동' },
-  { name: '연예·사회',  description: '연예, 사회 이슈, 생활 정보' },
+  { name: '국내여행',   description: '국내 지역별 여행 코스, 가볼만한곳, 맛집·카페' },
+  { name: '해외여행',   description: '해외 지역별 여행 코스, 가볼만한곳, 맛집·카페' },
 ];
 
 async function getExistingCategories(page, blogName) {
