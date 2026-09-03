@@ -139,8 +139,50 @@ ${getThemeStyles(category)}
 }
 
 // ── ① TL;DR 박스 ──────────────────────────────────────────────────────────
-function buildTldrBox(sections) {
-  const bullets = (sections ?? [])
+// 지시서 A-1: "~라면 ~가 중요합니다" 식 섹션 첫 문장 복붙은 요약이 아니라 정보 0.
+// trip_data가 있으면 실제 수치·동선(거리·스팟수·평점·리뷰수)만으로 구성하고,
+// 없을 때만 기존 방식(섹션 첫 문장)으로 폴백한다.
+function buildTldrBox(sections, tripData) {
+  const bullets = tripData?.spots?.length ? buildTldrBulletsFromTripData(tripData) : buildTldrBulletsFromSections(sections);
+  if (!bullets.length) return '';
+  return (
+    `<div class="tldr-box">\n` +
+    `<h4>📋 한눈에 보기</h4>\n` +
+    `<ul>\n${bullets.join('\n')}\n</ul>\n` +
+    `</div>`
+  );
+}
+
+function buildTldrBulletsFromTripData(tripData) {
+  const spots = tripData.spots ?? [];
+  const totalHours = spots.reduce((sum, s) => sum + (s.toNextMinutes ?? 0), 0) / 60;
+  const bullets = [];
+
+  const distancePart = tripData.totalDistanceKm ? `총 이동 ${tripData.totalDistanceKm}km · ` : '';
+  const timePart = totalHours > 0 ? ` · 약 ${totalHours < 1 ? Math.round(totalHours * 60) + '분' : totalHours.toFixed(1) + '시간'}` : '';
+  bullets.push(`<li>${distancePart}${spots.length}곳${timePart}</li>`);
+
+  const route = spots
+    .map((s) => {
+      const ratingPart = (typeof s.rating === 'number' && typeof s.reviewCount === 'number')
+        ? `(★${s.rating}, 리뷰 ${s.reviewCount.toLocaleString()})`
+        : '';
+      return `${s.name}${ratingPart}`;
+    })
+    .join(' → ');
+  bullets.push(`<li>${route}</li>`);
+
+  const modes = [...new Set(spots.map((s) => s.toNextMode).filter(Boolean))];
+  if (modes.length) {
+    const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+    bullets.push(`<li>이동수단: ${modes.map((m) => modeKr[m] ?? m).join(', ')} 기준</li>`);
+  }
+
+  return bullets;
+}
+
+function buildTldrBulletsFromSections(sections) {
+  return (sections ?? [])
     .slice(0, 5)
     .map((s) => {
       // 마크다운 제거 후 첫 문장 추출
@@ -149,13 +191,6 @@ function buildTldrBox(sections) {
       return first ? `<li>${first}</li>` : null;
     })
     .filter(Boolean);
-  if (!bullets.length) return '';
-  return (
-    `<div class="tldr-box">\n` +
-    `<h4>📋 핵심 요약 (TL;DR)</h4>\n` +
-    `<ul>\n${bullets.join('\n')}\n</ul>\n` +
-    `</div>`
-  );
 }
 
 // ── ① 키워드 하이라이트 (각 키워드 첫 등장만) ─────────────────────────────
@@ -419,37 +454,46 @@ async function monetizeBlogDraft(content) {
   const affiliateMap = {};
   let hasAffiliate = false;
 
-  for (const hook of affiliateHooks) {
-    const products = await searchCoupangProducts(hook.product_category ?? keyword);
-    if (products.length > 0) {
-      affiliateMap[hook.position] = buildAffiliateBlock(products, hook.anchor_text);
-      hasAffiliate = true;
-    } else {
-      // API 없을 때: 수동 딥링크 폴백 (blog_html 있으면 우선 사용)
-      const manual = getManualCoupangLink(hook.product_category ?? keyword);
+  // 여행 채널 전환 이후 쿠팡은 콘텐츠와 무관해짐 — 제휴는 트래블페이아웃으로 대체 예정(순위 5,
+  // 아직 미구현). getManualCoupangLink는 매칭 실패 시 "전체 중 랜덤 폴백"을 하기 때문에,
+  // travel 카테고리에서 호출하면 여행 글에 완전히 무관한 상품이 랜덤으로 붙는다
+  // (실측: maeilg.com/236·237에 쿠팡 고지만 있고 실제로는 무관한 링크가 랜덤 삽입됨).
+  // → travel 카테고리는 쿠팡 매칭 자체를 건너뛴다.
+  const coupangEnabled = content.category !== 'travel';
+
+  if (coupangEnabled) {
+    for (const hook of affiliateHooks) {
+      const products = await searchCoupangProducts(hook.product_category ?? keyword);
+      if (products.length > 0) {
+        affiliateMap[hook.position] = buildAffiliateBlock(products, hook.anchor_text);
+        hasAffiliate = true;
+      } else {
+        // API 없을 때: 수동 딥링크 폴백 (blog_html 있으면 우선 사용)
+        const manual = getManualCoupangLink(hook.product_category ?? keyword);
+        if (manual) {
+          affiliateMap[hook.position] = manual.blog_html
+            ? manual.blog_html
+            : buildAffiliateBlock(
+                [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
+                hook.anchor_text
+              );
+          hasAffiliate = true;
+        }
+      }
+    }
+
+    // affiliate_hooks가 없어도 수동 딥링크가 있으면 conclusion_top에 자동 삽입
+    if (!hasAffiliate) {
+      const manual = getManualCoupangLink(keyword);
       if (manual) {
-        affiliateMap[hook.position] = manual.blog_html
+        affiliateMap['conclusion_top'] = manual.blog_html
           ? manual.blog_html
           : buildAffiliateBlock(
               [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
-              hook.anchor_text
+              '관련 상품'
             );
         hasAffiliate = true;
       }
-    }
-  }
-
-  // affiliate_hooks가 없어도 수동 딥링크가 있으면 conclusion_top에 자동 삽입
-  if (!hasAffiliate) {
-    const manual = getManualCoupangLink(keyword);
-    if (manual) {
-      affiliateMap['conclusion_top'] = manual.blog_html
-        ? manual.blog_html
-        : buildAffiliateBlock(
-            [{ name: `${manual.label} 관련 추천 상품 보기`, deep_link: manual.url }],
-            '관련 상품'
-          );
-      hasAffiliate = true;
     }
   }
 
@@ -457,7 +501,7 @@ async function monetizeBlogDraft(content) {
   const bodyImages = blog_assets?.body_images ?? [];
 
   // ① TL;DR 박스
-  const tldrHtml     = buildTldrBox(blog_draft.sections);
+  const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
 
   // ① 키워드 태그 클라우드
   const tagCloudHtml = buildKeywordTags(seoKeywords);
@@ -513,7 +557,7 @@ async function monetizeBlogDraft(content) {
   const currentPostUrl = content.blog_post_url ?? null;
   let relatedPostsHtml = '';
   try {
-    const related = await findRelatedPosts(keyword, currentPostUrl);
+    const related = await findRelatedPosts(keyword, currentPostUrl, undefined, content.category);
     relatedPostsHtml = buildRelatedPostsHtml(related);
     if (related.length > 0) {
       logger.info(`[monetizer] Internal links: ${related.length}개 관련 포스트 연결 (${keyword})`);
@@ -522,18 +566,35 @@ async function monetizeBlogDraft(content) {
     logger.warn(`[monetizer] Internal links failed: ${err.message}`);
   }
 
-  // 블로그가 YouTube 영상보다 먼저 발행되므로 특정 영상 링크 대신 채널 홍보 카드 사용
-  const channelUrl = config.youtube?.channelUrl || 'https://www.youtube.com/@매일읽어주는남자';
-  const ctaBox =
-    `<div class="cta-box">` +
-    `<h3>📌 매일읽어주는남자</h3>` +
-    `<p>매일 아침 경제·생활 정보를 짧고 쉽게 전달합니다.<br>` +
-    `유튜브 <strong>구독 &amp; 🔔 알림 설정</strong>으로 놓치지 마세요!</p>` +
-    `<a href="${channelUrl}" target="_blank" rel="noopener" ` +
-    `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#FF0000;` +
-    `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
-    `▶ 채널 바로가기</a>` +
-    `</div>`;
+  // YouTube 채널은 정지됨(2026-06) — 존재하지 않는 채널 홍보는 즉시 제거.
+  // 트레쥴 코스 API(course-brief)의 appUrl을 대신 홍보한다 (본문 중간 1회 + 푸터 1회, C항).
+  const tripAppUrl = content.trip_data?.appUrl ?? null;
+  const tripRegion = content.trip_data?.region ?? keyword;
+
+  const ctaBox = tripAppUrl
+    ? `<div class="cta-box">` +
+      `<h3>📌 매일 떠나는 남자</h3>` +
+      `<p>실제 평점·동선 데이터로 검증한 여행 코스를 소개합니다.</p>` +
+      `<p>이 코스를 앱에서 그대로 열어보세요 →</p>` +
+      `<a href="${tripAppUrl}" target="_blank" rel="noopener" ` +
+      `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#2563eb;` +
+      `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
+      `트레쥴에서 ${tripRegion} 코스 보기</a>` +
+      `</div>`
+    : `<div class="cta-box">` +
+      `<h3>📌 매일 떠나는 남자</h3>` +
+      `<p>실제 평점·동선 데이터로 검증한 여행 코스를 소개합니다.</p>` +
+      `</div>`;
+
+  // 본문 중간 CTA (C-1) — 코스를 나열한 직후, appUrl 있을 때만 삽입.
+  // "글마다 배너 3개씩 도배 금지"(C-4) — 본문 1 + 푸터 1로 제한.
+  const midBodyCta = tripAppUrl
+    ? `<blockquote class="tradule-mid-cta" style="border-left:4px solid #2563eb;padding:12px 16px;` +
+      `margin:24px 0;background:#eff6ff;border-radius:0 8px 8px 0;">` +
+      `이 코스를 지도에서 보고 순서를 바꾸거나 장소를 추가하려면<br>` +
+      `<a href="${tripAppUrl}" target="_blank" rel="noopener"><strong>트레쥴에서 ${tripRegion} 코스 열기</strong></a>` +
+      `</blockquote>`
+    : '';
 
   // hero 배너 (제목 + 메타설명)
   const heroHtml =
@@ -551,6 +612,7 @@ async function monetizeBlogDraft(content) {
     tldrHtml,                                     // TL;DR 박스
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문
+    midBodyCta,                                   // 트레쥴 CTA — 코스 나열 직후 (C-1)
     adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,

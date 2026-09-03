@@ -46,27 +46,48 @@ function cosineSimilarity(a, b) {
 }
 
 // ── 관련 포스트 조회 ──────────────────────────────────────────────────────────
+// 관련 포스트 블록을 아예 숨길 최소 건수 — 카테고리 필터링 후 이 수 미만이면 표시하지 않는다
+// (지시서 D항: "여행 글이 3편 미만이면 관련 포스트 블록 자체를 숨기는 게 낫다")
+const MIN_RELATED_POSTS_TO_SHOW = 3;
+
 /**
  * 현재 포스트와 관련된 발행 포스트를 반환한다.
  * @param {string} keyword        - 현재 포스트 키워드
  * @param {string} currentPostUrl - 현재 포스트 URL (자기 자신 제외)
  * @param {number} limit          - 반환할 최대 포스트 수
+ * @param {string} [category]     - 현재 포스트 카테고리. 지정하면 같은 카테고리 포스트만 후보로
+ *                                   삼는다 (여행 글 아래 경제 글이 붙는 것 방지, 지시서 D항).
  * @returns {Promise<Array<{keyword,title,post_url,score}>>}
  */
-export async function findRelatedPosts(keyword, currentPostUrl, limit = INTERNAL_LINK_LIMIT) {
-  // 발행된 포스트 전체 조회 (자기 자신 제외)
-  const rows = db
-    .prepare(
-      `SELECT keyword, title, post_url, published_at
-       FROM blog_posts
-       WHERE status = 'published'
-         AND post_url IS NOT NULL
-         AND (? IS NULL OR post_url != ?)
-       ORDER BY published_at DESC
-       LIMIT 100`
-    )
-    .all(currentPostUrl ?? null, currentPostUrl ?? null);
+export async function findRelatedPosts(keyword, currentPostUrl, limit = INTERNAL_LINK_LIMIT, category = null) {
+  // 발행된 포스트 전체 조회 (자기 자신 제외). category가 있으면 keywords 테이블과
+  // 조인해 같은 카테고리만 후보로 삼는다 — blog_posts에는 category 컬럼이 없어서
+  // keyword 텍스트로 keywords.category를 역참조한다.
+  const rows = category
+    ? db.prepare(
+        `SELECT bp.keyword, bp.title, bp.post_url, bp.published_at
+         FROM blog_posts bp
+         JOIN keywords k ON k.keyword = bp.keyword
+         WHERE bp.status = 'published'
+           AND bp.post_url IS NOT NULL
+           AND (? IS NULL OR bp.post_url != ?)
+           AND k.category = ?
+         ORDER BY bp.published_at DESC
+         LIMIT 100`
+      ).all(currentPostUrl ?? null, currentPostUrl ?? null, category)
+    : db.prepare(
+        `SELECT keyword, title, post_url, published_at
+         FROM blog_posts
+         WHERE status = 'published'
+           AND post_url IS NOT NULL
+           AND (? IS NULL OR post_url != ?)
+         ORDER BY published_at DESC
+         LIMIT 100`
+      ).all(currentPostUrl ?? null, currentPostUrl ?? null);
 
+  // 카테고리 필터링 결과가 너무 적으면(같은 카테고리 글이 아직 몇 편 안 됨) 관련 포스트
+  // 블록 자체를 숨기는 게 낫다 — 억지로 다른 카테고리를 섞지 않는다.
+  if (category && rows.length < MIN_RELATED_POSTS_TO_SHOW) return [];
   if (rows.length === 0) return [];
 
   // 임베딩 유사도 사용 가능하면 활성화 (API 비용 발생)
