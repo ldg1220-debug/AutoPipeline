@@ -26,6 +26,8 @@
     "blog:reset-today": "node scripts/reset-blog-published.js",
     "wp:publish": "node scripts/publish-wordpress.js",
     "affiliate:replace": "node scripts/replace-affiliate-links.js",
+    "coupang:strip": "node scripts/strip-coupang-links.js --dry",
+    "coupang:strip:apply": "node scripts/strip-coupang-links.js --apply",
     "blog:keywords": "node src/agents/keyword_miner.js",
     "blog:content": "node src/agents/blog_content_enhancer.js",
     "blog:assets": "node src/agents/blog_asset_builder.js",

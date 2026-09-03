@@ -22,6 +22,8 @@ output/blog/*
 !output/blog/.gitkeep
 output/analytics/*
 !output/analytics/.gitkeep
+output/backup/*
+!output/backup/.gitkeep
 
 # SQLite DB (로컬 전용)
 data/
