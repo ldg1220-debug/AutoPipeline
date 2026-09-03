@@ -76,7 +76,39 @@ async function fetchCategoriesFromPage(context, blogName) {
   try {
     tempPage = await context.newPage();
 
-    // 전략 1: 관리 페이지 로드 시 Tistory가 내부적으로 호출하는 category API를 인터셉트
+    await tempPage.goto(`https://${blogName}.tistory.com/manage/category/`, {
+      waitUntil: 'networkidle',
+      timeout: 20000,
+    });
+
+    // 전략 0 (최우선): 페이지가 인라인 <script>로 심어두는 window.Config.blog.categories.
+    // React가 이 데이터로 카테고리 트리를 렌더링하므로 DOM 셀렉터보다 훨씬 안정적이고,
+    // 하위 카테고리(children) id까지 그대로 들어있다 (실측: 국내여행=1400399, 해외여행=1400400).
+    try {
+      const configCategories = await tempPage.evaluate(() => {
+        // eslint-disable-next-line no-undef
+        return window.Config?.blog?.categories ?? null;
+      });
+      if (Array.isArray(configCategories) && configCategories.length > 0) {
+        const flatten = (list, parentName = null) =>
+          list.flatMap((c) => {
+            // id -3(전체보기), 0(카테고리 없음)은 실제 발행 대상 카테고리가 아니므로 제외
+            if (c.id == null || c.id < 1 || c.name === '카테고리 없음') return [];
+            const self = { id: String(c.id), name: c.name, parent: parentName };
+            const children = c.children?.length ? flatten(c.children, c.name) : [];
+            return [self, ...children];
+          });
+        const flat = flatten(configCategories);
+        if (flat.length > 0) {
+          logger.info(`[tistoryClassifier] Categories from window.Config: ${flat.map((c) => c.name).join(', ')}`);
+          return flat;
+        }
+      }
+    } catch (err) {
+      logger.warn(`[tistoryClassifier] window.Config 카테고리 추출 실패, 다른 전략 시도: ${err.message}`);
+    }
+
+    // 전략 1: 관리 페이지가 내부적으로 호출하는 category API를 인터셉트 (재요청으로 재확인)
     let intercepted = [];
     await tempPage.route('**tistory.com/apis/category**', async (route) => {
       const resp = await route.fetch();
@@ -92,10 +124,8 @@ async function fetchCategoriesFromPage(context, blogName) {
       await route.fulfill({ response: resp });
     });
 
-    await tempPage.goto(`https://${blogName}.tistory.com/manage/category/`, {
-      waitUntil: 'networkidle',
-      timeout: 20000,
-    });
+    // route 핸들러가 붙은 상태로 다시 로드해야 요청을 가로챌 수 있음
+    await tempPage.reload({ waitUntil: 'networkidle', timeout: 20000 });
     await tempPage.waitForTimeout(1500);
 
     if (intercepted.length > 0) {
