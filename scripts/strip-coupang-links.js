@@ -46,6 +46,7 @@ const limitArg = args.indexOf('--limit');
 const limit    = limitArg !== -1 ? parseInt(args[limitArg + 1], 10) : Infinity;
 const postArg  = args.indexOf('--post');
 const onlyPostId = postArg !== -1 ? args[postArg + 1] : null;
+const isHeaded = args.includes('--headed'); // 디버깅용: 브라우저 창을 직접 눈으로 볼 때
 
 const BACKUP_DIR = path.resolve(__dirname, '../output/backup/coupang-strip');
 const DONE_PATH  = path.join(BACKUP_DIR, 'done.json');
@@ -241,7 +242,7 @@ async function main() {
     await fs.mkdir(BACKUP_DIR, { recursive: true });
   }
 
-  const browser = await launchBrowser(true);
+  const browser = await launchBrowser(!isHeaded);
   const context = await createTistoryContext(browser);
   if (!context) {
     console.error('❌ Tistory 로그인 세션 없음 — npm run blog:login 먼저 실행하세요.');
