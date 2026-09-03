@@ -608,6 +608,12 @@ async function monetizeBlogDraft(content) {
 
   const innerHtml = [
     heroHtml,
+    // 쿠팡 파트너스 대가성 문구는 반드시 콘텐츠 최상단(제목 근처)에 있어야 한다.
+    // 예전엔 맨 아래(hasAffiliate ? PARTNERS_DISCLOSURE)에만 있어서 본문 73% 지점에
+    // 위치하는 사례가 실측됐음 — 공정위 지침상 "고지 미흡"으로 판정될 수 있는 위치.
+    // 제휴 링크가 있을 때만(hasAffiliate) 여기 노출하고, 링크 카드 옆(buildAffiliateBlock
+    // 내부)에도 동일 문구를 남겨 "링크 근처 재고지" 권장사항도 함께 충족한다.
+    hasAffiliate ? PARTNERS_DISCLOSURE : '',
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
     infoCardHtml,                                 // 핵심 수치 인포그래픽
@@ -620,7 +626,6 @@ async function monetizeBlogDraft(content) {
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
     adsenseSlot('post_end'),
-    hasAffiliate ? PARTNERS_DISCLOSURE : '',
   ].filter(Boolean).join('\n\n');
 
   const html = [
