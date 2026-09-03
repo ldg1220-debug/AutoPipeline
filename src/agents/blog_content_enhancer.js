@@ -208,9 +208,22 @@ async function pass1Intent(keyword, category, benchmarkCtx = '') {
 }
 
 // ── Pass 2: H2/H3 아웃라인 + FAQ 생성 ─────────────────────────────────────
-async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') {
+// tripData가 있으면 스팟을 섹션에 배타적으로 배정(spot_indices)하도록 요청한다 (A-3:
+// 같은 스팟이 여러 섹션에 중복 등장하는 문제 방지). 이동수단(toNextMode) 요약도 함께
+// 넘겨 제목·구조가 데이터와 모순되지 않게 한다 (A-6: "대중교통"인데 실제론 car인 경우 등).
+function summarizeTransportModes(tripData) {
+  const modes = [...new Set((tripData?.spots ?? []).map((s) => s.toNextMode).filter(Boolean))];
+  if (!modes.length) return '이동수단 데이터 없음';
+  const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+  return modes.map((m) => modeKr[m] ?? m).join(', ');
+}
+
+async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
+  const spotsForPrompt = (tripData?.spots ?? []).map((s, idx) => ({
+    index: idx, name: s.name, category: s.category, order: s.order,
+  }));
   const prompt   = fillTemplate(template, {
     keyword,
     category,
@@ -220,9 +233,28 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
     competitor_structure: JSON.stringify(intent.competitor_structure),
     unique_angle:         intent.unique_angle,
     youtube_hook:         hook,
+    trip_spots:           spotsForPrompt.length ? JSON.stringify(spotsForPrompt) : '[]',
+    transport_summary:    summarizeTransportModes(tripData),
   }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
+}
+
+/**
+ * section.spot_indices(Pass 2가 배정한 스팟 인덱스 배열)가 있으면 그 스팟만 담은
+ * trip_data 서브셋을 반환한다. 배정이 없으면(구버전 아웃라인·데이터 없음) 원본을 그대로 반환.
+ */
+function sliceTripDataForSection(tripData, section) {
+  if (!tripData?.spots?.length) return tripData;
+  const indices = section.spot_indices;
+  if (!Array.isArray(indices) || indices.length === 0) return tripData;
+
+  const spots = indices
+    .map((i) => tripData.spots[i])
+    .filter(Boolean);
+  if (!spots.length) return tripData;
+
+  return { ...tripData, spots };
 }
 
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
@@ -509,6 +541,10 @@ async function enhanceBlogDraft(content) {
 
   const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx + qaCtx;
 
+  // 트레쥴 코스 데이터 — tradule_source.js(Part 1.7)가 keywordData.contents[].trip_data에
+  // { region, days, totalDistanceKm, spots, appUrl } 형태로 주입한다. 없으면 null.
+  const tripData = content.trip_data ?? null;
+
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
   const intent = await pass1Intent(keyword, category, combinedCtx);
 
@@ -518,7 +554,8 @@ async function enhanceBlogDraft(content) {
     category,
     intent,
     shortform_script?.hook ?? '',
-    combinedCtx
+    combinedCtx,
+    tripData
   );
 
   // H2/H3 섹션만 추출 (FAQ 제외)
@@ -531,14 +568,15 @@ async function enhanceBlogDraft(content) {
   const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
     (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
-  // 트레쥴 코스 데이터 — tradule_source.js(Part 1.7)가 keywordData.contents[].trip_data에
-  // { region, days, totalDistanceKm, spots, appUrl } 형태로 주입한다. 없으면 null.
-  const tripData = content.trip_data ?? null;
-
   const completedSections = [];
   for (let i = 0; i < bodySections.length; i++) {
     const section = bodySections[i];
-    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, tripData);
+    // A-3: 같은 스팟이 여러 섹션에 중복 등장하는 문제 — Pass 2가 section.spot_indices로
+    // 스팟을 섹션에 배타적으로 배정해두면, 본문 생성 시 그 섹션에 배정된 스팟만 전달한다
+    // (배정이 없으면 전체 trip_data를 그대로 넘겨 하위 호환 유지 — spot_indices 미지원
+    // 아웃라인이거나 트레쥴 데이터 자체가 없는 경우).
+    const sectionTripData = sliceTripDataForSection(tripData, section);
+    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, sectionTripData);
     completedSections.push({ level: section.level, heading: section.heading, body });
   }
 
