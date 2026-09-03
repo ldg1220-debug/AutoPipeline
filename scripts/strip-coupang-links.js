@@ -10,7 +10,7 @@
  *   위반(어뷰징)·구글 스팸 신호 위험으로 과거 발행분을 정리한다.
  *
  * 제거 규칙 (실측 DOM 구조 기준, maeilg.com/230):
- *   ① a[href*="link.coupang.com"] 또는 a[href*="coupa.ng"] → 가장 가까운 조상 div 제거.
+ *   ① a[href*="coupang.com"] 또는 a[href*="coupa.ng"] → 가장 가까운 조상 div 제거.
  *      단, 그 div의 텍스트 길이가 300자를 넘으면 절대 제거하지 않고 경고 후 스킵
  *      (본문을 통째로 지우는 사고 방지 — 핵심 안전장치)
  *   ② "쿠팡 파트너스 활동의 일환" 포함 <p> 제거. 부모 div에 남은 자식이 없으면 그 div도 제거.
@@ -144,7 +144,7 @@ async function stripCoupang(page, html, maxChars) {
 
     // ① 쿠팡 링크를 포함한 "가장 가까운 조상 div" 제거 — 300자 넘으면 스킵
     const coupangAnchors = [
-      ...container.querySelectorAll('a[href*="link.coupang.com"], a[href*="coupa.ng"]'),
+      ...container.querySelectorAll('a[href*="coupang.com"], a[href*="coupa.ng"], a[href*="coupang.co.kr"]'),
     ];
     for (const a of coupangAnchors) {
       if (!a.isConnected) continue; // 이미 위에서 제거된 블록에 속해 있었음
@@ -178,10 +178,18 @@ async function stripCoupang(page, html, maxChars) {
       }
     }
 
+    // 진단용 안전망: href에 "쿠팡"/"coupang" 도메인 패턴이 안 걸렸는데도 "쿠팡"이라는
+    // 글자가 들어간 링크가 남아있다면, 아직 못 잡은 도메인 형태가 있다는 뜻이므로
+    // href를 그대로 로그에 남겨 다음 셀렉터 보강에 쓴다 (제거는 하지 않음 — 안전 우선).
+    const missedCoupangLike = [...container.querySelectorAll('a')]
+      .filter((a) => a.textContent.includes('쿠팡') && !/coupang|coupa\.ng/i.test(a.getAttribute('href') || ''))
+      .map((a) => `href="${a.getAttribute('href')}" text="${a.textContent.trim().slice(0, 30)}"`);
+
     return {
       html: container.innerHTML,
       cardsRemoved,
       disclosuresRemoved,
+      missedCoupangLike,
       skipped,
       removedSamples,
     };
@@ -275,7 +283,7 @@ async function main() {
         continue;
       }
 
-      const { html: cleaned, cardsRemoved, disclosuresRemoved, skipped, removedSamples } =
+      const { html: cleaned, cardsRemoved, disclosuresRemoved, skipped, removedSamples, missedCoupangLike } =
         await stripCoupang(page, original, MAX_REMOVED_DIV_CHARS);
 
       const logLine = `[${postId}] "${post.keyword}" — 카드 ${cardsRemoved}개 / 고지 ${disclosuresRemoved}개 제거` +
@@ -286,6 +294,10 @@ async function main() {
         if (skipped.length) {
           console.log(`⚠️  ${logLine}`);
           for (const s of skipped) console.log(`     - ${s}`);
+        }
+        if (missedCoupangLike.length) {
+          console.log(`🚨 [${postId}] "${post.keyword}" — 셀렉터가 못 잡은 쿠팡 링크로 보이는 항목 ${missedCoupangLike.length}개:`);
+          for (const m of missedCoupangLike) console.log(`     - ${m}`);
         }
         await sleep(REQUEST_DELAY_MS);
         continue;
