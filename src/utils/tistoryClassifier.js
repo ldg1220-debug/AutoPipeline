@@ -4,11 +4,16 @@
  * 카테고리: Tistory REST API → SQLite 캐시(1일) → GPT-4o-mini 매칭
  * 태그:    GPT-4o-mini가 keyword + seoKeywords 기반으로 10개 생성
  */
+import { fileURLToPath } from 'url';
+import path from 'path';
+import fs from 'fs/promises';
 import axios from 'axios';
 import db from '../db/db.js';
 import { config } from '../config/index.js';
 import logger from './logger.js';
 import { throttle } from './rateLimiter.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CACHE_TTL_HOURS = 24;
 
@@ -133,7 +138,17 @@ async function fetchCategoriesFromPage(context, blogName) {
 
     if (categories.length > 0) return categories;
 
-    logger.warn(`[tistoryClassifier] Category page scrape returned 0 — page structure may have changed`);
+    // 셀렉터가 다 실패하면 실제 페이지 HTML을 저장해둔다 — 다음에 어떤 마크업으로
+    // 바뀌었는지 원격 세션에서 직접 볼 수 없으므로, 이 파일을 열어보고 셀렉터를 갱신한다.
+    try {
+      const html = await tempPage.content();
+      const debugPath = path.resolve(__dirname, '../../output/blog/debug_category_page.html');
+      await fs.mkdir(path.dirname(debugPath), { recursive: true });
+      await fs.writeFile(debugPath, html, 'utf8');
+      logger.warn(`[tistoryClassifier] Category page scrape returned 0 — page structure may have changed. HTML saved: ${debugPath}`);
+    } catch (dumpErr) {
+      logger.warn(`[tistoryClassifier] Category page scrape returned 0, HTML dump also failed: ${dumpErr.message}`);
+    }
     return [];
   } catch (err) {
     logger.warn(`[tistoryClassifier] Category page scrape failed: ${err.message}`);
