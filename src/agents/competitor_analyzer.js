@@ -502,13 +502,16 @@ export async function analyzeCompetitors(
     return cache;
   }
 
-  // 기존 캐시에서 카테고리 데이터 재사용
+  // 기존 캐시에서 카테고리 데이터 재사용.
+  // 영상 파이프라인이 꺼져 있으면 YouTube 쪽은 과거(경제 채널 시절) 캐시라도 절대
+  // 들고 다니지 않는다 — doYoutube=false라 API는 안 부르지만, 여기서 걸러주지 않으면
+  // 예전 인사이트가 계속 프롬프트에 주입될 수 있다.
   const existingCategories = cache?.categories ?? {};
   const mergedCategories   = {};
   for (const cat of categories) {
     mergedCategories[cat] = {
-      youtube: existingCategories[cat]?.youtube ?? null,
-      blog:    existingCategories[cat]?.blog    ?? null,
+      youtube: config.runtime.videoPipelineEnabled ? (existingCategories[cat]?.youtube ?? null) : null,
+      blog:    existingCategories[cat]?.blog ?? null,
     };
   }
 
@@ -530,6 +533,8 @@ export async function analyzeCompetitors(
         logger.error('[competitor_analyzer] YouTube 분석 실패', { message: err.message });
       }
     }
+  } else if (!config.runtime.videoPipelineEnabled) {
+    logger.info('[competitor_analyzer] YouTube 분석 비활성 (VIDEO_PIPELINE_ENABLED=false) — 완전히 스킵, 과거 캐시도 사용 안 함');
   } else {
     logger.info(`[competitor_analyzer] YouTube 캐시 유효 (${YOUTUBE_TTL_DAYS}일 TTL) — 재사용`);
   }
