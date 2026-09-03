@@ -13,7 +13,7 @@ import { runTextQA, runVisionQA, runBlogQA, runContentDirectorQA } from './agent
 import { generateAllMedia, generateLongFormMedia } from './agents/media_generator.js';
 import { pdReview } from './agents/pd_reviewer.js';
 import { publishContents } from './agents/auto_publisher.js';
-import { mineKeywords } from './agents/keyword_miner.js';
+import { mineKeywords, isBlacklisted, generateTravelSeeds } from './agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from './agents/blog_content_enhancer.js';
 import { buildAllAssets } from './agents/blog_asset_builder.js';
 import { monetizeAll } from './agents/monetizer.js';
@@ -25,6 +25,7 @@ import { analyzeCompetitors } from './agents/competitor_analyzer.js';
 import { createContentBrief, reviewContent, finalApproval } from './agents/pipeline_director.js';
 import { createLongFormAndShorts } from './agents/long_form_creator.js';
 import { runProjectManagerReview } from './agents/project_manager.js';
+import { runPerformanceReview } from './agents/performance_reviewer.js';
 import axios from 'axios';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -140,8 +141,21 @@ async function askBlogTopicSelection(items, timeoutSec = 120) {
   }
 
   console.log('\n' + SEP);
-  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  Enter = 전체 자동 선택)');
+  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  !4 = 4번만 제외하고 전체  /  Enter = 전체 자동 선택)');
   console.log(`⏱  ${timeoutSec}초 내 입력 없으면 자동 선택됩니다.\n`);
+
+  // "1-3" 같은 범위 표기를 개별 번호로 펼친다 (제외 토큰 "!4"는 그대로 둠)
+  const expandRanges = (str) => str.replace(/(\d+)\s*[-~]\s*(\d+)/g, (_, a, b) => {
+    const from = parseInt(a, 10), to = parseInt(b, 10);
+    return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
+  });
+
+  const toIndices = (str) => new Set(
+    expandRanges(str)
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10) - 1)
+      .filter((i) => i >= 0 && i < flatList.length)
+  );
 
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
@@ -164,18 +178,21 @@ async function askBlogTopicSelection(items, timeoutSec = 120) {
       const input = line.trim();
       if (!input) return done(items, '→ 전체 자동 선택');
 
-      const rangeExpanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
-        const from = parseInt(a, 10), to = parseInt(b, 10);
-        return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
-      });
+      // "!4" 또는 "!4,!7" — 해당 번호만 제외하고 나머지 전체 선택
+      const tokens = input.split(',').map((s) => s.trim());
+      const excludeTokens = tokens.filter((t) => t.startsWith('!'));
+      const includeTokens = tokens.filter((t) => !t.startsWith('!') && t !== '');
 
-      const indices = rangeExpanded
-        .split(',')
-        .map((s) => parseInt(s.trim(), 10) - 1)
-        .filter((i) => i >= 0 && i < flatList.length);
+      if (excludeTokens.length > 0 && includeTokens.length === 0) {
+        const excludeIdx = toIndices(excludeTokens.map((t) => t.slice(1)).join(','));
+        const remaining = flatList.filter((_, i) => !excludeIdx.has(i));
+        if (remaining.length === 0) return done(items, '→ 제외 결과 0개 — 전체 자동 선택');
+        return done(remaining, `→ ${excludeIdx.size}개 제외, 나머지 선택`);
+      }
 
-      if (indices.length === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
-      const unique = [...new Set(indices)].sort((a, b) => a - b);
+      const indices = toIndices(includeTokens.join(','));
+      if (indices.size === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
+      const unique = [...indices].sort((a, b) => a - b);
       done(unique.map((i) => flatList[i]), '→ 선택 완료');
     });
   });
@@ -187,6 +204,7 @@ const _forceKwIdx = _cliArgs.indexOf('--force-keyword');
 const _forceKeyword = _forceKwIdx !== -1 ? _cliArgs[_forceKwIdx + 1] : null;
 const _forceCatIdx = _cliArgs.indexOf('--force-category');
 const _forceCategory = _forceCatIdx !== -1 ? _cliArgs[_forceCatIdx + 1] : 'economy';
+const _noBlog = _cliArgs.includes('--no-blog');
 
 /**
  * 파이프라인 1회 실행 함수.
@@ -390,59 +408,29 @@ async function runPipeline() {
     contents: contentData.contents.filter((c) => approvedKeywords.has(c.keyword)),
   };
 
-  // ── 최상위 키워드 롱폼 생성 (score 1위 또는 --force-keyword) ─────────────
-  // 나머지 키워드는 standalone 쇼츠(최대 59초, 완전한 한 편)로 유지
-  const _bestKeyword = trendData.selected_items[0]?.keyword;
-  if (_bestKeyword && approvedKeywords.has(_bestKeyword)) {
-    try {
-      const _bestContent = approvedContentData.contents.find((c) => c.keyword === _bestKeyword);
-      if (_bestContent) {
-        logger.info(`[app] 최상위 키워드 롱폼 생성 시작: "${_bestKeyword}"`);
-        const _lfResult = await createLongFormAndShorts(
-          trendData.selected_items[0],
-          _bestContent.blog_draft ?? null
-        );
-        if (_lfResult.long_video?.sections?.length) {
-          const _lfIdx = approvedContentData.contents.findIndex((c) => c.keyword === _bestKeyword);
-          if (_lfIdx !== -1) {
-            approvedContentData.contents[_lfIdx] = {
-              ...approvedContentData.contents[_lfIdx],
-              long_video: _lfResult.long_video,
-            };
-          }
-          logger.info(`[app] 롱폼 생성 완료: "${_bestKeyword}" (${_lfResult.long_video.sections.length}섹션)`);
-        }
-      }
-    } catch (err) {
-      logger.warn(`[app] 롱폼 생성 실패 ("${_bestKeyword}"): ${err.message}. 쇼츠만 진행.`);
-    }
-  }
-
+  // 모든 승인 항목에 long_form_creator를 적용하여 2분 30초 영상 구조를 생성한다.
   try {
     if (approvedContentData.contents.length === 0) {
       logger.warn('[app] Agent 2.5 skipped — no text-approved items to produce.');
     } else {
-      // 롱폼 항목(최상위 키워드)과 쇼츠 전용 항목 분리
-      const _longformItems   = approvedContentData.contents.filter((c) => c.long_video?.sections?.length);
-      const _shortsOnlyItems = approvedContentData.contents.filter((c) => !c.long_video?.sections?.length);
-
-      for (const tc of _longformItems) {
+      // long_form_creator로 모든 항목의 영상 스크립트 생성 (3섹션, 2분 30초 목표)
+      const longFormContents = [];
+      for (const item of approvedContentData.contents) {
+        logger.info(`[app] 롱폼+쇼츠 생성 시작: "${item.keyword}"`);
         try {
-          logger.info(`[app] 롱폼+쇼츠 미디어 생성: "${tc.keyword}"`);
-          await generateLongFormMedia(tc);
-          logger.info(`[app] 롱폼 미디어 완료: "${tc.keyword}"`);
+          const longForm = await createLongFormAndShorts(item, item.blog_draft ?? null);
+          longFormContents.push({ ...item, long_video: longForm.long_video });
+          logger.info(`[app] 롱폼 생성 완료: "${item.keyword}" (${longForm.long_video?.sections?.length ?? 0}섹션)`);
         } catch (lfErr) {
-          logger.warn(`[app] 롱폼 미디어 실패 ("${tc.keyword}"): ${lfErr.message}`);
+          logger.warn(`[app] 롱폼 생성 실패 "${item.keyword}", content_creator 섹션으로 대체: ${lfErr.message}`);
+          longFormContents.push(item);
         }
       }
 
-      if (_shortsOnlyItems.length > 0) {
-        const mediaResult = await generateAllMedia({ ...approvedContentData, contents: _shortsOnlyItems });
-        await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
-        logger.info(`[app] 쇼츠 미디어 생성 완료: ${mediaResult.results?.length ?? 0}개`);
-      }
-
-      logger.info(`[app] Agent 2.5 complete. 롱폼: ${_longformItems.length}, 쇼츠: ${_shortsOnlyItems.length}`);
+      const mediaResult = await generateAllMedia({ ...approvedContentData, contents: longFormContents });
+      await writeJSON(path.resolve(__dirname, `../output/scripts/media_${date}.json`), mediaResult);
+      const longCount = mediaResult.results?.filter((r) => r.video).length ?? 0;
+      logger.info(`[app] Agent 2.5 complete. 롱폼: ${longCount}, 쇼츠: 0`);
     }
   } catch (err) {
     logger.warn('[app] Agent 2.5 (media_generator) failed. Continuing without media.', {
@@ -592,7 +580,10 @@ async function runBlogPipeline(youtubeResults = null) {
   // ── Part 1: Keyword Miner ──────────────────────────────────────────────
   let keywordData;
   try {
-    const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
+    // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
+    const seeds = process.env.KEYWORD_SEEDS
+      ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
+      : generateTravelSeeds(30);
     keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
     await writeJSON(path.resolve(__dirname, `../output/keywords/keywords_${date}.json`), keywordData);
     logger.info(`[app] Blog Part 1 complete. Keywords: ${keywordData.contents?.length ?? 0}`);
@@ -607,11 +598,26 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.info('[app] Blog Part 1: 신규 키워드 없음 → DB pending 키워드 사용');
     try {
       const limit = config.runtime.blogPostsPerDay ?? 5;
-      const rows  = db.prepare(
+      // DB에 오래 전 적재된 키워드는 이후 추가된 블랙리스트 규칙을 거치지 않았을 수 있으므로
+      // 선택 시점에 다시 검증한다 (저작권 침해 등 부적합 키워드의 재유입 차단).
+      // 여행 채널 전환 이전(경제·부동산·뷰티 등) DB pending 잔여물이 다시 섞여 나오는
+      // 문제 방지 — category = 'travel'인 것만 후보로 삼는다.
+      const candidateRows = db.prepare(
         `SELECT keyword, category, score, commercial, sources
-         FROM keywords WHERE status = 'pending'
+         FROM keywords WHERE status = 'pending' AND category = 'travel'
          ORDER BY score DESC LIMIT ?`
-      ).all(limit);
+      ).all(limit * 3);
+
+      const rows = [];
+      for (const r of candidateRows) {
+        if (isBlacklisted(r.keyword)) {
+          db.prepare(`UPDATE keywords SET status = 'rejected' WHERE keyword = ?`).run(r.keyword);
+          logger.warn(`[app] Blog Part 1: DB pending 키워드 "${r.keyword}" 블랙리스트 재검출 → rejected 처리`);
+          continue;
+        }
+        rows.push(r);
+        if (rows.length >= limit) break;
+      }
 
       if (!rows.length) {
         logger.warn('[app] Blog Part 1: DB pending 키워드도 없음. Blog Pipeline 종료.');
@@ -631,6 +637,31 @@ async function runBlogPipeline(youtubeResults = null) {
       logger.error('[app] Blog Part 1: DB pending 조회 실패. Blog Pipeline 종료.', { message: err.message });
       return;
     }
+  }
+
+  // ── --force-keyword: 블로그 파이프라인에서도 강제 키워드를 맨 앞에 삽입 ──
+  if (_forceKeyword) {
+    const alreadyIn = keywordData.contents.some(
+      (c) => c.keyword.toLowerCase() === _forceKeyword.toLowerCase()
+    );
+    if (!alreadyIn) {
+      keywordData.contents.unshift({
+        keyword:  _forceKeyword,
+        category: _forceCategory,
+        score:    100,
+        commercial: 1,
+        sources:  'forced',
+        forced:   true,
+      });
+    } else {
+      // 이미 있으면 맨 앞으로 이동
+      const idx = keywordData.contents.findIndex(
+        (c) => c.keyword.toLowerCase() === _forceKeyword.toLowerCase()
+      );
+      const [item] = keywordData.contents.splice(idx, 1);
+      keywordData.contents.unshift(item);
+    }
+    logger.info(`[app] Blog --force-keyword: "${_forceKeyword}" → 최우선 처리`);
   }
 
   // YouTube 발행 결과 로드 — 직접 전달 우선, 없으면 오늘 저장 파일에서 읽기
@@ -655,7 +686,17 @@ async function runBlogPipeline(youtubeResults = null) {
   }
 
   // ── Topic Grouper: 같은 주제 키워드 묶기 ─────────────────────────────
-  // 주제가 다르면 각각 별도 포스트, 겹치면 합쳐서 하나의 풍부한 포스트로
+  // force-keyword는 단독 포스트로 확정 — 그룹핑에서 제외 후 복원
+  let forcedItem = null;
+  if (_forceKeyword) {
+    const fidx = keywordData.contents.findIndex(
+      (c) => c.keyword.toLowerCase() === _forceKeyword.toLowerCase()
+    );
+    if (fidx !== -1) {
+      [forcedItem] = keywordData.contents.splice(fidx, 1);
+    }
+  }
+
   try {
     keywordData = await groupSimilarTopics(keywordData);
     logger.info(
@@ -665,6 +706,11 @@ async function runBlogPipeline(youtubeResults = null) {
     logger.warn('[app] Topic grouping failed. Continuing with original keywords.', {
       message: err.message,
     });
+  }
+
+  // force-keyword를 단독 포스트로 맨 앞에 복원
+  if (forcedItem) {
+    keywordData.contents.unshift(forcedItem);
   }
 
   // ── 주제 확장 + 사용자 선택 ─────────────────────────────────────────────
@@ -681,6 +727,24 @@ async function runBlogPipeline(youtubeResults = null) {
   if (!keywordData.contents?.length) {
     logger.warn('[app] Blog: 선택된 키워드 없음. Blog Pipeline 종료.');
     return;
+  }
+
+  // ── 카테고리별 일일 발행 상한 적용 ────────────────────────────────────────
+  {
+    const limits = config.keywordMiner?.categoryDailyLimit ?? {};
+    const catCount = {};
+    keywordData.contents = keywordData.contents.filter((item) => {
+      const cat = item.category ?? 'economy';
+      const max = limits[cat] ?? 0;
+      if (max === 0) return true;
+      catCount[cat] = (catCount[cat] ?? 0) + 1;
+      if (catCount[cat] > max) {
+        logger.info(`[app] 카테고리 "${cat}" 일일 상한(${max}) 초과 — 제외: ${item.keyword}`);
+        return false;
+      }
+      return true;
+    });
+    logger.info(`[app] 카테고리 상한 적용 후: ${keywordData.contents.length}개`);
   }
 
   // ── 경쟁 채널 분석 (주 1회 — 인사이트 7일 캐시) ─────────────────────────
@@ -1074,12 +1138,14 @@ async function askUploadOption() {
     rl.question(
       '\n실행 옵션을 선택하세요:\n' +
       '  1. 전체 플로우  (영상 제작 + 블로그 + YouTube 업로드)\n' +
-      '  2. 업로드 전까지 (영상 제작 + 블로그만, 업로드는 나중에)\n\n' +
-      '선택 [1/2] (기본값 1, 30초 후 자동 선택): ',
+      '  2. 업로드 전까지 (영상 제작 + 블로그만, 업로드는 나중에)\n' +
+      '  3. 블로그만    (영상 제작 없이 블로그만 생성)\n\n' +
+      '선택 [1/2/3] (기본값 1, 30초 후 자동 선택): ',
       (answer) => {
         clearTimeout(timer);
         rl.close();
-        resolve(answer.trim() !== '2');
+        const choice = answer.trim();
+        resolve(choice === '3' ? 'blog-only' : choice !== '2');
       }
     );
   });
@@ -1095,28 +1161,64 @@ if (_isDirectEntry) {
       logger.info(`[app] --force-keyword 모드: "${_forceKeyword}" (카테고리: ${_forceCategory})`);
     }
 
-    const doYouTubeUpload = await askUploadOption();
-    config.runtime.youtubeUpload = doYouTubeUpload;
+    if (config.runtime.videoPipelineEnabled) {
+      const uploadChoice = await askUploadOption();
+      if (uploadChoice === 'blog-only') {
+        config.runtime.youtubeUpload = false;
+        config.runtime.videoPipelineEnabled = false;
+        logger.info('[app] 옵션 3 — 영상 제작 없이 블로그만 생성.');
+      } else {
+        config.runtime.youtubeUpload = uploadChoice;
+        if (!uploadChoice) {
+          logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+        }
+      }
+    } else {
+      config.runtime.youtubeUpload = false;
+    }
 
-    if (!doYouTubeUpload) {
-      logger.info('[app] 옵션 2 — YouTube 업로드 건너뜀. 나중에 업로드: node scripts/rerun-media-upload.js --upload-only');
+    if (!config.runtime.videoPipelineEnabled) {
+      logger.info('[app] VIDEO_PIPELINE_ENABLED=false — 영상(YouTube) 파이프라인 전체 중단, 블로그만 운영.');
     }
 
     if (config.runtime.dryRun) {
       logger.info('[app] DRY_RUN mode — running once and exiting.');
-      runPipeline().then(() => process.exit(0));
+      if (config.runtime.videoPipelineEnabled) {
+        runPipeline().then(() => process.exit(0));
+      } else {
+        runBlogPipeline().then(() => process.exit(0));
+      }
     } else {
-      // YouTube 파이프라인: A슬롯(월·수·금·일 12:00) + B슬롯(화·목·토 14:00) 교대
-      startScheduler(runPipeline, config.runtime.cronSchedule);
-      startScheduler(runPipeline, config.runtime.cronScheduleB);
+      if (config.runtime.videoPipelineEnabled) {
+        // 숏폼 파이프라인: A슬롯(매일 12:00 KST) + B슬롯(매일 14:00 KST)
+        startScheduler(runPipeline, config.runtime.cronSchedule);
+        startScheduler(runPipeline, config.runtime.cronScheduleB);
+        // 롱폼 unified 파이프라인: 주 1회 (매주 목요일 22:00 KST)
+        startScheduler(runUnifiedPipeline, config.runtime.longformCronSchedule);
+      }
       // 블로그 파이프라인: YouTube 완료 1시간 후 (A: 13:00 / B: 15:00)
       startScheduler(runBlogPipeline, config.runtime.blogCronSchedule);
       startScheduler(runBlogPipeline, config.runtime.blogCronScheduleB);
+      // 실적 검토: 매주 월요일 오전 9시 KST (0 0 * * 1)
+      const perfCron = process.env.PERF_REVIEW_CRON || '0 0 * * 1';
+      startScheduler(runPerformanceReview, perfCron);
 
-      // 최초 기동 시 두 파이프라인 모두 순차 실행
+      // 최초 기동 시 파이프라인 순차 실행 (--no-blog 시 블로그 생략)
       try {
-        const youtubeResult = await runPipeline();
-        await runBlogPipeline(youtubeResult);
+        if (!config.runtime.videoPipelineEnabled) {
+          if (_noBlog) {
+            logger.info('[app] --no-blog 플래그 — 블로그 파이프라인 생략 (영상도 중단 상태라 실행할 게 없음)');
+          } else {
+            await runBlogPipeline();
+          }
+        } else {
+          const youtubeResult = await runPipeline();
+          if (_noBlog) {
+            logger.info('[app] --no-blog 플래그 — 블로그 파이프라인 생략');
+          } else {
+            await runBlogPipeline(youtubeResult);
+          }
+        }
       } catch (err) {
         logger.error('[app] Initial run failed', { message: err.message });
       }

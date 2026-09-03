@@ -6,7 +6,7 @@
 import readline from 'readline';
 import axios from 'axios';
 import fs from 'fs';
-import { mineKeywords } from '../src/agents/keyword_miner.js';
+import { mineKeywords, generateTravelSeeds } from '../src/agents/keyword_miner.js';
 import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll, reloadCoupangLinks } from '../src/agents/monetizer.js';
@@ -16,6 +16,7 @@ import { runBlogQA } from '../src/agents/qa_editor.js';
 import { runProjectManagerReview } from '../src/agents/project_manager.js';
 import { groupSimilarTopics } from '../src/agents/topic_grouper.js';
 import { analyzeCompetitors } from '../src/agents/competitor_analyzer.js';
+import { attachTripData } from '../src/agents/tradule_source.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -201,8 +202,21 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
   }
 
   console.log('\n' + SEP);
-  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  Enter = 전체 자동 선택)');
+  console.log('번호를 입력하세요 (예: 1,3,5  /  1-3 범위  /  !4 = 4번만 제외하고 전체  /  Enter = 전체 자동 선택)');
   console.log(`⏱  ${timeoutSec}초 내 입력 없으면 자동 선택됩니다.\n`);
+
+  // "1-3" 같은 범위 표기를 개별 번호로 펼친다 (제외 토큰 "!4"는 그대로 둠)
+  const expandRanges = (str) => str.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
+    const from = parseInt(a, 10), to = parseInt(b, 10);
+    return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
+  });
+
+  const toIndices = (str) => new Set(
+    expandRanges(str)
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10) - 1)
+      .filter((n) => Number.isFinite(n) && n >= 0 && n < flatList.length)
+  );
 
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
@@ -227,20 +241,22 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
       const input = line.trim();
       if (!input) return done(items, '→ 전체 자동 선택');
 
-      // 범위 표기 지원 (1-3 → 1,2,3)
-      const rangeExpanded = input.replace(/(\d+)\s*-\s*(\d+)/g, (_, a, b) => {
-        const from = parseInt(a, 10), to = parseInt(b, 10);
-        return Array.from({ length: Math.abs(to - from) + 1 }, (__, k) => Math.min(from, to) + k).join(',');
-      });
+      // "!4" 또는 "!4,!7" — 해당 번호만 제외하고 나머지 전체 선택
+      const tokens = input.split(',').map((s) => s.trim());
+      const excludeTokens = tokens.filter((t) => t.startsWith('!'));
+      const includeTokens = tokens.filter((t) => !t.startsWith('!') && t !== '');
 
-      const indices = rangeExpanded
-        .split(',')
-        .map((s) => parseInt(s.trim(), 10) - 1)
-        .filter((n) => Number.isFinite(n) && n >= 0 && n < flatList.length);
+      if (excludeTokens.length > 0 && includeTokens.length === 0) {
+        const excludeIdx = toIndices(excludeTokens.map((t) => t.slice(1)).join(','));
+        const remaining = flatList.filter((_, i) => !excludeIdx.has(i));
+        if (remaining.length === 0) return done(items, '→ 제외 결과 0개 — 전체 자동 선택');
+        return done(remaining, `→ ${excludeIdx.size}개 제외, 나머지 선택`);
+      }
 
-      if (indices.length === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
+      const indices = toIndices(includeTokens.join(','));
+      if (indices.size === 0) return done(items, '→ 유효한 번호 없음 — 전체 자동 선택');
 
-      const unique = [...new Set(indices)];
+      const unique = [...indices];
       done(unique.map((i) => flatList[i]), '→ 선택 완료');
     });
   });
@@ -409,7 +425,10 @@ async function main() {
   if (forceKeyword) logger.info(`[blog:pipeline] --force-keyword: "${forceKeyword}" (카테고리: ${forceCategory})`);
 
   // Part 1: Keyword Miner
-  const seeds = config.keywordMiner.seeds.split(',').map((s) => s.trim()).filter(Boolean);
+  // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
+  const seeds = process.env.KEYWORD_SEEDS
+    ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
+    : generateTravelSeeds(30);
   const keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
   await writeJSON(`${outDir}/keywords/keywords_${date}.json`, keywordData);
 
@@ -424,21 +443,27 @@ async function main() {
   if (rawKeywords.length < targetCount) {
     const need = targetCount - rawKeywords.length;
     const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
+    // 여행 채널 전환 이전(경제·부동산·뷰티 등)에 쌓인 DB pending 잔여물이 계속 섞여 나오는
+    // 문제 방지 — category = 'travel'인 것만 보충 대상으로 삼는다.
     const dbKeywords = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' ORDER BY score DESC LIMIT ?`)
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' ORDER BY score DESC LIMIT ?`)
       .all(need * 2);  // 중복 제거 여분 확보
     const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
     if (fillKws.length > 0) {
-      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending ${fillKws.length}개 보충`);
+      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending(travel) ${fillKws.length}개 보충`);
       rawKeywords = [...rawKeywords, ...fillKws];
+    } else {
+      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족하지만 DB pending에 travel 카테고리 후보가 없음 (${rawKeywords.length}개로 진행)`);
     }
   }
 
   // ── 예고(promised) 키워드 최우선 배치 ──────────────────────────────────
   // 이전 영상 대본에서 "다음 영상 예고"로 추출된 키워드를 가장 앞에 배치한다.
+  // VIDEO_PIPELINE_ENABLED=false(영상 중단) 이후로는 새로 생성될 일이 없고,
+  // 여행 채널 전환 이전 경제 채널 시절 잔여물만 남아있을 수 있으므로 travel만 채택한다.
   try {
     const promisedRows = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' ORDER BY score DESC`)
+      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' AND category = 'travel' ORDER BY score DESC`)
       .all();
     if (promisedRows.length > 0) {
       const promisedSet = new Set(promisedRows.map((r) => r.keyword.toLowerCase()));
@@ -563,8 +588,10 @@ async function main() {
 
   // Part 1.55: 이미 발행된 포스트와 중복 주제 제거 (21일 이내, 6글자 공통 부분문자열 기준)
   try {
+    // blog_posts에는 used_at 컬럼이 없음(published_at만 존재) — 잘못된 컬럼명으로
+    // 매 실행마다 이 단계 전체가 예외로 죽어 중복 제거가 조용히 스킵되고 있었음.
     const published = db
-      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published' AND used_at >= datetime('now', '-21 days')`)
+      .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published' AND published_at >= datetime('now', '-21 days')`)
       .all()
       .map((r) => r.keyword.replace(/[\s&]/g, '').toLowerCase());
 
@@ -698,6 +725,29 @@ async function main() {
     logger.info('[blog:pipeline] Part 1.6 완료 (경쟁 채널 분석).');
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.6 Competitor Analyzer 실패 (계속 진행): ${err.message}`);
+  }
+
+  // Part 1.7: Tradule Source — 여행 코스 실데이터(평점·리뷰수·동선) 주입
+  try {
+    contentData.contents = (await attachTripData(contentData)).contents;
+    const skipped = contentData.contents.filter((c) => c.skip_reason);
+    if (skipped.length > 0) {
+      logger.info(
+        `[blog:pipeline] Part 1.7: 트레쥴 데이터 부족으로 ${skipped.length}개 스킵: ` +
+        skipped.map((c) => `"${c.keyword}"(${c.skip_reason})`).join(', ')
+      );
+    }
+    // C-2 계약: 스팟 3개 미만(=trip_data 없이 skip_reason만 있는 항목)은 글을 쓰지 않는다.
+    // 단, 지역 매칭 자체가 안 된 키워드(여행 코스가 아닌 일반 키워드)는 trip_data 없이도 통과시킨다.
+    contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+    logger.info(`[blog:pipeline] Part 1.7 완료. 진행 대상: ${contentData.contents.length}개`);
+  } catch (err) {
+    logger.warn(`[blog:pipeline] Part 1.7 Tradule Source 실패 (계속 진행, trip_data 없이): ${err.message}`);
+  }
+
+  if (!contentData.contents.length) {
+    logger.warn('[blog:pipeline] Part 1.7 이후 남은 키워드 없음. 종료.');
+    process.exit(0);
   }
 
   // Part 2: Content Enhancer

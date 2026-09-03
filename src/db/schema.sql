@@ -94,3 +94,36 @@ CREATE TABLE IF NOT EXISTS thumbnail_ab_tests (
 );
 CREATE INDEX IF NOT EXISTS idx_thumb_ab_video ON thumbnail_ab_tests(video_id);
 CREATE INDEX IF NOT EXISTS idx_thumb_ab_variant ON thumbnail_ab_tests(current_variant);
+
+-- youtube_posts: 업로드된 YouTube 영상 이력
+CREATE TABLE IF NOT EXISTS youtube_posts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  keyword      TEXT    NOT NULL,
+  category     TEXT    NOT NULL DEFAULT 'economy',
+  video_id     TEXT    NOT NULL UNIQUE,
+  channel_type TEXT    NOT NULL DEFAULT 'shorts',  -- shorts | longform
+  url          TEXT    NOT NULL,
+  title        TEXT,
+  published_at TEXT,
+  blog_post_id INTEGER REFERENCES blog_posts(id),
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_youtube_posts_keyword ON youtube_posts(keyword);
+CREATE INDEX IF NOT EXISTS idx_youtube_posts_channel ON youtube_posts(channel_type);
+
+-- youtube_metrics: 영상별 성과 지표 (주간 수집)
+CREATE TABLE IF NOT EXISTS youtube_metrics (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_id              TEXT    NOT NULL REFERENCES youtube_posts(video_id),
+  collected_at          TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+  views                 INTEGER DEFAULT 0,
+  watch_minutes         REAL    DEFAULT 0,
+  avg_view_duration_sec REAL    DEFAULT 0,
+  impressions           INTEGER DEFAULT 0,
+  ctr                   REAL    DEFAULT 0,
+  likes                 INTEGER DEFAULT 0,
+  comments              INTEGER DEFAULT 0,
+  subscribers_gained    INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_youtube_metrics_video ON youtube_metrics(video_id);
+CREATE INDEX IF NOT EXISTS idx_youtube_metrics_date  ON youtube_metrics(collected_at);

@@ -15,8 +15,57 @@ const require = createRequire(import.meta.url);
 const sharp   = require('sharp');
 
 const execFileAsync = promisify(execFile);
-// ffmpeg-static 번들 바이너리 (시스템 ffmpeg 설치 불필요)
-const { default: ffmpegPath } = await import('ffmpeg-static');
+
+// ffmpeg-static 지연 로드 — 패키지 없을 시 부트 크래시 방지
+let _ffmpegPath = null;
+async function getFfmpegPath() {
+  if (_ffmpegPath) return _ffmpegPath;
+  try {
+    const mod = await import('ffmpeg-static');
+    _ffmpegPath = mod.default;
+  } catch {
+    _ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    logger.warn('[media_generator] ffmpeg-static 없음 — 시스템 ffmpeg 사용');
+  }
+  return _ffmpegPath;
+}
+
+// ffprobePath: ffmpeg-static 번들 ffprobe (동일 디렉토리)
+async function getFfprobePath() {
+  const fp = await getFfmpegPath();
+  return fp.replace(/ffmpeg(\.exe)?$/, (_, ext) => `ffprobe${ext ?? ''}`);
+}
+
+// 오디오 파일 실제 길이 측정 (ffprobe -count_packets).
+// ElevenLabs VBR MP3는 헤더에 기록된 duration이 실제 재생보다 ~32초 부풀려짐.
+async function getAudioDuration(audioPath) {
+  const ffprobePath = await getFfprobePath();
+  // 1차: count_packets (VBR MP3에서 정확)
+  try {
+    const { stdout } = await execFileAsync(ffprobePath, [
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-count_packets',
+      '-show_entries', 'stream=nb_read_packets,duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      audioPath,
+    ]);
+    const lines = stdout.trim().split('\n').map(Number).filter(n => !isNaN(n) && n > 0);
+    if (lines.length > 0) return lines[0];
+  } catch { /* fall through */ }
+  // 2차: format duration (헤더값)
+  try {
+    const { stdout } = await execFileAsync(ffprobePath, [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', audioPath,
+    ]);
+    const sec = parseFloat(stdout);
+    if (!isNaN(sec) && sec > 0) return sec;
+  } catch { /* fall through */ }
+  // 3차 폴백: ElevenLabs ~104kbps 기준 bytes / 13000
+  const stats = await fs.stat(audioPath).catch(() => ({ size: 0 }));
+  return Math.max(30, Math.ceil(stats.size / 13000) + 1);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -24,12 +73,20 @@ const __dirname  = path.dirname(__filename);
 const MOCK_CONTENT_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 // ── 매읽남 캐릭터 공통 설명 ──────────────────────────────────────────────
+// 스타일 기준: 흰 복슬 페르시안 고양이 + 금테 안경 + 베이지 재킷 + 따뜻한 실내 배경
+// 순수 흰색 배경 / Grok Aurora 혼용 금지 — 스타일 불일치 원인
 const MAEILNAMJA_BASE =
-  'Chibi kawaii anime-style white Persian cat professor character, ' +
-  'wearing beige/tan blazer with dark navy necktie, small round gold-rim glasses, ' +
-  'extremely fluffy white fur, adorable chubby proportions, full body visible, ' +
-  'expressive large eyes, Korean YouTube Shorts educational content style, ' +
-  'vibrant clean illustration, absolutely no text or letters anywhere in the image';
+  'Kawaii chibi illustration, Korean educational YouTube character, ' +
+  'white fluffy Persian cat professor, ' +
+  'extremely voluminous fluffy white fur, pure white fur color (NOT gray, NOT dark), ' +
+  'wearing beige tan double-button blazer, dark navy necktie, ' +
+  'large prominent round gold-rim glasses, ' +
+  'chubby adorable chibi proportions, full body visible from head to toe, ' +
+  'warm expressive eyes with bold black outlines, ' +
+  'clean cartoon style with soft cell shading, saturated colors, ' +
+  'warm cozy indoor background (soft lighting, bookshelf or desk), ' +
+  'absolutely no text or letters or numbers anywhere in the image, ' +
+  'no photorealism, consistent character design';
 
 // act별 분위기 가이드
 const ACT_MOODS = [
@@ -163,40 +220,49 @@ async function verifyCharacterImage(imageUrl, actName) {
 
 // ── GPT-4o-mini로 대본 기반 장면 배경 생성 ────────────────────────────────
 /**
- * 대본 3개 구간(도입/본론/마무리)의 실제 내용을 분석해
+ * 대본 5개 구간(hook/context/insight_cause/insight_effect/close)의 실제 내용을 분석해
  * 각 DALL-E 이미지에 쓸 장면 배경 설명을 영어로 생성한다.
- * GPT-4o-mini 1회 호출 ($0.0001) → 이미지 3장의 배경이 대본과 일치한다.
+ * GPT-4o-mini 1회 호출 → 이미지 5장의 배경이 대본과 일치한다.
  */
 async function buildSceneBackgrounds(keyword, scripts) {
-  const actTexts = [
-    scripts.hook    ?? '',
-    `${scripts.context ?? ''} ${scripts.insight ?? ''}`.trim(),
-    `${scripts.summary ?? ''} ${scripts.cta ?? ''}`.trim(),
-  ].map((t) => t.slice(0, 150));
+  const insight = scripts.insight ?? '';
+  const insightMid = Math.floor(insight.length / 2);
+
+  const segTexts = [
+    (scripts.hook    ?? '').slice(0, 120),
+    (scripts.context ?? '').slice(0, 120),
+    insight.slice(0, insightMid).slice(0, 120),
+    insight.slice(insightMid).slice(0, 120),
+    `${scripts.summary ?? ''} ${scripts.cta ?? ''}`.trim().slice(0, 120),
+  ];
 
   const prompt =
     `You are a visual director for a Korean economic YouTube Shorts channel.\n` +
     `Topic: "${keyword}"\n\n` +
-    `Script sections (Korean):\n` +
-    `[도입/Hook]: ${actTexts[0]}\n` +
-    `[본론/Body]: ${actTexts[1]}\n` +
-    `[마무리/Close]: ${actTexts[2]}\n\n` +
-    `For each section, generate:\n` +
-    `1. "bg": background scene (the environment/setting relevant to the script)\n` +
-    `2. "pose": character action/pose for the chibi cat professor (매읽남) in that scene\n\n` +
+    `Script segments (Korean):\n` +
+    `[1 Hook/도입]: ${segTexts[0]}\n` +
+    `[2 Context/배경]: ${segTexts[1]}\n` +
+    `[3 Cause/원인]: ${segTexts[2]}\n` +
+    `[4 Effect/영향]: ${segTexts[3]}\n` +
+    `[5 Close/마무리]: ${segTexts[4]}\n\n` +
+    `For each segment generate "bg", "pose" (initial pose), and "pose2" (follow-up pose — a contrasting but related action).\n\n` +
     `Rules for bg:\n` +
-    `- Directly relevant to the script content (courtroom, trading floor, office, etc.)\n` +
-    `- NO text, NO numbers, NO specific prices or index values anywhere\n` +
-    `- Stock charts may show trend arrows or candlestick shapes ONLY — zero visible numerical data\n` +
-    `Rules for pose (character action, not background):\n` +
-    `- Act 0 mood: ${ACT_MOODS[0]} — e.g. gasping, pointing at screen in shock\n` +
-    `- Act 1 mood: ${ACT_MOODS[1]} — e.g. holding document, gesturing at chart\n` +
-    `- Act 2 mood: ${ACT_MOODS[2]} — e.g. thumbs up, calm smile, bowing slightly\n` +
-    `- Each bg/pose under 120 chars\n` +
+    `- Directly relevant to the segment content\n` +
+    `- NO text, NO numbers, NO prices anywhere\n` +
+    `- Stock charts: trend arrows or candlestick shapes ONLY\n` +
+    `Rules for pose / pose2 (character actions — must clearly differ from each other):\n` +
+    `- Segment 1 (Hook): pose=shocked gasping arms up, pose2=pointing at screen urgently\n` +
+    `- Segment 2 (Context): pose=reading document calmly, pose2=explaining with open arms\n` +
+    `- Segment 3 (Cause): pose=pointing at chart confidently, pose2=holding up finger making key point\n` +
+    `- Segment 4 (Effect): pose=concerned hands forward, pose2=shaking head worried\n` +
+    `- Segment 5 (Close): pose=thumbs up warm smile, pose2=slight bow hands clasped\n` +
+    `- Each bg/pose/pose2 under 120 chars\n` +
     `Return JSON: {\n` +
-    `  "hook":  {"bg":"...","pose":"..."},\n` +
-    `  "body":  {"bg":"...","pose":"..."},\n` +
-    `  "close": {"bg":"...","pose":"..."}\n` +
+    `  "hook":           {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "context":        {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "insight_cause":  {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "insight_effect": {"bg":"...","pose":"...","pose2":"..."},\n` +
+    `  "close":          {"bg":"...","pose":"...","pose2":"..."}\n` +
     `}`;
 
   try {
@@ -217,95 +283,214 @@ async function buildSceneBackgrounds(keyword, scripts) {
   } catch (err) {
     logger.warn(`[media_generator] Scene background generation failed: ${err.message}. Using defaults.`);
     return {
-      hook:  { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines on screens, no numbers no text, spotlight', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open' },
-      body:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text, warm lighting',   pose: 'pointing confidently with wooden pointer stick, explaining with determined expression' },
-      close: { bg: 'cozy library with warm golden sunlight through window, stacked books, no text',                                   pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head' },
+      hook:           { bg: 'dramatic dark trading floor with glowing red downward arrow trend lines, no numbers no text', pose: 'alarmed shocked expression, both arms raised dramatically, mouth wide open', pose2: 'pointing urgently at screen, leaning forward, eyes wide' },
+      context:        { bg: 'bright modern newsroom with abstract chart shapes on screens, no numbers no text', pose: 'reading newspaper attentively, calm informative expression', pose2: 'explaining with open arms, confident warm expression' },
+      insight_cause:  { bg: 'bright modern office with abstract upward trend chart shapes on whiteboard, no numbers no text', pose: 'pointing confidently with wooden pointer stick, determined expression', pose2: 'holding up index finger making key point, eyebrows raised' },
+      insight_effect: { bg: 'dramatic city skyline at dusk with falling graph silhouette, no text', pose: 'concerned expression, hands forward showing impact', pose2: 'shaking head slowly, worried expression, arms crossed' },
+      close:          { bg: 'cozy library with warm golden sunlight through window, stacked books, no text', pose: 'calm wise smile, one paw raised giving thumbs-up, slightly bowing head', pose2: 'hands clasped, slight bow, gentle reassuring expression' },
     };
   }
 }
 
-// ── 씬 이미지 3컷 생성 ────────────────────────────────────────────────────
+// ── 레퍼런스 이미지 로더 ──────────────────────────────────────────────────
+// reference/ 폴더의 매읽남 캐릭터 기본 이미지를 찾아 Buffer로 반환한다.
+// 파일명 우선순위: maeilnamja.png > maeilnamja.jpg > character.png > character.jpg
+// 없으면 null 반환 → 기존 generations API 사용
+const REFERENCE_DIR = path.resolve(__dirname, '../../reference');
+const REFERENCE_CANDIDATES = [
+  '매읽남.png', '매읽남.jpg',
+  'maeilnamja.png', 'maeilnamja.jpg',
+  'character.png',  'character.jpg',
+  'ref.png',        'ref.jpg',
+];
+let _refImageCache = undefined; // undefined = 미조회, null = 없음
+
+async function loadReferenceImage() {
+  if (_refImageCache !== undefined) return _refImageCache;
+  for (const name of REFERENCE_CANDIDATES) {
+    const p = path.resolve(REFERENCE_DIR, name);
+    try {
+      const buf = await fs.readFile(p);
+      _refImageCache = { buffer: buf, name, path: p };
+      logger.info(`[media_generator] 레퍼런스 이미지 로드: ${name}`);
+      return _refImageCache;
+    } catch { /* 없으면 다음 후보 */ }
+  }
+  _refImageCache = null;
+  return null;
+}
+
 /**
- * 대본 내용 기반 씬 이미지 3컷 생성 (도입/본론/마무리).
- * 캐릭터 없이 콘텐츠와 직결된 시네마틱 장면으로 컷 전환 연출.
+ * gpt-image-1 /images/edits 로 레퍼런스 이미지 기반 씬 이미지를 생성한다.
+ * 레퍼런스 이미지의 캐릭터 스타일을 유지하면서 새 배경+포즈를 적용한다.
+ * 성공 시 로컬 파일 경로 반환, 실패 시 null 반환.
+ */
+async function generateImageWithReference(imagePrompt, refBuf, refName, imgPath) {
+  try {
+    const form = new FormData();
+    form.append('model', 'gpt-image-1');
+    form.append('prompt', imagePrompt);
+    form.append('n', '1');
+    form.append('size', '1024x1536');
+    form.append('quality', 'high');
+
+    // image 파라미터: File-like Blob (Node 22 네이티브 FormData + Blob)
+    const mime = refName.endsWith('.jpg') || refName.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
+    const blob = new Blob([refBuf], { type: mime });
+    form.append('image', blob, refName);
+
+    const res = await axios.post(
+      'https://api.openai.com/v1/images/edits',
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${config.openai.apiKey}`,
+          ...form.getHeaders?.() ?? {},
+        },
+        timeout: 120000,
+      }
+    );
+    const item = res.data.data[0];
+    if (item?.b64_json) {
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+      return imgPath;
+    }
+    if (item?.url) {
+      const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+      return imgPath;
+    }
+    return null;
+  } catch (err) {
+    const msg = err.response?.data?.error?.message ?? err.message;
+    logger.warn(`[media_generator] gpt-image-1 edits failed: ${msg}`);
+    return null;
+  }
+}
+
+// ── 씬 이미지 5컷 생성 ────────────────────────────────────────────────────
+/**
+ * 대본 내용 기반 씬 이미지 5컷 생성 (hook/context/insight_cause/insight_effect/close).
+ * 각 이미지가 그 시점의 스크립트 내용과 직접 대응하여 영상 몰입감을 높인다.
  * gpt-image-1 → Pexels 순으로 폴백.
  */
+/**
+ * 씬 이미지 생성 헬퍼 — gpt-image-1 edits(레퍼런스 있음) 또는 generations 호출.
+ * 성공 시 로컬 파일 경로 반환, 실패 시 null.
+ */
+async function generateOneSceneImage(imagePrompt, imgPath, refImage) {
+  // 레퍼런스 있음 → edits API
+  if (refImage) {
+    const url = await generateImageWithReference(imagePrompt, refImage.buffer, refImage.name, imgPath);
+    if (url) return url;
+  }
+  // 레퍼런스 없거나 edits 실패 → generations API
+  try {
+    const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
+    const res = await axios.post(
+      'https://api.openai.com/v1/images/generations', body,
+      { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
+    );
+    const item = res.data.data[0];
+    let saved = null;
+    if (item.b64_json) {
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
+      saved = imgPath;
+    } else if (item.url) {
+      const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
+      await fs.mkdir(path.dirname(imgPath), { recursive: true });
+      await fs.writeFile(imgPath, Buffer.from(imgRes.data));
+      saved = imgPath;
+    }
+    return saved;
+  } catch (err) {
+    logger.warn(`[media_generator] gpt-image-1 failed (${path.basename(imgPath)}): ${err.response?.data?.error?.message ?? err.message}`);
+    return null;
+  }
+}
+
+/**
+ * 씬 이미지 5구간 × 포즈 2장 = 최대 10장 생성.
+ * 반환: [[pose0_url, pose1_url], ...] — 길이 5인 배열, 각 요소가 [A, B] 포즈 쌍.
+ * 포즈 A → B 컷 전환으로 캐릭터가 움직이는 느낌을 연출한다.
+ */
 async function generateSceneImages(keyword, scripts, category) {
-  if (!config.openai.apiKey) return [null, null, null];
+  if (!config.openai.apiKey) return Array(5).fill([null, null]);
 
   const scenes = await buildSceneBackgrounds(keyword, scripts ?? {});
-  const sceneList = [scenes.hook, scenes.body, scenes.close];
-  logger.info(`[media_generator] Scene prompts ready for: ${keyword}`);
+  const sceneList = [
+    scenes.hook,
+    scenes.context,
+    scenes.insight_cause,
+    scenes.insight_effect,
+    scenes.close,
+  ];
 
-  const actLabels = ['도입', '본론', '마무리'];
+  const refImage = await loadReferenceImage();
+  const useEdits = !!refImage;
+  logger.info(
+    `[media_generator] Scene image generation start (5seg × 2pose = 10) | ` +
+    `mode: ${useEdits ? `edits (${refImage.name})` : 'generations'} | ${keyword}`
+  );
+
+  const segLabels = ['hook', 'context', 'insight_cause', 'insight_effect', 'close'];
+  const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const results = [];
 
-  for (let i = 0; i < 3; i++) {
-    await throttle(300);
-    const cachedUrl = await findSimilarImage(keyword, i);
-    if (cachedUrl) {
-      // 로컬 파일 경로인 경우 실제 존재 여부 검증 (이전 실행에서 생성 후 삭제된 경우 방지)
-      const isValid = cachedUrl.startsWith('http://') || cachedUrl.startsWith('https://')
-        || await fs.access(cachedUrl).then(() => true).catch(() => false);
-      if (isValid) {
-        logger.info(`[media_generator] Reusing cached scene act${i} (${actLabels[i]}): ${keyword}`);
-        results.push(cachedUrl);
-        continue;
-      }
-      logger.info(`[media_generator] Cached file missing, regenerating act${i}: ${keyword}`);
-    }
+  for (let i = 0; i < 5; i++) {
+    const { bg = 'warm indoor office', pose = '', pose2 = '' } = sceneList[i] ?? {};
+    const posePair = [];
 
-    // 매읽남 캐릭터 + 씬별 포즈 + 씬별 배경 조합
-    const { bg, pose } = sceneList[i] ?? { bg: '', pose: '' };
-    const imagePrompt =
-      `${MAEILNAMJA_BASE}. ` +
-      `Character action: ${pose}. ` +
-      `Background scene: ${bg}. ` +
-      `Full body character centered, 9:16 portrait composition, high quality, vibrant illustration.`;
+    for (const [pIdx, poseText] of [[0, pose], [1, pose2 || pose]]) {
+      await throttle(300);
 
-    const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-    const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}.png`);
-
-    // Grok Aurora 우선 → OpenAI gpt-image-1 폴백 → Pexels 최종 폴백
-    let imageUrl = null;
-    if (config.grok?.apiKey) {
-      imageUrl = await generateImageGrokAurora(imagePrompt, imgPath);
-      if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, Grok Aurora): ${keyword}`);
-    }
-    if (!imageUrl && config.openai.apiKey) {
-      try {
-        const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'high' };
-        const res = await axios.post(
-          'https://api.openai.com/v1/images/generations', body,
-          { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 120000 }
-        );
-        const item = res.data.data[0];
-        if (item.b64_json) {
-          await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
-          imageUrl = imgPath;
-        } else if (item.url) {
-          // OpenAI 임시 URL도 만료 가능 → 즉시 다운로드
-          const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
-          await fs.mkdir(path.dirname(imgPath), { recursive: true });
-          await fs.writeFile(imgPath, Buffer.from(imgRes.data));
-          imageUrl = imgPath;
+      // 캐시 확인 (캐시 키: subAct*2 + poseIdx)
+      const cacheKey = i * 2 + pIdx;
+      const cachedUrl = await findSimilarImage(keyword, cacheKey);
+      if (cachedUrl) {
+        const isValid = cachedUrl.startsWith('http') || await fs.access(cachedUrl).then(() => true).catch(() => false);
+        if (isValid) {
+          logger.info(`[media_generator] Cache hit: ${segLabels[i]} pose${pIdx}`);
+          posePair.push(cachedUrl);
+          continue;
         }
-        if (imageUrl) logger.info(`[media_generator] Scene image ${i + 1}/3 done (${actLabels[i]}, gpt-image-1): ${keyword}`);
-      } catch (err) {
-        logger.warn(`[media_generator] gpt-image-1 act${i} failed: ${err.response?.data?.error?.message ?? err.message}`);
       }
+
+      const imagePrompt =
+        `${MAEILNAMJA_BASE}. ` +
+        `Background setting: ${bg}. ` +
+        `Character action: ${poseText}. ` +
+        `Full body character centered in foreground, 9:16 portrait composition, high quality.`;
+
+      const imgPath = path.resolve(__dirname, `../../output/media/${safeKw}_scene${i}_p${pIdx}.png`);
+      let imageUrl = await generateOneSceneImage(imagePrompt, imgPath, useEdits ? refImage : null);
+
+      // 이미지 생성 실패 → Pexels 폴백 (pose0만, pose1은 pose0 재사용)
+      if (!imageUrl) {
+        if (pIdx === 0) {
+          const pexels = await searchPexelsImages(keyword, category, 1);
+          imageUrl = pexels[0] || null;
+          if (imageUrl) logger.info(`[media_generator] ${segLabels[i]} p0 → Pexels fallback`);
+        } else {
+          imageUrl = posePair[0] ?? null; // pose1 실패 시 pose0 재사용
+        }
+      }
+
+      if (imageUrl) {
+        logger.info(`[media_generator] ${segLabels[i]} pose${pIdx} done (${useEdits && imageUrl !== posePair[0] ? 'edits' : 'gen'}): ${keyword}`);
+        saveImageToCache(keyword, cacheKey, imageUrl).catch(() => {});
+      }
+      posePair.push(imageUrl ?? null);
     }
 
-    // Pexels 최종 폴백
-    if (!imageUrl) {
-      const pexels = await searchPexelsImages(keyword, category, 1);
-      imageUrl = pexels[0] || null;
-      if (imageUrl) logger.info(`[media_generator] Scene image act${i} → Pexels fallback`);
-    }
-
-    results.push(imageUrl ?? null);
-    if (imageUrl) saveImageToCache(keyword, i, imageUrl).catch(() => {});
+    results.push(posePair);
   }
+
+  const total = results.flat().filter(Boolean).length;
+  logger.info(`[media_generator] Scene images: ${total}/10 generated`);
   return results;
 }
 
@@ -400,52 +585,76 @@ function wrapTextKorean(text, maxCharsPerLine = 22) {
 
 // ── 씬 리스트 생성 ─────────────────────────────────────────────────────────
 /**
- * 스크립트 5구간을 45자 단위로 분할, 글자 수 비례로 타이밍 배분.
- * 반환: [{ text, start, duration, act }]
- *   act 0 = 도입(hook), act 1 = 본론(context+insight), act 2 = 마무리(summary+cta)
+ * 스크립트 5구간을 12자 단위로 분할, 글자 수 비례로 타이밍 배분.
+ * 반환: [{ text, start, duration, act, subAct }]
+ *   act    0 = 도입(hook), 1 = 본론, 2 = 마무리
+ *   subAct 0 = hook, 1 = context, 2 = insight 전반(원인), 3 = insight 후반(영향), 4 = close
+ *   → subAct를 이미지 인덱스로 사용해 씬 이미지 5컷을 각 구간에 매핑한다.
  */
 function buildScenes(scripts, totalDuration) {
   const { hook = '', context = '', insight = '', summary = '', cta = '' } = scripts;
 
+  // insight를 절반으로 나눠 원인/영향 구간 분리
+  const insightMid = Math.floor(insight.length / 2);
+  const insightCause  = insight.slice(0, insightMid);
+  const insightEffect = insight.slice(insightMid);
+
+  // 자막 청크: 12자 단위 분할 (가독성 최적)
+  // subAct: 5개 이미지 구간 인덱스 (generateSceneImages 순서와 일치)
   const actChunks = [
-    { act: 0, chunks: splitText(hook.slice(0, 80), 45) },
-    { act: 1, chunks: [
-        ...splitText(context.slice(0, 180), 45),
-        ...splitText(insight.slice(0, 280), 45),
-      ]
-    },
-    { act: 2, chunks: [
-        ...splitText(summary.slice(0, 140), 45),
-        ...splitText(cta.slice(0, 100),    45),
+    { act: 0, subAct: 0, chunks: splitText(hook, 12) },
+    { act: 1, subAct: 1, chunks: splitText(context, 12) },
+    { act: 1, subAct: 2, chunks: splitText(insightCause, 12) },
+    { act: 1, subAct: 3, chunks: splitText(insightEffect, 12) },
+    { act: 2, subAct: 4, chunks: [
+        ...splitText(summary, 12),
+        ...splitText(cta,     12),
       ]
     },
   ];
 
-  const allChunks = actChunks.flatMap(({ act, chunks }) =>
-    chunks.filter(Boolean).map((text) => ({ text, act }))
+  // isKey: hook(act 0) 또는 숫자+단위 포함 → 주황색 강조
+  const KEY_PATTERN = /\d[\d,]*\.?\d*\s*[%억조만천원↑↓배배]|[?!]/;
+  const allChunks = actChunks.flatMap(({ act, subAct, chunks }) =>
+    chunks.filter(Boolean).map((text) => ({
+      text,
+      act,
+      subAct,
+      isKey: act === 0 || KEY_PATTERN.test(text),
+    }))
   );
 
   if (allChunks.length === 0) return [];
 
-  const totalChars = allChunks.reduce((s, c) => s + c.text.length, 0);
-  const MIN_DUR = 2;
+  // TTS 낭독 속도 기반 타이밍: 7.0자/초 (ElevenLabs 실측값)
+  // 실측: 688자 → 실제 말 100초. totalDuration이 있으면 동적 계산.
+  const totalScriptChars = allChunks.reduce((s, c) => s + c.text.length, 0);
+  const TTS_RATE = (totalDuration > 0 && totalScriptChars > 0)
+    ? totalScriptChars / totalDuration
+    : 7.0; // 자/초
+  const MIN_DUR  = 1.5;
 
   let elapsed = 0;
-  return allChunks.map(({ text, act }, i) => {
-    const isLast = i === allChunks.length - 1;
-    const proportion = text.length / totalChars;
-    const rawDur = Math.max(MIN_DUR, Math.round(proportion * totalDuration));
-    const duration = isLast ? Math.max(MIN_DUR, totalDuration - elapsed) : rawDur;
-    const scene = { text, start: elapsed, duration, act };
-    elapsed += rawDur;
+  const scenes = allChunks.map(({ text, act, subAct, isKey }) => {
+    const dur = Math.max(MIN_DUR, text.length / TTS_RATE);
+    const scene = { text, start: elapsed, duration: dur, act, subAct, isKey };
+    elapsed += dur;
     return scene;
   });
+
+  // 전체 자막 길이가 오디오보다 짧으면 마지막 자막을 오디오 끝까지 늘림
+  if (elapsed < totalDuration) {
+    scenes[scenes.length - 1].duration += (totalDuration - elapsed);
+  }
+
+  return scenes;
 }
 
 // ── 이미지 배경 클립 생성 ─────────────────────────────────────────────────
 /**
- * act 0·1·2별로 캐릭터 이미지를 할당한다.
- * 같은 act 내 씬들은 동일 캐릭터 이미지를 사용해 구간감을 살린다.
+ * subAct(0-4)별로 씬 이미지를 할당한다.
+ * 같은 subAct 내 씬들은 동일 이미지를 사용해 자연스러운 구간 전환을 만든다.
+ * imageUrls: 5개 배열 (hook/context/insight_cause/insight_effect/close)
  */
 function buildImageClips(imageUrls, scenes, totalDuration) {
   const FALLBACK = 'https://placehold.co/1080x1920/1a1a2e/1a1a2e.png';
@@ -454,39 +663,44 @@ function buildImageClips(imageUrls, scenes, totalDuration) {
     return [{ asset: { type: 'image', src: FALLBACK }, start: 0, length: totalDuration, fit: 'cover' }];
   }
 
-  // act별 이미지 URL 결정 (null이면 FALLBACK)
-  const imgByAct = [0, 1, 2].map((act) => imageUrls[act] || FALLBACK);
+  // subAct별 이미지 URL 결정 (2D 배열이면 pose0만 사용, 1D 배열도 허용)
+  const imgBySubAct = [0, 1, 2, 3, 4].map((i) => {
+    const entry = imageUrls[i];
+    const url = Array.isArray(entry) ? (entry[0] ?? null) : (entry ?? null);
+    return url || FALLBACK;
+  });
 
-  // act 구간 경계를 scene 단위로 병합 → 같은 act는 하나의 이미지 클립
+  // subAct 구간 경계를 scene 단위로 병합 → 같은 subAct는 하나의 이미지 클립
   const clips = [];
-  let lastAct = -1;
+  let lastSubAct = -1;
   let clipStart = 0;
   let clipEnd = 0;
 
   for (const scene of scenes) {
-    if (scene.act !== lastAct) {
-      if (lastAct >= 0) {
+    const subAct = scene.subAct ?? scene.act ?? 0;
+    if (subAct !== lastSubAct) {
+      if (lastSubAct >= 0) {
         clips.push({
-          asset: { type: 'image', src: imgByAct[lastAct] },
+          asset: { type: 'image', src: imgBySubAct[lastSubAct] },
           start:  clipStart,
           length: clipEnd - clipStart,
           fit:    'cover',
-          effect: lastAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
+          effect: lastSubAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
           transition: { in: 'fade', out: 'fade' },
         });
       }
       clipStart = scene.start;
-      lastAct = scene.act;
+      lastSubAct = subAct;
     }
     clipEnd = scene.start + scene.duration;
   }
-  // 마지막 act 클립
+  // 마지막 클립
   clips.push({
-    asset: { type: 'image', src: imgByAct[lastAct] },
+    asset: { type: 'image', src: imgBySubAct[lastSubAct] },
     start:  clipStart,
     length: Math.max(1, clipEnd - clipStart),
     fit:    'cover',
-    effect: lastAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
+    effect: lastSubAct % 2 === 0 ? 'zoomIn' : 'zoomOut',
     transition: { in: 'fade', out: 'fade' },
   });
 
@@ -549,9 +763,11 @@ async function renderSubtitlePng(text, outputPath) {
   const lineH = Math.ceil(fontSize * 1.6);
   const padding = 24;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = wrapTextKorean(text, 22);
-  const boxH = lines.length * lineH + padding * 2;
   const boxX = 90, boxW = 900;
+  const innerW = boxW - padding * 2 - 10;
+  const maxCpl = Math.floor(innerW / (fontSize * 0.62));
+  const lines = wrapTextKorean(text, maxCpl);
+  const boxH = lines.length * lineH + padding * 2;
   const boxY = H - boxH - 115;
   const textElems = lines.map((line, i) => {
     const y = boxY + padding + (i + 0.8) * lineH;
@@ -584,37 +800,46 @@ async function renderLabelPng(seriesName, outputPath) {
 }
 
 // ── Sharp 버퍼 반환 변형 (ffmpeg 합성용) ─────────────────────────────────
-async function renderSubtitlePngBuffer(text) {
+async function renderSubtitlePngBuffer(text, isKey = false) {
   const W = 1080, H = 1920;
   const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-  const fontSize = 48;
+  const fontSize = 68;
   const lineH = Math.ceil(fontSize * 1.55);
-  const padding = 28;
+  const padding = 32;
   const esc = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = wrapTextKorean(text, 18);
+  const boxX = 20, boxW = 1040;
+  const innerW = boxW - padding * 2;
+  const maxCpl = Math.floor(innerW / fontSize);
+  const lines = wrapTextKorean(text, maxCpl);
   const boxH = lines.length * lineH + padding * 2;
-  const boxX = 60, boxW = 960;
-  const boxY = H - boxH - 100;
-  // 텍스트 그림자 효과: 같은 텍스트를 살짝 오프셋으로 먼저 렌더링
-  const shadowElems = lines.map((line, i) => {
-    const y = boxY + padding + (i + 0.82) * lineH;
-    return `<text x="${W / 2 + 3}" y="${y + 3}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.6" text-anchor="middle">${esc(line)}</text>`;
+  const boxY = H - boxH - 120;
+
+  const fillColor = isKey ? '#FF8C00' : '#FFFFFF';
+
+  // 검은 외곽선: 상하좌우 2px 오프셋으로 4방향 그림자 → 외곽선 효과
+  const outline = (line, cx, y) => (
+    [[-2,0],[2,0],[0,-2],[0,2]].map(([dx,dy]) =>
+      `<text x="${cx+dx}" y="${y+dy}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#000000" fill-opacity="0.95" text-anchor="middle">${esc(line)}</text>`
+    ).join('\n')
+  );
+
+  const textSvg = lines.map((line, i) => {
+    const cx = W / 2;
+    const y  = boxY + padding + (i + 0.82) * lineH;
+    return `${outline(line, cx, y)}
+    <text x="${cx}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="${fillColor}" text-anchor="middle">${esc(line)}</text>`;
   }).join('\n');
-  const textElems = lines.map((line, i) => {
-    const y = boxY + padding + (i + 0.82) * lineH;
-    return `<text x="${W / 2}" y="${y}" font-family="${FONT}" font-size="${fontSize}" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${esc(line)}</text>`;
-  }).join('\n');
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
     <defs>
       <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000000" stop-opacity="0.75"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="0.92"/>
+        <stop offset="0%" stop-color="#000000" stop-opacity="0.72"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.90"/>
       </linearGradient>
     </defs>
     <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="16" fill="url(#subGrad)"/>
-    <rect x="${boxX}" y="${boxY}" width="6" height="${boxH}" rx="3" fill="#FACC15"/>
-    ${shadowElems}
-    ${textElems}
+    <rect x="${boxX}" y="${boxY}" width="6" height="${boxH}" rx="3" fill="${isKey ? '#FF8C00' : '#FACC15'}"/>
+    ${textSvg}
   </svg>`;
   return await sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -701,6 +926,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
   const listFile = `${outputPath}.list.txt`;
   await fs.writeFile(listFile, listContent);
 
+  const ffmpegPath = await getFfmpegPath();
   await execFileAsync(ffmpegPath, [
     '-f', 'concat', '-safe', '0', '-i', listFile,
     '-c:a', 'libmp3lame', '-q:a', '2', '-y', outputPath,
@@ -712,6 +938,7 @@ async function mergeAudioFiles(audioPaths, outputPath) {
 // ── ffmpeg stderr로 실제 오디오 길이(초) 측정 ───────────────────────────
 async function getAudioDurationSec(audioPath) {
   try {
+    const ffmpegPath = await getFfmpegPath();
     // ffmpeg -i 는 항상 Duration을 stderr에 출력하고 에러 코드 1을 반환 (출력 없으므로)
     const { stderr = '' } = await execFileAsync(
       ffmpegPath, ['-i', audioPath], { encoding: 'utf8' }
@@ -734,6 +961,7 @@ async function getAudioDurationSec(audioPath) {
  *   duration — 프레임 표시 시간(초)
  */
 async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, seriesName } = {}) {
+  const ffmpegPath = await getFfmpegPath();
   const sessionId = Date.now().toString(36);
   const tmpDir    = path.resolve(path.dirname(outputPath), 'tmp_ffmpeg');
   await fs.mkdir(tmpDir, { recursive: true });
@@ -765,7 +993,7 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, 
       composites.push({ input: await renderFirstFramePngBuffer(keyword, seriesName) });
     } else {
       if (label)    composites.push({ input: await renderLabelPngBuffer(label) });
-      if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle) });
+      if (subtitle) composites.push({ input: await renderSubtitlePngBuffer(subtitle, frames[i].isKey ?? false) });
     }
 
     const frameBuf = composites.length
@@ -796,15 +1024,69 @@ async function renderFramesWithFfmpeg(frames, audioPath, outputPath, { keyword, 
       clipPaths.push(clipPath);
     }
 
-    // 클립 concat (스트림 복사) + 오디오 합성
+    // 클립 concat (스트림 복사) + 오디오 합성 (+ 효과음 믹싱)
     const concatFile = path.resolve(tmpDir, `clips_${sessionId}.txt`);
     await fs.writeFile(concatFile, clipPaths.map((p) => `file '${p.replace(/\\/g, '/')}'`).join('\n'));
+
+    // 효과음: assets/sounds/intro.mp3 (인트로), transition.mp3 (씬 전환)
+    const soundsDir = path.resolve(__dirname, '../../assets/sounds');
+    const introSfx  = path.resolve(soundsDir, 'intro.mp3');
+    const transitionSfx = path.resolve(soundsDir, 'transition.mp3');
+    const hasIntro  = await fs.access(introSfx).then(() => true).catch(() => false);
+    const hasTrans  = await fs.access(transitionSfx).then(() => true).catch(() => false);
+
+    let audioFilter = null;
+    const extraInputs = [];
+    if (audioPath) extraInputs.push('-i', audioPath);
+    if (hasIntro)  extraInputs.push('-i', introSfx);
+    if (hasTrans && frames.length > 1) extraInputs.push('-i', transitionSfx);
+
+    if (audioPath && (hasIntro || hasTrans)) {
+      // 인트로 + 주TTS 오디오 믹싱, 전환음은 2초 시점에 삽입
+      const inputs = ['[1:a]'];
+      let idx = 2;
+      if (hasIntro)  { inputs.push(`[${idx}:a]`); idx++; }
+      if (hasTrans && frames.length > 1) {
+        // 첫 씬 전환 시점에 전환음 믹싱
+        const transAt = Math.max(1, frames[0]?.duration ?? 3);
+        inputs.push(`[${idx}:a]adelay=${transAt * 1000}|${transAt * 1000}[tr]`);
+        audioFilter = `${inputs.slice(0, -1).join('')}${inputs[inputs.length - 1]};amix=inputs=${inputs.length - 1 + 1}:duration=first`;
+      } else {
+        audioFilter = `${inputs.join('')}amix=inputs=${inputs.length}:duration=first`;
+      }
+    }
+
+    // 오디오 실제 길이를 정밀 측정 (ffprobe -count_packets 방식)
+    // MP3 헤더 기반 추정은 ElevenLabs VBR에서 최대 30초 과보고 발생
+    let exactAudioDur = null;
+    if (audioPath) {
+      try {
+        const { stdout } = await execFileAsync(ffprobePath, [
+          '-v', 'error',
+          '-select_streams', 'a:0',
+          '-count_packets',
+          '-show_entries', 'stream=nb_read_packets,duration',
+          '-of', 'default=noprint_wrappers=1:nokey=1',
+          audioPath,
+        ]);
+        const val = parseFloat(stdout.trim().split('\n')[0]);
+        if (!isNaN(val) && val > 0) exactAudioDur = val;
+      } catch { /* fallback: getAudioDuration 값 사용 */ }
+    }
+
     try {
       await execFileAsync(ffmpegPath, [
         '-f', 'concat', '-safe', '0', '-i', concatFile,
-        ...(audioPath ? ['-i', audioPath] : []),
-        '-c:v', 'copy',
-        ...(audioPath ? ['-c:a', 'aac', '-b:a', '128k', '-shortest'] : []),
+        ...extraInputs,
+        // -c:v libx264 로 재인코딩: -shortest/-t 가 정확히 동작하려면 copy 불가
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
+        ...(audioPath && audioFilter
+          ? ['-filter_complex', audioFilter, '-c:a', 'aac', '-b:a', '128k']
+          : audioPath
+            ? ['-c:a', 'aac', '-b:a', '128k']
+            : []),
+        // 오디오 종료 지점에서 정확히 자름 (-t 우선, 없으면 -shortest)
+        ...(exactAudioDur ? ['-t', String(exactAudioDur)] : ['-shortest']),
         '-y', outputPath,
       ], { maxBuffer: 50 * 1024 * 1024 });
     } finally {
@@ -944,99 +1226,6 @@ async function generateThumbnailTitle(keyword, hook) {
   }
 }
 
-
-// ── 쇼츠 썸네일 (1080×1920, 9:16 세로형) ─────────────────────────────────
-/**
- * YouTube Shorts 세로 포맷 썸네일.
- * renderFirstFramePngBuffer와 동일한 스타일:
- * - 배경: 캐릭터/씬 이미지 (없으면 단색)
- * - 상단 그라데이션 오버레이
- * - "▶ 오늘의 핵심" 노란 배지
- * - 키워드를 노란 큰 텍스트로 중앙 배치
- * - 시리즈명 하단
- */
-async function generateShortsThumbnail(content, charImageUrl, outputPath) {
-  const W = 1080, H = 1920;
-  const keyword    = content.keyword ?? '';
-  const seriesName = content.series_name ?? '매일읽어주는남자';
-  const esc  = (s) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const FONT = 'Malgun Gothic,맑은 고딕,AppleGothic,NanumGothic,sans-serif';
-
-  // 배경 이미지 처리 (없으면 어두운 단색 폴백)
-  let charBuf;
-  if (charImageUrl) {
-    const charRaw = charImageUrl.startsWith('http://') || charImageUrl.startsWith('https://')
-      ? Buffer.from((await axios.get(charImageUrl, { responseType: 'arraybuffer', timeout: 30000 })).data)
-      : await fs.readFile(charImageUrl);
-    charBuf = await sharp(charRaw)
-      .resize(W, H, { fit: 'cover', position: 'centre' })
-      .png()
-      .toBuffer();
-  } else {
-    charBuf = await sharp({
-      create: { width: W, height: H, channels: 4, background: { r: 10, g: 18, b: 40, alpha: 1 } },
-    }).png().toBuffer();
-    logger.info(`[media_generator] Shorts thumbnail: 이미지 없음 → 단색 배경 사용`);
-  }
-
-  // 키워드 줄바꿈 (12자/줄, 최대 3줄)
-  const lines     = wrapTextKorean(keyword, 12).slice(0, 3);
-  const titleSize = 96;
-  const lineH     = Math.ceil(titleSize * 1.3);
-  const blockH    = lines.length * lineH + 60;
-  const blockY    = Math.round(H * 0.36);
-
-  const shadowElems = lines.map((line, i) =>
-    `<text x="${W / 2 + 4}" y="${blockY + 48 + (i + 0.85) * lineH + 4}"
-      font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
-      fill="#000000" fill-opacity="0.55" text-anchor="middle">${esc(line)}</text>`
-  ).join('\n');
-  const titleElems = lines.map((line, i) =>
-    `<text x="${W / 2}" y="${blockY + 48 + (i + 0.85) * lineH}"
-      font-family="${FONT}" font-size="${titleSize}" font-weight="bold"
-      fill="#FACC15" text-anchor="middle">${esc(line)}</text>`
-  ).join('\n');
-
-  const overlay = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <defs>
-        <linearGradient id="grad" x1="0" y1="0.25" x2="0" y2="1">
-          <stop offset="0%"   stop-color="#000000" stop-opacity="0"/>
-          <stop offset="42%"  stop-color="#000000" stop-opacity="0.68"/>
-          <stop offset="100%" stop-color="#000000" stop-opacity="0.88"/>
-        </linearGradient>
-      </defs>
-      <!-- 하단 그라데이션 -->
-      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#grad)"/>
-      <!-- 키워드 배경 박스 -->
-      <rect x="60" y="${blockY}" width="${W - 120}" height="${blockH}" rx="20"
-        fill="#000000" fill-opacity="0.52"/>
-      <!-- 좌측 노란 강조 바 -->
-      <rect x="60" y="${blockY}" width="8" height="${blockH}" rx="4" fill="#FACC15"/>
-      <!-- ▶ 오늘의 핵심 배지 -->
-      <rect x="${W / 2 - 140}" y="${blockY - 62}" width="280" height="50" rx="25" fill="#FACC15"/>
-      <text x="${W / 2}" y="${blockY - 24}"
-        font-family="${FONT}" font-size="28" font-weight="bold"
-        fill="#0a1228" text-anchor="middle">▶ 오늘의 핵심</text>
-      <!-- 키워드 그림자 + 텍스트 -->
-      ${shadowElems}
-      ${titleElems}
-      <!-- 시리즈명 하단 -->
-      <text x="${W / 2}" y="${blockY + blockH + 58}"
-        font-family="${FONT}" font-size="36"
-        fill="#94a3b8" text-anchor="middle">${esc(seriesName)}</text>
-    </svg>`
-  );
-
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await sharp(charBuf)
-    .composite([{ input: overlay }])
-    .jpeg({ quality: 95 })
-    .toFile(outputPath);
-
-  logger.info(`[media_generator] Shorts thumbnail saved: ${outputPath}`);
-  return outputPath;
-}
 
 // ── 썸네일 이미지 합성 (1280×720) ────────────────────────────────────────
 /**
@@ -1325,8 +1514,7 @@ async function renderVideoWithShotstack(content, audioPath, outputPath, characte
   logger.info(`[media_generator] Uploading audio: ${content.keyword}`);
   const audioUrl = await uploadAudioForShotstack(audioPath);
 
-  const audioStats = await fs.stat(audioPath);
-  const TOTAL_DURATION = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+  const TOTAL_DURATION = await getAudioDuration(audioPath);
   logger.info(`[media_generator] Duration: ${TOTAL_DURATION}s`);
 
   const seriesName = content.series_name ?? '매일읽어주는남자';
@@ -1456,9 +1644,8 @@ async function generateMedia(content) {
   const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
   const srtPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.srt`);
 
-  const thumbPath       = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
-  const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null, thumbnail_shorts: null };
+  const thumbPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
+  const result = { keyword: content.keyword, audio: null, video: null, srt: null, thumbnail: null };
 
   if (!config.openai.apiKey) {
     logger.warn(`[media_generator] OPENAI_API_KEY not set. Skipping: ${content.keyword}`);
@@ -1475,16 +1662,15 @@ async function generateMedia(content) {
       content.shortform_script?.cta     ?? '',
     ].filter(Boolean);
 
-    let scriptText = normalizeScriptForTTS(parts.join(' '));
-    if (scriptText.length > 600) scriptText = scriptText.slice(0, 600);
+    const scriptText = normalizeScriptForTTS(parts.join(' '));
 
     await generateAudio(scriptText, audioPath);
     result.audio = audioPath;
 
-    // SRT 생성: 오디오 크기로 총 길이 추정 → 씬 타이밍 계산 → SRT 저장
+    // SRT 생성: ffprobe -count_packets로 실제 오디오 길이 측정 → 씬 타이밍 계산 → SRT 저장
     try {
-      const audioStats = await fs.stat(audioPath);
-      const totalDuration = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+      const totalDuration = await getAudioDuration(audioPath);
+      logger.info(`[media_generator] 오디오 실측 ${totalDuration.toFixed(1)}초 | 스크립트 ${scriptText.length}자 | TTS속도 ${(scriptText.length / totalDuration).toFixed(2)}자/초`);
       const scenes = buildScenes(
         {
           hook:    content.shortform_script?.hook    ?? '',
@@ -1523,64 +1709,46 @@ async function generateMedia(content) {
     content = { ...content, image_prompt: enhancedPrompt };
   }
 
-  // 3. 씬 이미지 3컷 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
+  // 3. 씬 이미지 5구간 × 포즈 2장 생성 (대본 내용 기반, 실패 시 Pexels 폴백)
+  // sceneUrls: [[pose0_url, pose1_url], ...] — 길이 5인 배열
   let sceneUrls;
   try {
-    logger.info(`[media_generator] Generating scene images (3 cuts): ${content.keyword}`);
     sceneUrls = await generateSceneImages(content.keyword, content.shortform_script ?? {}, content.category);
-    const successCount = sceneUrls.filter(Boolean).length;
-    logger.info(`[media_generator] Scene images: ${successCount}/3 generated`);
+    const successCount = sceneUrls.flat().filter(Boolean).length;
 
     if (successCount === 0) {
       logger.warn('[media_generator] All scene images failed. Falling back to Pexels.');
-      const pexels = await searchPexelsImages(content.keyword, content.category, 3);
-      sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
+      const pexels = await searchPexelsImages(content.keyword, content.category, 5);
+      sceneUrls = pexels.map((u) => [u ?? null, null]);
     }
   } catch (err) {
     logger.warn(`[media_generator] Scene image error: ${err.message}. Falling back to Pexels.`);
-    const pexels = await searchPexelsImages(content.keyword, content.category, 3);
-    sceneUrls = [pexels[0] || null, pexels[1] || null, pexels[2] || null];
+    const pexels = await searchPexelsImages(content.keyword, content.category, 5);
+    sceneUrls = pexels.map((u) => [u ?? null, null]);
   }
 
-  // 4. 썸네일 생성 (16:9 가로형 + 9:16 쇼츠 세로형) — 반드시 생성 보장
-  const thumbSceneUrl = sceneUrls[0] ?? null;
+  // 4. 썸네일 생성 (16:9) — 반드시 생성 보장
+  const thumbSceneUrl = sceneUrls[0]?.[0] ?? null;
   if (!thumbSceneUrl) logger.warn(`[media_generator] ⚠️ 씬 이미지 없음 → 단색 배경으로 썸네일 생성: ${content.keyword}`);
   else                 logger.info(`[media_generator] 썸네일 생성 시작 (sceneUrl: ${String(thumbSceneUrl).slice(0, 80)})`);
 
-  // 롱폼 썸네일 (16:9)
   try {
     await generateThumbnail(content, thumbSceneUrl, thumbPath);
     result.thumbnail = thumbPath;
-    logger.info(`[media_generator] ✅ 롱폼 썸네일(16:9) 저장: ${thumbPath}`);
+    logger.info(`[media_generator] ✅ 썸네일(16:9) 저장: ${thumbPath}`);
   } catch (err) {
-    logger.error(`[media_generator] ❌ 롱폼 썸네일(16:9) 실패: ${err.message}`);
+    logger.error(`[media_generator] ❌ 썸네일(16:9) 실패: ${err.message}`);
   }
   if (!result.thumbnail) {
     try {
       await generateFallbackThumbnail(content.keyword, thumbPath, false);
       result.thumbnail = thumbPath;
-    } catch (err) { logger.error(`[media_generator] 롱폼 폴백 썸네일도 실패: ${err.message}`); }
-  }
-
-  // 쇼츠 썸네일 (9:16) — 인트로 삽입에 반드시 필요하므로 폴백까지 보장
-  try {
-    await generateShortsThumbnail(content, thumbSceneUrl, thumbShortsPath);
-    result.thumbnail_shorts = thumbShortsPath;
-    logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 저장: ${thumbShortsPath}`);
-  } catch (err) {
-    logger.error(`[media_generator] ❌ 쇼츠 썸네일(9:16) 실패: ${err.message}`);
-  }
-  if (!result.thumbnail_shorts) {
-    try {
-      await generateFallbackThumbnail(content.keyword, thumbShortsPath, true);
-      result.thumbnail_shorts = thumbShortsPath;
-    } catch (err) { logger.error(`[media_generator] 쇼츠 폴백 썸네일도 실패: ${err.message}`); }
+    } catch (err) { logger.error(`[media_generator] 폴백 썸네일도 실패: ${err.message}`); }
   }
 
   // 5. ffmpeg 영상 렌더링
   try {
-    const audioStats = await fs.stat(result.audio);
-    const totalDuration = Math.max(20, Math.min(120, Math.ceil(audioStats.size / 24000) + 2));
+    const totalDuration = await getAudioDuration(result.audio);
     const scenes = buildScenes(
       {
         hook:    content.shortform_script?.hook    ?? '',
@@ -1592,12 +1760,28 @@ async function generateMedia(content) {
       totalDuration
     );
     const seriesName = content.series_name ?? '매일읽어주는남자';
-    const frames = scenes.map((scene) => ({
-      bgUrl:    sceneUrls[scene.act] ?? null,
-      label:    seriesName,
-      subtitle: scene.text,
-      duration: scene.duration,
-    }));
+
+    // 포즈 전환 타이밍: 서브액트 시작 기준 POSE_SWITCH_SEC 초마다 pose0↔pose1 교체
+    const POSE_SWITCH_SEC = 4;
+    const subActStartTime = {};
+    for (const scene of scenes) {
+      const sa = scene.subAct ?? scene.act ?? 0;
+      if (!(sa in subActStartTime)) subActStartTime[sa] = scene.start;
+    }
+
+    const frames = scenes.map((scene) => {
+      const sa = scene.subAct ?? scene.act ?? 0;
+      const elapsed = scene.start - (subActStartTime[sa] ?? 0);
+      const poseIdx = Math.floor(elapsed / POSE_SWITCH_SEC) % 2;
+      const urlPair = sceneUrls[sa] ?? [null, null];
+      return {
+        bgUrl:    urlPair[poseIdx] ?? urlPair[0] ?? null,
+        label:    seriesName,
+        subtitle: scene.text,
+        isKey:    scene.isKey ?? false,
+        duration: scene.duration,
+      };
+    });
     await renderFramesWithFfmpeg(frames, result.audio, videoPath, { keyword: content.keyword, seriesName });
     result.video = videoPath;
   } catch (err) {
@@ -1619,6 +1803,7 @@ async function generateMedia(content) {
  *   5. ffmpeg로 영상 렌더링 (로컬, 클라우드 의존 없음)
  */
 async function generateLongFormMedia(content) {
+  const ffmpegPath = await getFfmpegPath();
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
   const videoPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
   const result      = { keyword: content.keyword, video: null };
@@ -1651,7 +1836,7 @@ async function generateLongFormMedia(content) {
       if (!p) return sections[i]?.duration_seconds ?? 60;
       try {
         const stats = await fs.stat(p);
-        return Math.max(10, Math.ceil(stats.size / 24000) + 1);
+        return Math.max(10, Math.ceil(stats.size / 13000) + 1);
       } catch {
         return sections[i]?.duration_seconds ?? 60;
       }
@@ -1659,27 +1844,25 @@ async function generateLongFormMedia(content) {
   );
   logger.info(`[media_generator] Long-form total: ${sectionDurations.reduce((a, b) => a + b, 0)}s, sections: ${sections.length}`);
 
-  // ── 3. 섹션별 이미지 생성 (Grok Aurora → gpt-image-1 → Pexels) ──────────
-  const sectionImageUrls = [];
-  for (let i = 0; i < sections.length; i++) {
+  // ── 3. 이미지 3컷 생성 후 섹션 전체에 재사용 (스타일 일관성 보장) ──────────
+  // 롱폼 섹션 수에 상관없이 동일한 3개 이미지를 순환 사용해 아트 스타일 고정.
+  const BASE_POSES = [
+    { pose: 'dramatic urgent expression, arms raised in surprise, eyes wide open', bg: 'dramatic dark office with glowing screen' },
+    { pose: 'explaining confidently, pointing at whiteboard, professional teaching gesture', bg: 'warm classroom with bookshelf and soft lighting' },
+    { pose: 'calm warm smile, thumbs up, slight bow, satisfied expression', bg: 'cozy study room with desk lamp and books' },
+  ];
+  const baseImgUrls = [];
+  for (let b = 0; b < 3; b++) {
     await throttle(300);
-    const keyPoint = sections[i].key_point ?? sections[i].name ?? content.keyword;
-    const pose = i === 0 ? 'dramatic urgent expression, arms raised in surprise'
-      : i === sections.length - 1 ? 'calm warm smile, thumbs up, slight bow'
-      : 'explaining confidently, pointing at invisible chart, professional gesture';
+    const { pose, bg } = BASE_POSES[b];
     const imagePrompt =
-      `${MAEILNAMJA_BASE}. Character action: ${pose}. ` +
-      `Background scene: professional environment relevant to "${keyPoint}". ` +
-      `Full body visible, 9:16 portrait, vibrant illustration.`;
-
-    const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_img${i}.png`);
+      `${MAEILNAMJA_BASE}. Background setting: ${bg}. Character action: ${pose}. ` +
+      `Full body visible, 9:16 portrait.`;
+    const imgPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_base${b}.png`);
     let imageUrl  = null;
 
-    if (config.grok?.apiKey) {
-      imageUrl = await generateImageGrokAurora(imagePrompt, imgPath);
-      if (imageUrl) logger.info(`[media_generator] Long-form image s${i} (Grok Aurora): ${content.keyword}`);
-    }
-    if (!imageUrl && config.openai?.apiKey) {
+    // gpt-image-1 만 사용 — Grok Aurora와 혼용 시 스타일이 달라지므로 단일 엔진 고정
+    if (config.openai?.apiKey) {
       try {
         const body = { model: 'gpt-image-1', prompt: imagePrompt, n: 1, size: '1024x1536', quality: 'medium' };
         const res = await axios.post(
@@ -1691,23 +1874,29 @@ async function generateLongFormMedia(content) {
           await fs.writeFile(imgPath, Buffer.from(item.b64_json, 'base64'));
           imageUrl = imgPath;
         } else if (item.url) {
-          // 임시 URL 만료 전 즉시 다운로드
           const imgRes = await axios.get(item.url, { responseType: 'arraybuffer', timeout: 60000 });
           await fs.mkdir(path.dirname(imgPath), { recursive: true });
           await fs.writeFile(imgPath, Buffer.from(imgRes.data));
           imageUrl = imgPath;
         }
+        if (imageUrl) logger.info(`[media_generator] Long-form base image ${b + 1}/3 (gpt-image-1): ${content.keyword}`);
       } catch (err) {
-        logger.warn(`[media_generator] Long-form gpt-image-1 s${i} failed: ${err.message}`);
+        logger.warn(`[media_generator] Long-form base image ${b} failed: ${err.message}`);
       }
     }
     if (!imageUrl) {
       const pexels = await searchPexelsImages(content.keyword, content.category, 1);
       imageUrl = pexels[0] || null;
     }
-    sectionImageUrls.push(imageUrl);
+    baseImgUrls.push(imageUrl);
   }
-  logger.info(`[media_generator] Long-form images: ${sectionImageUrls.filter(Boolean).length}/${sections.length}`);
+
+  // 섹션별로 3개 기본 이미지를 순환 배정 (도입→긴장, 중간→설명, 마무리→희망)
+  const sectionImageUrls = sections.map((_, i) => {
+    const act = i === 0 ? 0 : i === sections.length - 1 ? 2 : 1;
+    return baseImgUrls[act] ?? baseImgUrls.find(Boolean) ?? null;
+  });
+  logger.info(`[media_generator] Long-form images: 3 base images reused across ${sections.length} sections`);
 
   // ── 4. 섹션 오디오 ffmpeg로 병합 ────────────────────────────────────────
   const mergedAudioPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_long_merged.mp3`);
@@ -1758,13 +1947,9 @@ async function generateLongFormMedia(content) {
   }
 
   // ── 5.5. 썸네일 생성 (generateMedia에서 생성 안 됐을 경우 보완) ────────────
-  const thumbPath_      = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
-  const thumbShortsPath_= path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-  const firstImgUrl     = sectionImageUrls[0] ?? null;
-  const [thumbExists_, thumbShortsExists_] = await Promise.all([
-    fs.access(thumbPath_).then(() => true).catch(() => false),
-    fs.access(thumbShortsPath_).then(() => true).catch(() => false),
-  ]);
+  const thumbPath_  = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb.jpg`);
+  const firstImgUrl = sectionImageUrls[0] ?? null;
+  const thumbExists_ = await fs.access(thumbPath_).then(() => true).catch(() => false);
   if (!thumbExists_) {
     try {
       await generateThumbnail(content, firstImgUrl, thumbPath_);
@@ -1774,122 +1959,8 @@ async function generateLongFormMedia(content) {
       await generateFallbackThumbnail(content.keyword, thumbPath_, false).catch(() => {});
     }
   }
-  // 쇼츠 썸네일은 인트로 삽입에 반드시 필요 — 폴백까지 보장
-  if (!thumbShortsExists_) {
-    try {
-      await generateShortsThumbnail(content, firstImgUrl, thumbShortsPath_);
-      logger.info(`[media_generator] ✅ 쇼츠 썸네일(9:16) 생성(보완): ${thumbShortsPath_}`);
-    } catch (err) {
-      logger.warn(`[media_generator] 쇼츠 썸네일(9:16) 생성 실패, 폴백 시도: ${err.message}`);
-      await generateFallbackThumbnail(content.keyword, thumbShortsPath_, true).catch(() => {});
-    }
-  }
-  // 최후 보루: 위 모두 실패해도 파일이 없으면 단순 폴백 강제 실행
-  const [finalThumbOk, finalShortsOk] = await Promise.all([
-    fs.access(thumbPath_).then(() => true).catch(() => false),
-    fs.access(thumbShortsPath_).then(() => true).catch(() => false),
-  ]);
-  if (!finalThumbOk)   await generateFallbackThumbnail(content.keyword, thumbPath_,       false).catch(() => {});
-  if (!finalShortsOk)  await generateFallbackThumbnail(content.keyword, thumbShortsPath_,  true).catch(() => {});
-
-  // ── 5.6. 롱폼 영상에 썸네일 인트로 2초 삽입 ─────────────────────────────
-  // thumbnails.set API 실패(채널 미인증) 대비 — YouTube 자동 커버 후보 프레임에 포함되도록 함
-  if (result.video) {
-    const thumbShortsPath = thumbShortsPath_;
-    try {
-      await fs.access(thumbShortsPath);
-      const tmpThumbClip  = videoPath.replace(/\.mp4$/, '_lthumbclip.mp4');
-      const tmpMergedPath = videoPath.replace(/\.mp4$/, '_lmerged.mp4');
-
-      await execFileAsync(ffmpegPath, [
-        '-loop', '1', '-i', thumbShortsPath,
-        '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-        '-t', '2',
-        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
-        '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
-        '-preset', 'fast', '-shortest', '-y', tmpThumbClip,
-      ]);
-
-      await execFileAsync(ffmpegPath, [
-        '-i', tmpThumbClip,
-        '-i', videoPath,
-        '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
-        '-map', '[v]', '-map', '[a]',
-        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMergedPath,
-      ]);
-
-      await fs.unlink(videoPath);
-      await fs.rename(tmpMergedPath, videoPath);
-      await fs.unlink(tmpThumbClip);
-      logger.info(`[media_generator] Long-form thumbnail intro prepended (2s cover frame)`);
-    } catch (thumbErr) {
-      logger.warn(`[media_generator] Long-form thumbnail prepend skipped: ${thumbErr.message}`);
-    }
-  }
-
-  // ── 6. 숏폼 추출 — source_section 구간을 롱폼에서 잘라냄 ──────────────
-  if (result.video) {
-    try {
-      const sourceIdx = (content.shorts?.source_section ?? content.shortform_script?.source_section ?? 5) - 1;
-      const clampedIdx = Math.max(0, Math.min(sourceIdx, adjustedDurations.length - 1));
-
-      // 섹션 누적 시작 시간 계산 (조정된 길이 기준)
-      let sectionStart = 0;
-      for (let i = 0; i < clampedIdx; i++) sectionStart += adjustedDurations[i];
-      const sectionDur = Math.min(adjustedDurations[clampedIdx] ?? 60, 58); // 1초 인트로 붙인 후 총 59초 이내 유지
-
-      const shortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_shorts.mp4`);
-      const ctaText = (content.cross_refs?.shorts_cta ?? '풀버전 채널에서 보기')
-        .replace(/'/g, "\\'").replace(/:/g, '\\:');
-
-      // 구간 잘라내기 + 9:16 크롭 (설명란 URL로 YouTube가 롱폼 자동 연결)
-      await execFileAsync(ffmpegPath, [
-        '-ss', String(sectionStart),
-        '-t',  String(sectionDur),
-        '-i',  result.video,
-        '-vf', 'crop=ih*9/16:ih:(iw-ih*9/16)/2:0',
-        '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', shortsPath,
-      ]);
-
-      result.shorts_video = shortsPath;
-      result.shorts_section_idx = clampedIdx;
-      result.shorts_start_sec   = sectionStart;
-      logger.info(`[media_generator] Shorts extracted from section ${clampedIdx + 1} (${sectionStart}s~${sectionStart + sectionDur}s): ${shortsPath}`);
-
-      // 썸네일 1초 인트로 삽입 → YouTube Shorts 커버 프레임 선택 가능
-      const thumbShortsPath = path.resolve(__dirname, `../../output/media/${safeKeyword}_thumb_shorts.jpg`);
-      try {
-        await fs.access(thumbShortsPath);
-        const tmpThumbClip  = shortsPath.replace(/\.mp4$/, '_thumbclip.mp4');
-        const tmpMergedPath = shortsPath.replace(/\.mp4$/, '_merged.mp4');
-
-        await execFileAsync(ffmpegPath, [
-          '-loop', '1', '-i', thumbShortsPath,
-          '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-          '-t', '2',
-          '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
-          '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-r', '30',
-          '-preset', 'fast', '-shortest', '-y', tmpThumbClip,
-        ]);
-
-        await execFileAsync(ffmpegPath, [
-          '-i', tmpThumbClip,
-          '-i', shortsPath,
-          '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
-          '-map', '[v]', '-map', '[a]',
-          '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-y', tmpMergedPath,
-        ]);
-
-        await fs.unlink(shortsPath);
-        await fs.rename(tmpMergedPath, shortsPath);
-        await fs.unlink(tmpThumbClip);
-        logger.info(`[media_generator] Shorts thumbnail intro prepended (1s cover frame)`);
-      } catch (thumbErr) {
-        logger.warn(`[media_generator] Shorts thumbnail prepend skipped: ${thumbErr.message}`);
-      }
-    } catch (err) {
-      logger.warn(`[media_generator] Shorts extraction failed: ${err.message}`);
-    }
+  if (!(await fs.access(thumbPath_).then(() => true).catch(() => false))) {
+    await generateFallbackThumbnail(content.keyword, thumbPath_, false).catch(() => {});
   }
 
   return result;
@@ -1911,20 +1982,6 @@ export async function generateAllMedia(contentData) {
   for (const content of contents) {
     logger.info(`[media_generator] Processing: ${content.keyword}`);
     const shortResult = await generateMedia(content);
-
-    // 롱폼 대본이 있으면 롱폼 영상도 생성
-    if (content.long_video?.sections?.length) {
-      try {
-        const longResult = await generateLongFormMedia(content);
-        shortResult.long_video_path = longResult.video;
-        logger.info(`[media_generator] Long-form video: ${longResult.video ?? 'skipped'}`);
-      } catch (err) {
-        logger.warn(`[media_generator] Long-form video failed: ${err.message}`);
-      }
-    } else {
-      logger.warn(`[media_generator] No long_video sections for "${content.keyword}" — long-form skipped`);
-    }
-
     results.push(shortResult);
   }
   return { generated_at: new Date().toISOString(), results };

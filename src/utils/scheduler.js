@@ -18,10 +18,15 @@ export function startScheduler(task, schedule = config.runtime.cronSchedule) {
 
   cron.schedule(schedule, async () => {
     logger.info('[scheduler] Triggered pipeline run');
+    // 스케줄 트리거 = 무인 자동 실행. 안전장치(검색량 게이트 등)를 fail-closed로 전환.
+    const prevAutoMode = config.runtime.autoMode;
+    config.runtime.autoMode = true;
     try {
       await task();
     } catch (err) {
       logger.error('[scheduler] Pipeline run failed', { message: err.message });
+    } finally {
+      config.runtime.autoMode = prevAutoMode;
     }
   });
 }

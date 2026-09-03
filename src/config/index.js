@@ -85,9 +85,32 @@ export const config = {
   tiktok: {
     accessToken: process.env.TIKTOK_ACCESS_TOKEN,
   },
+  // 검색량 게이트용으로는 폐기(2026-08-27 확인: 앱 등록 화면에 데이터랩·검색 API 없음 — 발급 불가).
+  // 아래 naverSearchAd로 대체. 이 블록은 competitor_analyzer.js(searchNaverBlogs)가
+  // 여전히 참조하므로 하위 호환을 위해 남겨둠 — 키가 없으면 해당 함수가 빈 배열을 반환하며
+  // 조용히 스킵되도록 이미 방어돼 있음(B-4: competitor_analyzer.js는 그대로 둔다).
   naverDatalab: {
-    clientId:     process.env.NAVER_CLIENT_ID,
-    clientSecret: process.env.NAVER_CLIENT_SECRET,
+    clientId:     process.env.NAVER_DATALAB_CLIENT_ID,
+    clientSecret: process.env.NAVER_DATALAB_CLIENT_SECRET,
+  },
+  // 검색량 게이트는 네이버 검색광고 키워드도구(searchad.naver.com, 별개 시스템)로 대체.
+  // 절대 월간 검색수(PC+모바일)를 반환하므로 "월 300건 이상" 같은 의미 있는 기준을 쓸 수 있음.
+  naverSearchAd: {
+    apiKey:      process.env.NAVER_SEARCHAD_API_KEY,
+    secretKey:   process.env.NAVER_SEARCHAD_SECRET_KEY,
+    customerId:  process.env.NAVER_SEARCHAD_CUSTOMER_ID,
+    minMonthlyVolume: Number(process.env.NAVER_MIN_MONTHLY_VOLUME ?? 300),
+  },
+  // 네이버 블로그 글쓰기 API는 2020-05-06 종료됨(광고성 글 대량 게재 방지) — 자동 발행 불가.
+  // B-2-1: 반자동 운용 — blog_publisher.js가 원고를 output/blog/naver_*.md 로 별도 저장,
+  // 사람이 수동으로 네이버 블로그에 복사·붙여넣기 한다.
+  tradule: {
+    // 베이스 도메인만 (엔드포인트 경로는 tradule_source.js가 붙임) — 지시서 3-1 기준
+    apiBase: process.env.TRADULE_API_BASE || 'https://www.tradule.co.kr',
+  },
+  travelpayouts: {
+    partnerId: process.env.TRAVELPAYOUTS_PARTNER_ID,
+    marker:    process.env.TRAVELPAYOUTS_MARKER,
   },
   coupang: {
     accessKey:  process.env.COUPANG_ACCESS_KEY,
@@ -97,8 +120,7 @@ export const config = {
   tistoryBlog: {
     sessionCookie: process.env.TISTORY_SESSION_COOKIE,
   },
-  tistoryCategories: process.env.TISTORY_CATEGORY_MAP ||
-    '경제·금융:1386597,부동산:1386598,건강:1386599,연예·사회:1386600,팁:1387658,뷰티:1387888',
+  tistoryCategories: process.env.TISTORY_CATEGORY_MAP || '',
   grok: {
     apiKey: process.env.GROK_API_KEY,
   },
@@ -106,13 +128,19 @@ export const config = {
     credentials: process.env.GOOGLE_SC_CREDENTIALS,  // JSON 키 파일 경로
   },
   keywordMiner: {
-    seeds:  process.env.KEYWORD_SEEDS ||
-      '재테크,부동산,경기침체,금리,주식투자,코인투자,ETF,달러환율,인플레이션,가계부채,' +
-      '아파트청약,전세사기,재건축,역세권,부동산세금,임대차,분양권,갭투자,경매부동산,신도시,' +
-      '노후준비,연금저축,개인연금,실업급여,정부지원금,국민연금,건강보험,복지혜택,청년지원,소득공제,' +
-      '피부관리,스킨케어루틴,선스틱추천,수분크림추천,여드름피부,건성피부관리,지성피부관리,' +
-      '봄피부관리,여름자외선차단,가을환절기피부,겨울건조피부,민감성피부,피부트러블해결',
+    // 시드는 기본적으로 keyword_miner.js의 generateTravelSeeds()가 트레쥴 지역 트리 ×
+    // 코스 패턴으로 매 실행마다 생성한다 (여행 채널 전환). 경제 채널 시절 하드코딩 시드는
+    // 폐기 — KEYWORD_SEEDS 환경변수를 명시적으로 설정했을 때만 그 값으로 오버라이드된다.
     topN:   parseInt(process.env.KEYWORD_TOP_N || '20', 10),
+    // 카테고리별 하루 최대 발행 수 (0 = 무제한)
+    categoryDailyLimit: {
+      beauty:        parseInt(process.env.BLOG_CATEGORY_LIMIT_BEAUTY        || '2', 10),
+      entertainment: parseInt(process.env.BLOG_CATEGORY_LIMIT_ENTERTAINMENT || '1', 10),
+      economy:       parseInt(process.env.BLOG_CATEGORY_LIMIT_ECONOMY       || '0', 10),
+      social:        parseInt(process.env.BLOG_CATEGORY_LIMIT_SOCIAL        || '0', 10),
+      health:        parseInt(process.env.BLOG_CATEGORY_LIMIT_HEALTH        || '0', 10),
+      realestate:    parseInt(process.env.BLOG_CATEGORY_LIMIT_REALESTATE    || '0', 10),
+    },
   },
   // 쇼핑 파이프라인 — links.json 제품 기반 (TikTok/Instagram/네이버클립용)
   shopping: {
@@ -137,16 +165,27 @@ export const config = {
   },
   runtime: {
     dryRun:           process.env.DRY_RUN === 'true',
+    // true = 무인 자동 발행(스케줄러 트리거 또는 --auto 플래그). 이 모드에서는
+    // 검색량 게이트 같은 안전장치가 fail-closed로 동작한다(설정 누락 시 파이프라인 중단).
+    // false(기본, 수동 실행/--dry)에서는 안전장치가 경고 후 통과(fail-open)한다.
+    // scheduler.js가 스케줄 트리거 시점에 true로 전환한다.
+    autoMode:         process.argv.includes('--auto'),
+    // YouTube 계정 삭제(2026-06) 이후 false — 영상 제작/업로드 파이프라인 전체 중단, 블로그만 운영
+    // 새 채널 생성 후 true로 되돌리면 영상 파이프라인 재개
+    videoPipelineEnabled: process.env.VIDEO_PIPELINE_ENABLED !== 'false',
     publishShorts:    process.env.PUBLISH_SHORTS !== 'false',  // false로 설정 시 쇼츠 업로드 건너뜀
     youtubeUpload:    process.env.YOUTUBE_UPLOAD !== 'false',  // false로 설정 시 YouTube 업로드 전체 건너뜀
     dailyVideos:      parseInt(process.env.DAILY_VIDEOS || '1', 10), // 하루 최대 롱폼 영상 수 (기본 1)
-    // A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
-    cronSchedule:     process.env.CRON_SCHEDULE      || '0 12 * * 1,3,5,0',
-    cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 14 * * 2,4,6',
+    // 숏폼 A 슬롯: 월·수·금·일 12:00 KST  |  B 슬롯: 화·목·토 14:00 KST
+    cronSchedule:     process.env.CRON_SCHEDULE      || '0 3 * * 1,3,5,0',
+    cronScheduleB:    process.env.CRON_SCHEDULE_B    || '0 5 * * 2,4,6',
     blogCronSchedule:  process.env.BLOG_CRON_SCHEDULE  || '0 22 * * 1,3,5,0',  // KST 07:00 오전 피크
     blogCronScheduleB: process.env.BLOG_CRON_SCHEDULE_B || '0 3 * * 2,4,6',    // KST 12:00 점심 피크
+    // 롱폼 unified 파이프라인: 매주 목요일 22:00 KST (= UTC 13:00) — 주 1회
+    longformCronSchedule: process.env.LONGFORM_CRON_SCHEDULE || '0 13 * * 4',
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
-    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '15', 10),
+    // AdSense 콘텐츠 가치 경고(2026-06) 이후 8로 하향 — .env.example 참고
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '8', 10),
   },
 };

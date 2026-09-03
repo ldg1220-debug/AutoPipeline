@@ -10,6 +10,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import db from '../db/db.js';
 import { generateYouTubeDescription, generateYouTubeTags, generateYouTubeTitle } from '../utils/youtubeSEO.js';
 import { getManualCoupangLink } from './monetizer.js';
+import { refreshYouTubeAccessToken } from '../utils/youtubeAuth.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -68,24 +69,7 @@ function getYouTubeChannelConfig(category) {
   return config.youtube;
 }
 
-/**
- * refresh_token으로 YouTube access_token을 갱신한다.
- * google-auth-library 없이 axios 직접 호출 방식을 사용한다.
- * 토큰 값은 로그에 절대 출력하지 않는다.
- */
-async function refreshYouTubeAccessToken(channelConfig = config.youtube) {
-  const response = await axios.post(
-    'https://oauth2.googleapis.com/token',
-    new URLSearchParams({
-      client_id:     channelConfig.clientId,
-      client_secret: channelConfig.clientSecret,
-      refresh_token: channelConfig.refreshToken,
-      grant_type:    'refresh_token',
-    }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 }
-  );
-  return response.data.access_token;
-}
+// refreshYouTubeAccessToken은 src/utils/youtubeAuth.js에서 import
 
 /**
  * 오늘(KST) 롱폼 업로드 수를 로컬 파일로 추적.
@@ -191,15 +175,7 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
     logger.warn(`[auto_publisher] Shorts file not found, skipping: ${videoPath}`);
     return { platform: 'youtube_shorts', status: 'skipped_no_video_file' };
   }
-
-  // 쇼츠 파일 자체 길이 확인 — 60초 초과면 YouTube가 Shorts로 인식 안 함
-  const shortsDurSec = await getVideoDurationSec(videoPath);
-  if (shortsDurSec !== null && shortsDurSec > 60) {
-    logger.warn(`[auto_publisher] Shorts 파일이 ${Math.round(shortsDurSec)}s > 60s → Shorts 업로드 건너뜀: ${videoPath}`);
-    return { platform: 'youtube_shorts', status: 'skipped_too_long', duration: shortsDurSec };
-  }
-
-  logger.info(`[auto_publisher] Shorts source: ${hasExtracted ? '롱폼 추출' : '단독 생성'} → ${videoPath} (${shortsDurSec ? Math.round(shortsDurSec) + 's' : '?'})`);
+  logger.info(`[auto_publisher] Shorts source: ${hasExtracted ? '롱폼 추출' : '단독 생성'} → ${videoPath}`);
 
   const blogPostUrl = content.blog_publish?.url ?? content.blog_post_url ?? null;
 
@@ -218,9 +194,10 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
   const shortsCoupangLine = shortsCoupang
     ? `🛒 ${shortsCoupang.url}\n`
     : '';
+  const shortsAiDisclosure = `\n\n⚠️ AI 제작 콘텐츠 (TTS·이미지·스크립트 포함)`;
   const shortsDesc  = description.includes('#Shorts')
-    ? `${shortsCoupangLine}${description}${longFormLine}`
-    : `${shortsCoupangLine}${description}${longFormLine}\n\n#Shorts`;
+    ? `${shortsCoupangLine}${description}${longFormLine}${shortsAiDisclosure}`
+    : `${shortsCoupangLine}${description}${longFormLine}${shortsAiDisclosure}\n\n#Shorts`;
   const shortsTags  = tags.includes('Shorts') ? tags : [...tags, 'Shorts', '쇼츠'];
 
   logger.info(`[auto_publisher] Shorts SEO — title: "${shortsTitle}" | tags: ${shortsTags.length}개`);
@@ -266,9 +243,9 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
   }
 
   if (thumbShortsExists) {
-    // YouTube 처리 대기 후 최대 3회 재시도
-    await new Promise((r) => setTimeout(r, 5000));
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // YouTube Shorts 처리 완료까지 충분히 대기 (5초는 너무 짧아 간헐적 실패 발생)
+    await new Promise((r) => setTimeout(r, 25000));
+    for (let attempt = 1; attempt <= 5; attempt++) {
       try {
         thumbnailUploaded = await uploadYouTubeThumbnail(videoId, thumbShortsPath, accessToken);
         if (thumbnailUploaded) {
@@ -276,12 +253,12 @@ async function publishShortsToYouTube(content, accessToken, longFormUrl = null, 
           break;
         }
       } catch (err) {
-        logger.warn(`[auto_publisher] Shorts 썸네일 업로드 실패 (시도 ${attempt}/3): ${err.message}`);
-        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+        logger.warn(`[auto_publisher] Shorts 썸네일 업로드 실패 (시도 ${attempt}/5): ${err.message}`);
+        if (attempt < 5) await new Promise((r) => setTimeout(r, attempt * 10000)); // 10s, 20s, 30s, 40s
       }
     }
     if (!thumbnailUploaded) {
-      logger.warn(`[auto_publisher] Shorts thumbnails.set 3회 모두 실패 → 영상 첫 프레임(2초 인트로)이 커버로 표시됩니다. videoId=${videoId}`);
+      logger.warn(`[auto_publisher] Shorts thumbnails.set 5회 모두 실패 → 영상 첫 프레임이 커버로 표시됩니다. videoId=${videoId}`);
     }
   }
 
@@ -343,7 +320,11 @@ async function publishToYouTube(content, accessToken, scheduleForTomorrow = true
   const coupangLine = coupangLink
     ? `\n\n🛒 관련 추천: ${coupangLink.url}\n(이 링크는 쿠팡 파트너스 링크로, 구매 시 일정 수수료를 받을 수 있습니다)`
     : '';
-  const finalDescription = description + coupangLine;
+
+  // AI 생성 콘텐츠 고지 (YouTube 정책 준수)
+  const aiDisclosure = `\n\n---\n⚠️ 이 영상은 AI 기술을 활용하여 제작되었습니다.\n음성(TTS), 이미지, 스크립트 등이 AI로 생성된 콘텐츠를 포함합니다.`;
+
+  const finalDescription = description + coupangLine + aiDisclosure;
 
   const metadata = {
     snippet: {
@@ -602,16 +583,6 @@ export async function publishContents(qaData, contentData) {
       continue;
     }
 
-    // beauty 카테고리는 매읽남 채널에 업로드하지 않음
-    const YOUTUBE_BLOCKED_CATEGORIES = ['beauty'];
-    if (YOUTUBE_BLOCKED_CATEGORIES.includes(content.category)) {
-      logger.info(`[auto_publisher] YouTube 업로드 건너뜀 — 카테고리 "${content.category}"는 이 채널 대상 아님: ${content.keyword}`);
-      result.youtube        = { platform: 'youtube',        status: 'skipped', reason: `category=${content.category}` };
-      result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped', reason: `category=${content.category}` };
-      results.push(result);
-      continue;
-    }
-
     // YouTube 채널 인증 (롱폼 + 쇼츠 공통)
     let accessToken = null;
     try {
@@ -634,6 +605,15 @@ export async function publishContents(qaData, contentData) {
     const scheduleForTomorrow = todayCount > 0;
     logger.info(`[auto_publisher] 오늘(KST) 롱폼 업로드 수: ${todayCount} → ${scheduleForTomorrow ? '다음 날 7:15 예약' : '즉시 공개'}`);
 
+    // 스팸 방지: 예약 포함 하루 최대 2개 업로드 제한
+    const DAILY_UPLOAD_LIMIT = 2;
+    if (todayCount >= DAILY_UPLOAD_LIMIT) {
+      logger.warn(`[auto_publisher] 일일 업로드 한도 도달 (${todayCount}/${DAILY_UPLOAD_LIMIT}), 건너뜀: ${content.keyword}`);
+      result.youtube = { platform: 'youtube', status: 'skipped_daily_limit' };
+      results.push(result);
+      continue;
+    }
+
     // 롱폼 업로드
     try {
       result.youtube = await publishToYouTube(content, accessToken, scheduleForTomorrow);
@@ -644,9 +624,9 @@ export async function publishContents(qaData, contentData) {
       result.youtube = { platform: 'youtube', status: 'failed', error: err.message };
     }
 
-    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 2분 미만 시 건너뜀
+    // 쇼츠 업로드 — PUBLISH_SHORTS=false 또는 롱폼 3분 미만 시 건너뜀
     if (config.runtime.publishShorts) {
-      // 롱폼 영상 길이 확인 — 2분(120초) 미만이면 영상 자체가 쇼츠급이므로 별도 쇼츠 불필요
+      // 롱폼 영상 길이 확인 — 3분(180초) 미만이면 영상 자체를 Shorts로 업로드하므로 별도 Shorts 불필요
       const safeKw      = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
       const mediaDir_   = path.resolve(__dirname, '../../output/media');
       const longVidPath = path.resolve(mediaDir_, `${safeKw}_long.mp4`);
@@ -655,8 +635,8 @@ export async function publishContents(qaData, contentData) {
       const vidPathForDur = longExists_ ? longVidPath : legacyPath_;
       const longDurSec  = await getVideoDurationSec(vidPathForDur);
 
-      if (longDurSec !== null && longDurSec < 120) {
-        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 2분 → 별도 쇼츠 업로드 건너뜀: ${content.keyword}`);
+      if (longDurSec !== null && longDurSec < 180) {
+        logger.info(`[auto_publisher] 롱폼 ${Math.round(longDurSec)}s < 3분 → 별도 Shorts 업로드 건너뜀 (영상 자체가 쇼츠 분량): ${content.keyword}`);
         result.youtube_shorts = { platform: 'youtube_shorts', status: 'skipped_short_longform' };
       } else {
         await new Promise((r) => setTimeout(r, 8000));

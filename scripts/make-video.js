@@ -1,0 +1,341 @@
+/**
+ * make-video.js — 키워드 지정 영상 제작 전용 파이프라인
+ *
+ * 흐름: 키워드 입력 → 스크립트 작성 → QA·교정 → 영상 제작 → YouTube 업로드
+ * 블로그 발행은 하지 않는다.
+ *
+ * 사용법:
+ *   node scripts/make-video.js --keyword "ETF 투자 방법" --category finance
+ *   node scripts/make-video.js --keyword "실업급여 신청 방법" --category social
+ *   node scripts/make-video.js --keyword "수분크림 추천" --category beauty --dry-run
+ *
+ * 카테고리 옵션:
+ *   economy | finance | realestate | health | beauty | social | entertainment
+ *
+ * 옵션:
+ *   --dry-run   : YouTube 업로드 없이 스크립트·영상만 생성
+ *   --no-qa     : QA 단계 건너뜀 (빠른 테스트용)
+ *   --longform  : 롱폼(5~10분) + 숏폼 동시 제작
+ */
+import path from 'path';
+import { fileURLToPath } from 'url';
+import axios from 'axios';
+import { parseStringPromise } from 'xml2js';
+import { config } from '../src/config/index.js';
+import logger from '../src/utils/logger.js';
+import { writeJSON } from '../src/utils/fileIO.js';
+import { createContents } from '../src/agents/content_creator.js';
+import { createContentBrief, reviewContent, finalApproval } from '../src/agents/pipeline_director.js';
+import { runTextQA, runVisionQA } from '../src/agents/qa_editor.js';
+import { generateAllMedia, generateLongFormMedia } from '../src/agents/media_generator.js';
+import { publishContents } from '../src/agents/auto_publisher.js';
+import { createLongFormAndShorts } from '../src/agents/long_form_creator.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+// ── CLI 인자 파싱 ─────────────────────────────────────────────────────────
+const args     = process.argv.slice(2);
+const kwIdx    = args.indexOf('--keyword');
+const catIdx   = args.indexOf('--category');
+const angleIdx = args.indexOf('--angle');
+const dryRun   = args.includes('--dry-run');
+const noQA     = args.includes('--no-qa');
+const longform  = args.includes('--longform');
+
+const keyword  = kwIdx    !== -1 ? args[kwIdx    + 1] : null;
+const category = catIdx   !== -1 ? args[catIdx   + 1] : 'economy';
+const angle    = angleIdx !== -1 ? args[angleIdx + 1] : null;
+
+if (!keyword) {
+  console.error('❌ 키워드를 지정하세요: --keyword "키워드"');
+  console.error('   예) node scripts/make-video.js --keyword "ETF 투자 방법" --category finance');
+  process.exit(1);
+}
+
+if (dryRun) {
+  config.runtime.dryRun = true;
+  config.runtime.youtubeUpload = false;
+}
+
+// ── 최근 뉴스 컨텍스트 수집 (Google News RSS) ─────────────────────────────
+async function fetchRecentNewsContext(kw) {
+  try {
+    const q   = encodeURIComponent(kw);
+    const url = `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;
+    const res = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const parsed = await parseStringPromise(res.data, { explicitArray: false });
+    const items  = parsed?.rss?.channel?.item ?? [];
+    const list   = Array.isArray(items) ? items : [items];
+    const top5   = list.slice(0, 5);
+
+    if (top5.length === 0) return { summary: '', figures: '' };
+
+    const headlines = top5.map((it, i) => {
+      const title   = it.title?.replace(/<[^>]+>/g, '').trim() ?? '';
+      const pubDate = it.pubDate ? new Date(it.pubDate).toLocaleDateString('ko-KR') : '';
+      return `${i + 1}. [${pubDate}] ${title}`;
+    }).join('\n');
+
+    const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    return {
+      summary: `[${today} 기준 최신 뉴스 헤드라인]\n${headlines}`,
+      figures: `위 기사 헤드라인의 구체적 수치·사실을 대본에 인용할 것.`,
+    };
+  } catch (err) {
+    logger.warn(`[make-video] 뉴스 컨텍스트 수집 실패 (계속): ${err.message}`);
+    return { summary: '', figures: '' };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+async function run() {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const tag  = `[make-video:${keyword}]`;
+  const startTime = Date.now();
+
+  console.log(`\n🎬 영상 제작 시작`);
+  console.log(`   키워드  : ${keyword}`);
+  console.log(`   카테고리: ${category}`);
+  if (angle) console.log(`   앵글    : ${angle}`);
+  console.log(`   롱폼    : ${longform ? 'ON' : 'OFF (숏폼 전용)'}`);
+  console.log(`   업로드  : ${dryRun ? 'OFF (dry-run)' : 'ON'}\n`);
+
+  // ── Step 1: 트렌드 아이템 구성 + 최신 뉴스 컨텍스트 주입 ─────────────────
+  logger.info(`${tag} Step 1: 최신 뉴스 수집 중...`);
+  const newsCtx = await fetchRecentNewsContext(keyword);
+  if (newsCtx.summary) logger.info(`${tag} 뉴스 헤드라인 ${newsCtx.summary.split('\n').length - 1}개 수집 완료`);
+
+  const trendItem = {
+    keyword,
+    category,
+    virality:          100,
+    commercial_value:  100,
+    freshness_hours:   0,
+    niche_premium:     0,
+    source_url:        'manual',
+    forced:            true,
+    summary:           newsCtx.summary,
+    figures:           newsCtx.figures,
+    director_brief:    angle
+      ? `[제작자 앵글 — 최우선 준수]\n${angle}\n\n이 관점을 대본 전체에 일관되게 반영할 것. 반대 관점으로 흐르지 말 것.`
+      : undefined,
+  };
+  const trendData = { selected_items: [trendItem] };
+
+  // ── Step 2: Director 브리프 생성 ─────────────────────────────────────────
+  // --angle 지정 시 pipeline_director 호출 생략 — angle 자체가 브리프가 됨
+  if (angle) {
+    trendData.selected_items[0].director_brief =
+      `[제작자 앵글 — 최우선 준수]\n${angle}\n\n이 관점을 대본 전체에 일관되게 반영할 것. 반대 관점으로 절대 흐르지 말 것.`;
+    logger.info(`${tag} --angle 지정됨 → Director 브리프 생략, 앵글만 사용`);
+  } else {
+    let brief = '';
+    try {
+      brief = await createContentBrief(trendItem);
+      logger.info(`${tag} Director brief 생성 완료`);
+    } catch (err) {
+      logger.warn(`${tag} Director brief 실패 (계속): ${err.message}`);
+    }
+    trendData.selected_items[0].director_brief = brief;
+  }
+
+  // ── Step 3: 스크립트 작성 ────────────────────────────────────────────────
+  logger.info(`${tag} Step 3: 스크립트 작성 중...`);
+  let contentData;
+  try {
+    contentData = await createContents(trendData);
+    await writeJSON(
+      path.resolve(__dirname, `../output/scripts/video_script_${date}_${keyword.replace(/\s/g, '_')}.json`),
+      contentData
+    );
+    logger.info(`${tag} 스크립트 작성 완료`);
+  } catch (err) {
+    logger.error(`${tag} 스크립트 작성 실패: ${err.message}`);
+    process.exit(1);
+  }
+
+  // ── Step 3-1: PD 검수 + Director 품질 리뷰 ──────────────────────────────
+  const currentBrief = trendData.selected_items[0].director_brief ?? '';
+  try {
+    const review = await reviewContent(contentData.contents[0], currentBrief);
+    if (!review.pass) {
+      logger.info(`${tag} Director 재생성 지시 (score ${review.score}): ${review.feedback}`);
+      const retryBrief = `${currentBrief}\n\n[재생성 지시] ${review.feedback}`;
+      const retryContent = await createContents({
+        selected_items: [{ ...trendItem, director_brief: retryBrief }],
+      });
+      if (retryContent.contents?.[0]) contentData.contents[0] = retryContent.contents[0];
+    }
+    logger.info(`${tag} PD 검수 완료`);
+  } catch (err) {
+    logger.warn(`${tag} PD 검수 실패 (계속): ${err.message}`);
+  }
+
+  // ── Step 4: 텍스트 QA (오탈자 자동 교정 포함) ───────────────────────────
+  let textQaData;
+  if (noQA) {
+    logger.info(`${tag} --no-qa: QA 단계 건너뜀`);
+    textQaData = {
+      reports: [{ keyword, final_decision: 'APPROVED', video_layout_check: 'PENDING', audio_sync_check: 'PENDING' }],
+    };
+  } else {
+    logger.info(`${tag} Step 4: 텍스트 QA + 오탈자 교정 중...`);
+    try {
+      textQaData = await runTextQA(contentData);
+      const report = textQaData.reports[0];
+      if (report?.final_decision === 'REJECTED') {
+        logger.warn(`${tag} 텍스트 QA 탈락 (${report.revision_reason}) — 재시도`);
+        const retryContent = await createContents({
+          selected_items: [{ ...trendItem, director_brief: currentBrief }],
+        });
+        contentData = retryContent;
+        textQaData  = await runTextQA(contentData);
+        if (textQaData.reports[0]?.final_decision === 'REJECTED') {
+          logger.error(`${tag} 재시도 후도 QA 탈락. 중단합니다.`);
+          process.exit(1);
+        }
+      }
+      logger.info(`${tag} 텍스트 QA 통과`);
+    } catch (err) {
+      logger.error(`${tag} 텍스트 QA 실패: ${err.message}`);
+      process.exit(1);
+    }
+  }
+
+  // ── Step 5: 롱폼 생성 (--longform 옵션 시) ──────────────────────────────
+  if (longform) {
+    logger.info(`${tag} Step 5: 롱폼 스크립트 생성 중...`);
+    try {
+      const lfResult = await createLongFormAndShorts(
+        trendItem,
+        contentData.contents[0]?.blog_draft ?? null
+      );
+      if (lfResult.long_video?.sections?.length) {
+        contentData.contents[0] = { ...contentData.contents[0], long_video: lfResult.long_video };
+        logger.info(`${tag} 롱폼 스크립트 완료 (${lfResult.long_video.sections.length}섹션)`);
+      }
+    } catch (err) {
+      logger.warn(`${tag} 롱폼 생성 실패, 숏폼만 진행: ${err.message}`);
+    }
+  }
+
+  // ── Step 6: 영상 제작 ────────────────────────────────────────────────────
+  logger.info(`${tag} Step 6: 영상 제작 중...`);
+  try {
+    const content = contentData.contents[0];
+    if (longform && content.long_video?.sections?.length) {
+      await generateLongFormMedia(content);
+      logger.info(`${tag} 롱폼 영상 제작 완료`);
+    } else {
+      await generateAllMedia(contentData);
+      logger.info(`${tag} 숏폼 영상 제작 완료`);
+    }
+  } catch (err) {
+    logger.error(`${tag} 영상 제작 실패: ${err.message}`);
+    process.exit(1);
+  }
+
+  // ── Step 7: 영상 Vision QA ───────────────────────────────────────────────
+  if (!noQA) {
+    logger.info(`${tag} Step 7: 영상 Vision QA 중...`);
+    try {
+      const visionQa = await runVisionQA(textQaData);
+      const report   = visionQa.reports[0];
+      if (report?.final_decision === 'REJECTED') {
+        logger.warn(`${tag} Vision QA 탈락: ${report.revision_reason} — 업로드는 계속 진행`);
+      } else {
+        logger.info(`${tag} Vision QA 통과`);
+      }
+      textQaData = visionQa;
+    } catch (err) {
+      logger.warn(`${tag} Vision QA 실패 (계속): ${err.message}`);
+    }
+  }
+
+  // ── Step 8: Director 최종 승인 ───────────────────────────────────────────
+  if (!noQA) {
+    try {
+      const report   = textQaData.reports[0];
+      const approval = await finalApproval(report, contentData.contents[0]);
+      if (!approval.approved) {
+        logger.warn(`${tag} Director 최종 거부: ${approval.reason}`);
+        if (!dryRun) {
+          console.log('\n⛔ Director가 업로드를 거부했습니다.');
+          console.log(`   사유: ${approval.reason}`);
+          console.log('   --no-qa 옵션으로 강제 업로드할 수 있습니다.\n');
+          process.exit(0);
+        }
+      }
+    } catch (err) {
+      logger.warn(`${tag} Director 최종 승인 실패 (계속): ${err.message}`);
+    }
+  }
+
+  // ── Step 9: YouTube 업로드 ───────────────────────────────────────────────
+  // 숏폼 전용 실행 시 이전에 남은 _long.mp4가 있으면 업로더가 그걸 우선 선택하므로 제거
+  if (!longform) {
+    const { default: fsSync } = await import('fs');
+    const safeKw = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    const longPath = path.resolve(__dirname, `../output/media/${safeKw}_long.mp4`);
+    try {
+      fsSync.unlinkSync(longPath);
+      logger.info(`${tag} 이전 롱폼 파일 제거 (숏폼 업로드 보장): ${longPath}`);
+    } catch { /* 없으면 무시 */ }
+  }
+
+  if (dryRun) {
+    console.log('\n✅ Dry-run 완료 — YouTube 업로드 건너뜀');
+    console.log(`   스크립트: output/scripts/video_script_${date}_${keyword.replace(/\s/g, '_')}.json`);
+    console.log('   영상    : output/media/\n');
+    process.exit(0);
+  }
+
+  logger.info(`${tag} Step 9: YouTube 업로드 중...`);
+  try {
+    const publishResult = await publishContents(textQaData, contentData);
+    await writeJSON(
+      path.resolve(__dirname, `../output/qa_reports/video_publish_${date}_${keyword.replace(/\s/g, '_')}.json`),
+      publishResult
+    );
+
+    const result = publishResult.results?.[0];
+    const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
+
+    // 영상 파일 실제 길이 측정
+    const { getVideoDurationSec } = await import('../src/agents/auto_publisher.js').catch(() => ({ getVideoDurationSec: null }));
+    const safeKw   = keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
+    const vidPath  = path.resolve(__dirname, `../output/media/${safeKw}.mp4`);
+    let videoDurStr = '';
+    try {
+      const { execFile } = await import('child_process');
+      const { promisify } = await import('util');
+      const execFileAsync = promisify(execFile);
+      const ffprobePath = (await import('ffmpeg-static')).default.replace('ffmpeg', 'ffprobe');
+      const { stdout } = await execFileAsync(ffprobePath, [
+        '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', vidPath,
+      ]).catch(() => ({ stdout: '' }));
+      const sec = parseFloat(stdout);
+      if (!isNaN(sec)) {
+        const m = Math.floor(sec / 60);
+        const s = Math.round(sec % 60);
+        videoDurStr = `${m}분 ${s}초`;
+      }
+    } catch { /* ffprobe 없으면 생략 */ }
+
+    console.log('\n✅ 완료!');
+    console.log(`   키워드   : ${keyword}`);
+    if (videoDurStr) console.log(`   영상길이 : ${videoDurStr}`);
+    if (result?.youtube?.url) console.log(`   YouTube  : ${result.youtube.url}`);
+    console.log(`   처리시간 : ${elapsed}분\n`);
+  } catch (err) {
+    logger.error(`${tag} YouTube 업로드 실패: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+run().catch((err) => {
+  console.error('Fatal:', err.message);
+  process.exit(1);
+});

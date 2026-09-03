@@ -56,6 +56,13 @@ function buildStrategyContext(strategy) {
   ].filter(Boolean).join('\n');
 }
 
+const LABOR_SOCIAL_PATTERNS = [
+  /노조|파업|임금|성과급|연봉|최저임금|고용|실업|해고|근로|직장|노동|비정규|정규직|육아휴직|산재/,
+];
+function isLaborOrSocialKeyword(kw) {
+  return LABOR_SOCIAL_PATTERNS.some((re) => re.test(kw ?? ''));
+}
+
 // ── 1. 콘텐츠 브리프 생성 ─────────────────────────────────────────────────
 /**
  * 트렌드 아이템 1개에 대해 채널 전략 기반 콘텐츠 브리프를 생성한다.
@@ -78,6 +85,11 @@ export async function createContentBrief(item) {
             `[채널 전략]\n${strategyCtx}\n\n` +
             `[오늘의 키워드]\n${item.keyword}\n` +
             `[카테고리] ${item.category ?? '경제'}\n\n` +
+            (isLaborOrSocialKeyword(item.keyword)
+              ? `⚠️ 이 키워드는 노동·임금·사회 이슈입니다.\n` +
+                `  → 주식 매수·매도·투자 전망은 절대 포함하지 말 것.\n` +
+                `  → 근로자 입장, 임금 현실, 노사 갈등의 사회적 의미에 집중할 것.\n\n`
+              : '') +
             `이 키워드로 영상을 만들 때 콘텐츠 작가에게 줄 구체적인 브리프를 작성하세요.\n` +
             `브리프 포함 항목:\n` +
             `1. 핵심 각도 (어떤 관점으로 접근할지)\n` +
@@ -191,6 +203,10 @@ export async function finalApproval(qaReport, content) {
           content:
             `당신은 ${strategy.channel_name} 채널의 총괄 PD입니다. 최종 발행 승인을 결정합니다.\n\n` +
             `[채널 피해야 할 것]\n${(strategy.avoid ?? []).join('\n')}\n` +
+            `[중요 판단 기준]\n` +
+            `- "검증되지 않은 투자 조언"은 실제 매수/매도 추천, 특정 종목 추천을 뜻함\n` +
+            `- 노조, 성과급, 임금, 고용 등 뉴스 보도성 경제 콘텐츠는 투자 조언이 아님\n` +
+            `- 공포 조장 판단: 수치 없이 막연한 위기감만 조성하는 경우만 해당\n` +
             `[디렉터 특별 지시]\n${strategy.director_notes ?? '없음'}\n\n` +
             `[검수 통과한 콘텐츠 요약]\n` +
             `키워드: ${content?.keyword ?? qaReport.keyword}\n` +

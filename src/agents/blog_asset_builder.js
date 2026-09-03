@@ -6,13 +6,32 @@ import { createRequire } from 'module';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
+
+// [역할: Image Maker] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+// 가이드 파일(prompts/image_guide.md)에 정의된 규칙을 LLM 프롬프트에 주입하고,
+// 자체 검수(Gemini Vision)까지 책임지는 단일 책임 에이전트.
 
 const require = createRequire(import.meta.url);
 const sharp = require('sharp');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ── 이미지 가이드 (prompts/image_guide.md) 로드 — LLM 프롬프트에 주입 ────────
+let _imageGuideCache = null;
+async function loadImageGuide() {
+  if (_imageGuideCache !== null) return _imageGuideCache;
+  try {
+    _imageGuideCache = await fs.readFile(
+      path.resolve(__dirname, '../../prompts/image_guide.md'),
+      'utf-8'
+    );
+  } catch {
+    _imageGuideCache = '';
+  }
+  return _imageGuideCache;
+}
 
 // 카테고리별 Pexels 검색 쿼리 (블로그 가로형 이미지용)
 const PEXELS_QUERY = {
@@ -124,7 +143,7 @@ async function fetchPexelsImages(keyword, category, count, destDir) {
 
   const query = PEXELS_QUERY[category] ?? `${keyword} korea`;
   const res = await axios.get('https://api.pexels.com/v1/search', {
-    params: { query, per_page: count + 2, orientation: 'landscape' },
+    params: { query, per_page: count + 5, orientation: 'landscape', page: Math.floor(Math.random() * 4) + 1 },
     headers: { Authorization: apiKey },
     timeout: 10000,
   });
@@ -248,27 +267,31 @@ async function extractKeyStats(content) {
     .map((s) => `${s.heading}: ${(s.body ?? '').slice(0, 300)}`)
     .join('\n');
 
+  const guideText = await loadImageGuide();
   const prompt =
     `다음 블로그 본문에서 독자에게 가장 인상적인 핵심 수치나 팩트를 3~4개 추출해줘.\n` +
     `키워드: ${content.keyword}\n\n${bodyText.slice(0, 1200)}\n\n` +
-    `조건: 숫자·퍼센트가 있으면 우선 선택. 없으면 핵심 팩트 한 줄.\n` +
-    `value는 짧게 (예: "3.5%", "7만원", "역대 최고"), label은 10자 이내.\n` +
+    `${guideText.slice(0, 800)}\n\n` +
+    `조건 (반드시 따를 것): 숫자·퍼센트가 있으면 우선 선택. 없으면 핵심 팩트 한 줄.\n` +
+    `value는 반드시 8자 이내, label은 반드시 10자 이내로 압축할 것.\n` +
     `JSON만 반환: {"stats":[{"value":"3.5%","label":"기준금리"},{"value":"7%","label":"전세가 하락"},...]}`;
 
   try {
     await throttle(1000);
-    const res = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-      },
-      {
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 15000,
-      }
+    const res = await retryOn429(() =>
+      axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          temperature: 0.3,
+        },
+        {
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 15000,
+        }
+      )
     );
     return JSON.parse(res.data.choices[0].message.content).stats ?? [];
   } catch (err) {
@@ -337,6 +360,168 @@ body{width:730px;height:200px;background:linear-gradient(135deg,#0f172a,#1e293b)
   }
 }
 
+// ── ④ Gemini Vision 자가 검수 (이미지 self-review 루프) ──────────────────
+
+/**
+ * 생성된 이미지(JPG)를 Gemini Vision으로 검수한다.
+ * qa_editor.js의 checkVideoWithGemini와 동일한 패턴 — 영상 대신 이미지에 적용.
+ * API 키 없거나 호출 실패 시 PASS로 폴백 (자가 검수는 보강 장치이지 필수 게이트가 아님).
+ */
+async function reviewImageWithGemini(imagePath, guideText) {
+  if (!config.gemini.apiKey) return { pass: true, reason: '' };
+
+  try {
+    const imageBuffer = await fs.readFile(imagePath);
+    const base64Image = imageBuffer.toString('base64');
+    const prompt =
+      `다음은 블로그용으로 HTML/CSS 렌더링한 이미지입니다. 아래 자가 검수 체크리스트를 기준으로 ` +
+      `JSON으로만 응답하세요.\n\n${guideText.slice(0, 1500)}\n\n` +
+      `출력: { "pass": true|false, "reason": "FAIL이면 구체적 사유, PASS면 빈 문자열" }`;
+
+    const res = await retryOn503(() =>
+      axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'image/jpeg', data: base64Image } },
+            ],
+          }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { timeout: 30000 }
+      )
+    );
+
+    const raw = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+    const parsed = JSON.parse(raw);
+    return { pass: parsed.pass !== false, reason: parsed.reason ?? '' };
+  } catch (err) {
+    logger.warn(`[blog_asset_builder] Vision self-review failed: ${err.message}. Defaulting to PASS.`);
+    return { pass: true, reason: '' };
+  }
+}
+
+/**
+ * GPT-4o-mini로 썸네일용 짧은 헤드라인 문구를 생성한다 (image_guide.md 규칙 강제 주입).
+ * 실패 시 키워드를 그대로 사용.
+ */
+async function generateThumbnailHeadline(content, guideText) {
+  if (!config.openai.apiKey) return content.keyword.slice(0, 14);
+
+  const prompt =
+    `블로그 썸네일에 들어갈 짧은 헤드라인 문구를 만들어줘.\n` +
+    `키워드: ${content.keyword}\n` +
+    `참고 맥락: ${(content.image_prompt ?? '').slice(0, 200)}\n\n` +
+    `${guideText.slice(0, 800)}\n\n` +
+    `JSON만 반환: {"headline":"..."}`;
+
+  try {
+    await throttle(500);
+    const res = await retryOn429(() =>
+      axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          temperature: 0.6,
+        },
+        {
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 15000,
+        }
+      )
+    );
+    const headline = JSON.parse(res.data.choices[0].message.content).headline;
+    return (headline || content.keyword).slice(0, 14);
+  } catch (err) {
+    logger.warn(`[blog_asset_builder] Headline generation failed: ${err.message}`);
+    return content.keyword.slice(0, 14);
+  }
+}
+
+const THUMB_GRADIENT = {
+  economy:       ['#0f172a', '#1e3a8a'],
+  finance:       ['#1c1917', '#92400e'],
+  realestate:    ['#052e16', '#15803d'],
+  health:        ['#083344', '#0891b2'],
+  entertainment: ['#2e1065', '#9333ea'],
+  social:        ['#450a0a', '#dc2626'],
+};
+
+const CATEGORY_ICON = {
+  economy: '📊', finance: '💰', realestate: '🏢',
+  health: '🌿', entertainment: '🎬', social: '🏛️',
+};
+
+/**
+ * HTML/CSS를 Playwright로 렌더링해 블로그 썸네일을 만든다.
+ * DALL-E(유료, 빌링 한도 이슈 빈발)의 무료 대체/보강 경로.
+ * fontScale을 줄여 재시도하면 자가 검수 FAIL(텍스트 잘림) 시 회복할 수 있다.
+ */
+async function renderHtmlThumbnail(headline, category, outputPath, fontScale = 1) {
+  const [c1, c2] = THUMB_GRADIENT[category] ?? ['#0f172a', '#1e293b'];
+  const icon = CATEGORY_ICON[category] ?? '📰';
+  const fontSize = Math.round(56 * fontScale);
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:800px;height:450px;background:linear-gradient(135deg,${c1},${c2});
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+  padding:0 64px;font-family:'Malgun Gothic','맑은 고딕','AppleGothic',sans-serif;position:relative;overflow:hidden}
+.icon{font-size:64px;margin-bottom:18px}
+.headline{font-size:${fontSize}px;font-weight:800;color:#f8fafc;line-height:1.3;
+  max-width:90%;word-break:keep-all;text-shadow:0 2px 12px rgba(0,0,0,.3)}
+.bar{position:absolute;left:64px;bottom:48px;width:64px;height:6px;background:#f8fafc;border-radius:3px}
+</style></head><body>
+<div class="icon">${icon}</div>
+<div class="headline">${headline}</div>
+<div class="bar"></div>
+</body></html>`;
+
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await page.setViewportSize({ width: 800, height: 450 });
+    await page.setContent(html, { waitUntil: 'networkidle' });
+    const rawPath = outputPath.replace('.jpg', '_raw.png');
+    await page.screenshot({ path: rawPath });
+    await page.close();
+
+    await sharp(rawPath).jpeg({ quality: 92 }).toFile(outputPath);
+    await fs.unlink(rawPath).catch(() => {});
+    return outputPath;
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * HTML/CSS 썸네일 생성 + Gemini Vision 자가 검수 루프.
+ * FAIL 시 폰트를 줄여 최대 2회까지 재생성, 그래도 실패하면 마지막 결과를 그대로 채택
+ * (최종 폴백은 buildAssets의 Pexels 단계가 담당).
+ */
+async function generateHtmlThumbnailWithReview(content, destPath) {
+  const guideText = await loadImageGuide();
+  const headline = await generateThumbnailHeadline(content, guideText);
+
+  let fontScale = 1;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await renderHtmlThumbnail(headline, content.category, destPath, fontScale);
+    const review = await reviewImageWithGemini(destPath, guideText);
+    if (review.pass) {
+      logger.info(`[blog_asset_builder] HTML thumbnail self-review PASS (attempt ${attempt}): ${content.keyword}`);
+      return destPath;
+    }
+    logger.warn(`[blog_asset_builder] HTML thumbnail self-review FAIL (attempt ${attempt}): ${review.reason}`);
+    fontScale -= 0.15; // 텍스트 잘림 대응 — 폰트 축소 후 재시도
+  }
+  return destPath; // 3회 시도 후에도 보유 — Pexels 폴백 여부는 호출부에서 판단
+}
+
 // ── 단일 콘텐츠 자산 빌드 ─────────────────────────────────────────────────
 async function buildAssets(content, sharedGlobalIds = null) {
   const safeKeyword = content.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
@@ -383,7 +568,19 @@ async function buildAssets(content, sharedGlobalIds = null) {
     }
   }
 
-  // 3. 썸네일 폴백 — DALL-E 실패 시 섹션 이미지와 겹치지 않는 별도 Pexels 이미지 사용
+  // 2.5. 썸네일 폴백 1단계 — DALL-E 실패 시 HTML/CSS+Playwright로 무료 렌더링 (자가 검수 포함)
+  if (!result.thumbnail) {
+    try {
+      const htmlThumbPath = path.join(assetDir, 'thumbnail.jpg');
+      result.thumbnail = await generateHtmlThumbnailWithReview(content, htmlThumbPath);
+      logger.info(`[blog_asset_builder] Thumbnail (HTML/CSS render): ${content.keyword}`);
+    } catch (err) {
+      logger.warn(`[blog_asset_builder] HTML thumbnail failed: ${err.message}`);
+      result.thumbnail = null;
+    }
+  }
+
+  // 3. 썸네일 폴백 2단계 — HTML 렌더링도 실패 시 Pexels 사진으로 대체
   if (!result.thumbnail && config.pexels.apiKey) {
     try {
       // 전역 Set(포스트 간 중복 방지) + 현재 포스트 body_images ID 합산
@@ -421,6 +618,12 @@ async function buildAssets(content, sharedGlobalIds = null) {
         const cardPath = path.join(assetDir, 'info_card.jpg');
         result.info_card  = await generateInfoCard(stats, content.keyword, content.category, cardPath);
         result.info_stats = stats;
+
+        const guideText = await loadImageGuide();
+        const review = await reviewImageWithGemini(cardPath, guideText);
+        if (!review.pass) {
+          logger.warn(`[blog_asset_builder] Info card self-review FAIL: ${review.reason} (${content.keyword})`);
+        }
         logger.info(`[blog_asset_builder] Info card (${stats.length} stats): ${content.keyword}`);
       }
     } catch (err) {

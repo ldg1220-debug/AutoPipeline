@@ -9,7 +9,7 @@
  *   3. 점수 < TOPIC_GROUPER_THRESHOLD(기본 70)이면 상위 모델로 재그룹핑
  *   4. 결과를 output/feedback/grouper_feedback.json에 누적
  *
- * 에스컬레이션 사다리: gpt-4o-mini → gpt-4o → claude-sonnet-4-6
+ * 에스컬레이션 사다리: gpt-4o-mini → gpt-4o → gemini-2.5-flash → claude-sonnet-4-6
  */
 
 import path from 'path';
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -29,6 +29,7 @@ const FEEDBACK_PATH = path.resolve(__dirname, '../../output/feedback/grouper_fee
 const ESCALATION_LADDER = [
   'gpt-4o-mini',
   'gpt-4o',
+  'gemini-2.5-flash',
   'claude-sonnet-4-6',
 ];
 
@@ -38,22 +39,34 @@ function isAnthropicModel(model) {
   return model.startsWith('claude-');
 }
 
+function isGeminiModel(model) {
+  return model.startsWith('gemini-');
+}
+
+function hasKeyFor(model) {
+  if (isAnthropicModel(model)) return Boolean(config.anthropic.apiKey);
+  if (isGeminiModel(model)) return Boolean(config.gemini?.apiKey);
+  return Boolean(config.openai.apiKey);
+}
+
 async function callOpenAI(model, prompt) {
-  const res = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        'Content-Type': 'application/json',
+  const res = await retryOn429(() =>
+    axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
       },
-      timeout: 25000,
-    }
+      {
+        headers: {
+          Authorization: `Bearer ${config.openai.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 25000,
+      }
+    )
   );
   return JSON.parse(res.data.choices[0].message.content);
 }
@@ -81,6 +94,23 @@ async function callAnthropic(model, prompt) {
   return JSON.parse(match[0]);
 }
 
+async function callGemini(model, prompt) {
+  const res = await retryOn503(() =>
+    axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { response_mime_type: 'application/json' },
+      },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 25000 }
+    )
+  );
+  const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON found in Gemini response');
+  return JSON.parse(match[0]);
+}
+
 async function callModel(model, prompt) {
   if (isAnthropicModel(model)) {
     if (!config.anthropic.apiKey) {
@@ -88,6 +118,13 @@ async function callModel(model, prompt) {
       return callOpenAI('gpt-4o', prompt);
     }
     return callAnthropic(model, prompt);
+  }
+  if (isGeminiModel(model)) {
+    if (!config.gemini?.apiKey) {
+      logger.warn(`[topic_grouper] GEMINI_API_KEY not set. Falling back to gpt-4o.`);
+      return callOpenAI('gpt-4o', prompt);
+    }
+    return callGemini(model, prompt);
   }
   if (!config.openai.apiKey) throw new Error('OPENAI_API_KEY not set');
   return callOpenAI(model, prompt);
@@ -221,13 +258,35 @@ async function saveFeedback(entry) {
 
 // ── 공개 API ───────────────────────────────────────────────────────────────
 
+// 블로그에 사용하지 않을 키워드 패턴 (브랜드명·병원명·고유 시스템명)
+const BLOG_BLACKLIST = [
+  /피부과의원/,
+  /피부과\s*(목동|강남|홍대|신촌|종로|잠실|분당|수원|인천|부산)/,
+  /병원\s*(목동|강남|홍대|신촌|종로|잠실|분당)/,
+  /의원\s*(목동|강남|홍대)/,
+  /edi$/i,
+];
+
 export async function groupSimilarTopics(contentData) {
-  const contents = contentData?.contents ?? [];
+  let contents = contentData?.contents ?? [];
   if (contents.length === 0) return contentData;
 
-  if (!config.openai.apiKey && !config.anthropic.apiKey) {
+  // 브랜드·고유명사 블랙리스트 필터
+  const before = contents.length;
+  contents = contents.filter((c) => {
+    const kw = c.keyword ?? '';
+    const blocked = BLOG_BLACKLIST.some((re) => re.test(kw));
+    if (blocked) logger.info(`[topic_grouper] 블랙리스트 제외: "${kw}"`);
+    return !blocked;
+  });
+  if (contents.length < before) {
+    logger.info(`[topic_grouper] 블랙리스트 필터: ${before}개 → ${contents.length}개`);
+  }
+  if (contents.length === 0) return { ...contentData, contents: [] };
+
+  if (!config.openai.apiKey && !config.anthropic.apiKey && !config.gemini?.apiKey) {
     logger.warn('[topic_grouper] No API key. Skipping grouping.');
-    return contentData;
+    return { ...contentData, contents };
   }
 
   const keywords      = contents.map((c) => c.keyword);
@@ -242,10 +301,19 @@ export async function groupSimilarTopics(contentData) {
   logger.info(`[topic_grouper] ${keywords.length}개 키워드: [${keywords.join(', ')}]`);
   logger.info(`[topic_grouper] Primary: ${primaryModel} / Reviewer: ${reviewerModel}`);
 
-  // 1차 그룹핑
-  let groups     = await clusterWithModel(primaryModel, keywords);
-  let usedModel  = primaryModel;
-  let escalated  = false;
+  // 1차 그룹핑 — 실패(레이트리밋/결제한도 등) 시에도 다음 사다리 모델로 즉시 폴백
+  let groups, usedModel, escalated = false;
+  try {
+    groups    = await clusterWithModel(primaryModel, keywords);
+    usedModel = primaryModel;
+  } catch (err) {
+    const nextModel = ESCALATION_LADDER[ladderIdx + 1];
+    if (!nextModel || !hasKeyFor(nextModel)) throw err;
+    logger.warn(`[topic_grouper] ${primaryModel} 실패(${err.message}), ${nextModel}로 폴백`);
+    groups    = await clusterWithModel(nextModel, keywords);
+    usedModel = nextModel;
+    escalated = true;
+  }
 
   // 검수
   const review = await reviewGroupings(keywords, groups, reviewerModel);
@@ -258,7 +326,7 @@ export async function groupSimilarTopics(contentData) {
   // 점수 미달 시 에스컬레이션
   if (review.verdict === 'RETRY' || review.score < threshold) {
     const nextModel = ESCALATION_LADDER[ladderIdx + 1];
-    if (nextModel && nextModel !== primaryModel) {
+    if (nextModel && nextModel !== usedModel) {
       logger.info(`[topic_grouper] Escalating to: ${nextModel}`);
       groups    = await clusterWithModel(nextModel, keywords);
       usedModel = nextModel;

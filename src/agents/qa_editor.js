@@ -5,7 +5,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,24 +22,32 @@ const BANNED_WORDS = [
 // ─────────────────────────────────────────────────────────────
 
 async function runLLMQA(content) {
+  const s = content.shortform_script ?? {};
   const qaPrompt = `당신은 한국 미디어 콘텐츠 검수 전문가입니다. 아래 콘텐츠를 검수하고 JSON으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
 검수 대상 콘텐츠:
 - 키워드: ${content.keyword}
-- 숏폼 훅: ${content.shortform_script?.hook ?? ''}
-- 숏폼 컨텍스트: ${content.shortform_script?.context ?? ''}
-- 숏폼 인사이트: ${content.shortform_script?.insight ?? ''}
-- 숏폼 요약: ${content.shortform_script?.summary ?? ''}
-- 숏폼 CTA: ${content.shortform_script?.cta ?? ''}
+- 숏폼 훅: ${s.hook ?? ''}
+- 숏폼 컨텍스트: ${s.context ?? ''}
+- 숏폼 인사이트: ${s.insight ?? ''}
+- 숏폼 요약: ${s.summary ?? ''}
+- 숏폼 CTA: ${s.cta ?? ''}
 - 블로그 제목: ${content.blog_draft?.title ?? ''}
 - 블로그 섹션: ${JSON.stringify(content.blog_draft?.sections ?? [])}
 
 검수 항목:
 1. fact_check_score (0~100): 사실 정확성. 허위·과장·확인 불가 내용 발견 시 감점.
-2. grammar_check ("PASS" | "FAIL"): 맞춤법·문법 오류가 없으면 PASS.
+   ⚠️ 연도 오류 중점 검수: 현재는 2026년이다.
+     - "2023년에", "올해 2023", "2024년 현재" 등 과거 연도를 현재로 쓴 표현 발견 시 -30점 이상 감점
+     - 연도 없이 구체적 수치를 현재형으로 사실처럼 서술한 경우 -20점 감점
+2. grammar_check ("PASS" | "FAIL"): 맞춤법·문법·오탈자 오류가 없으면 PASS. 오류가 하나라도 있으면 FAIL.
+3. issues (string): 발견된 문제 요약. 연도 오류가 있으면 반드시 명시 (없으면 빈 문자열).
+4. corrected_script (object | null): grammar_check가 FAIL인 경우에만 오탈자·문법·연도 오류를 교정한 스크립트를 반환.
+   형식: { "hook": "...", "context": "...", "insight": "...", "summary": "...", "cta": "..." }
+   오류가 없으면 null.
 
 출력 형식 (JSON만):
-{ "fact_check_score": 0, "grammar_check": "PASS", "issues": "발견된 문제 요약 (없으면 빈 문자열)" }`;
+{ "fact_check_score": 0, "grammar_check": "PASS", "issues": "", "corrected_script": null }`;
 
   await throttle(2000);
   const response = await axios.post(
@@ -130,7 +138,9 @@ function validateHookQuality(content) {
 function detectBannedWords(content) {
   const fullText = [
     content.shortform_script?.hook ?? '',
-    content.shortform_script?.body ?? '',
+    content.shortform_script?.context ?? '',
+    content.shortform_script?.insight ?? '',
+    content.shortform_script?.summary ?? '',
     content.shortform_script?.cta ?? '',
     content.blog_draft?.title ?? '',
     ...(content.blog_draft?.sections ?? []).map((s) => s.body ?? ''),
@@ -177,18 +187,20 @@ async function checkVideoWithGemini(videoPath) {
 
 출력: { "layout": "PASS", "sync": "PASS", "reason": "" }`;
 
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
-      {
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: 'video/mp4', data: base64Video } },
-          ],
-        }],
-        generationConfig: { response_mime_type: 'application/json' },
-      },
-      { timeout: 60000 }
+    const response = await retryOn503(() =>
+      axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.gemini.apiKey}`,
+        {
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'video/mp4', data: base64Video } },
+            ],
+          }],
+          generationConfig: { response_mime_type: 'application/json' },
+        },
+        { timeout: 60000 }
+      )
     );
 
     const raw = response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
@@ -205,6 +217,83 @@ async function checkVideoWithGemini(videoPath) {
     logger.warn(`[qa_editor] Vision QA failed (${status}): ${detail}${body ? ' | ' + JSON.stringify(body).slice(0, 300) : ''}. Defaulting to PASS.`);
     return { layout: 'PASS', sync: 'PASS', reason: '' };
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Gemini 팩트체크 — GPT-4o 와 다른 모델로 교차 검증
+// ─────────────────────────────────────────────────────────────
+// gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+const GEMINI_FACTCHECK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+
+async function runGeminiFactCheck(content) {
+  if (!config.gemini?.apiKey) return null;
+
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const s = content.shortform_script ?? {};
+  const parts = [];
+
+  if (s.hook || s.insight)
+    parts.push(`[숏폼 스크립트]\n훅: ${s.hook ?? ''}\n컨텍스트: ${s.context ?? ''}\n인사이트: ${s.insight ?? ''}`);
+
+  const longSections = content.long_video?.sections ?? [];
+  if (longSections.length)
+    parts.push(`[롱폼 영상 스크립트]\n${longSections.map((sec) => `${sec.name}: ${sec.script ?? ''}`).join('\n')}`);
+
+  const blogSections = content.blog_draft?.sections ?? [];
+  if (blogSections.length)
+    parts.push(`[블로그 본문]\n${blogSections.map((sec) => `## ${sec.heading}\n${sec.body ?? ''}`).join('\n\n')}`);
+
+  if (parts.length === 0) return null;
+
+  const prompt = `당신은 한국 경제·금융 콘텐츠 팩트체커입니다. 아래 콘텐츠의 사실 정확성을 검수하고 JSON으로만 응답하세요.
+
+오늘 날짜: ${today} (KST)
+
+【반드시 확인할 경제 수치 기준】
+- 달러/원(USD/KRW): 2024년 후반~현재 1,400원 이상. 1,100~1,250원 표현은 오류.
+- 비트코인·암호화폐 가격: 특정 가격 언급 자체가 오류 (실시간 변동).
+- 한국 암호화폐 과세: 2025년부터 시행. 2023년 시행이라고 쓰면 오류.
+- 한국은행 기준금리: 구체적 수치 대신 "금리 변동기" 등 표현 사용해야 함.
+- 2023·2024·2025년 수치를 "올해", "현재", "최신"으로 표현하면 오류 (현재는 2026년).
+
+검수 대상 콘텐츠 (키워드: ${content.keyword}):
+${parts.join('\n\n')}
+
+응답 형식 (JSON만):
+{
+  "gemini_fact_score": 0~100,
+  "issues": ["발견된 오류 1", "발견된 오류 2"],
+  "verdict": "pass" | "warn" | "fail"
+}
+- gemini_fact_score: 100=완전 정확, 오류 1건당 -15~-30점
+- verdict: 90이상=pass, 60~89=warn, 60미만=fail
+- issues: 빈 배열이면 오류 없음`;
+
+  for (const model of GEMINI_FACTCHECK_MODELS) {
+    try {
+      await throttle(2000);
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { response_mime_type: 'application/json' },
+          },
+          { timeout: 60000 }
+        )
+      );
+      const raw = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const result = JSON.parse(raw);
+      return {
+        gemini_fact_score: result.gemini_fact_score ?? 80,
+        issues: result.issues ?? [],
+        verdict: result.verdict ?? 'pass',
+      };
+    } catch (err) {
+      logger.warn(`[qa_editor] Gemini factcheck (${model}) failed: ${err.message}`);
+    }
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -236,9 +325,21 @@ export async function runTextQA(contentData) {
     if (config.openai.apiKey) {
       try {
         const llmResult = await runLLMQA(content);
-        factScore = llmResult.fact_check_score ?? 80;
-        grammarCheck = llmResult.grammar_check ?? 'PASS';
-        llmIssues = llmResult.issues ?? '';
+        factScore    = llmResult.fact_check_score ?? 80;
+        grammarCheck = llmResult.grammar_check    ?? 'PASS';
+        llmIssues    = llmResult.issues           ?? '';
+
+        // 오탈자 교정: corrected_script가 있으면 스크립트를 덮어씌우고 grammar PASS 처리
+        if (grammarCheck === 'FAIL' && llmResult.corrected_script) {
+          const c = llmResult.corrected_script;
+          const fields = ['hook', 'context', 'insight', 'summary', 'cta'];
+          const hasFix = fields.some((f) => c[f] && c[f] !== content.shortform_script?.[f]);
+          if (hasFix) {
+            content.shortform_script = { ...content.shortform_script, ...c };
+            grammarCheck = 'PASS';
+            logger.info(`[qa_editor] 오탈자 자동 교정 완료: ${content.keyword} | ${llmIssues}`);
+          }
+        }
       } catch (err) {
         logger.warn(`[qa_editor] LLM QA failed for: ${content.keyword}`, { message: err.message });
       }
@@ -265,6 +366,26 @@ export async function runTextQA(contentData) {
       logger.warn(`[qa_editor] OPENAI_API_KEY not set. Skipping LLM QA: ${content.keyword}`);
     }
 
+    // ② Gemini 교차 팩트체크 (GPT-4o와 다른 모델로 독립 검증)
+    let geminiFactScore = null;
+    let geminiIssues = [];
+    let geminiVerdict = 'skipped';
+    try {
+      const geminiResult = await runGeminiFactCheck(content);
+      if (geminiResult) {
+        geminiFactScore = geminiResult.gemini_fact_score;
+        geminiIssues = geminiResult.issues ?? [];
+        geminiVerdict = geminiResult.verdict;
+        if (geminiVerdict === 'fail') {
+          logger.warn(`[qa_editor] Gemini 팩트체크 실패 (${content.keyword}): ${geminiIssues.join(' | ')}`);
+        } else {
+          logger.info(`[qa_editor] Gemini 팩트체크 ${geminiVerdict} (${content.keyword})`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`[qa_editor] Gemini factcheck error: ${err.message}`);
+    }
+
     const hookIssues = validateHookQuality(content);
     if (hookIssues.length > 0) {
       logger.warn(`[qa_editor] Hook quality issue: ${content.keyword} | ${hookIssues.join(', ')}`);
@@ -275,6 +396,7 @@ export async function runTextQA(contentData) {
     if (bannedDetected) reasons.push('금지어 감지됨');
     if (grammarCheck === 'FAIL') reasons.push('문법 오류 감지됨');
     if (factScore < 60) reasons.push(`팩트체크 점수 미달 (${factScore}/100)`);
+    if (geminiVerdict === 'fail') reasons.push(`Gemini 팩트체크 실패 (${geminiFactScore}/100): ${geminiIssues.join(', ')}`);
     if (flowScore < 60) reasons.push(`대본 흐름 점수 미달 (${flowScore}/100)`);
     if (hookScore < 60) reasons.push(`훅 흡입력 점수 미달 (${hookScore}/100)`);
     // llmIssues는 참고용으로만 기록 (금융 수치 "확인 필요" 메모로 전량 REJECT되는 문제 방지)
@@ -293,6 +415,9 @@ export async function runTextQA(contentData) {
       cta_score: ctaScore,
       flow_issues: flowIssues,
       flow_suggestions: flowSuggestions,
+      gemini_fact_score: geminiFactScore,
+      gemini_issues: geminiIssues,
+      gemini_verdict: geminiVerdict,
       video_layout_check: 'PENDING',
       audio_sync_check: 'PENDING',
       final_decision: approved ? 'APPROVED' : 'REJECTED',
@@ -327,7 +452,10 @@ export async function runVisionQA(textQaData) {
     if (report.final_decision !== 'APPROVED') continue; // 텍스트 탈락은 건너뜀
 
     const safeKeyword = report.keyword.replace(/[^a-zA-Z0-9가-힣]/g, '_');
-    const videoPath = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+    const longPath   = path.resolve(__dirname, `../../output/media/${safeKeyword}_long.mp4`);
+    const shortPath  = path.resolve(__dirname, `../../output/media/${safeKeyword}.mp4`);
+    const longExists = await fs.access(longPath).then(() => true).catch(() => false);
+    const videoPath  = longExists ? longPath : shortPath;
 
     logger.info(`[qa_editor] Vision QA: ${report.keyword}`);
     const visionResult = await checkVideoWithGemini(videoPath);
@@ -353,9 +481,14 @@ export async function runVisionQA(textQaData) {
 // ─────────────────────────────────────────────────────────────
 // ③ 블로그 본문 QA — blog_content_enhancer 완료 후 실행
 // ─────────────────────────────────────────────────────────────
-const BLOG_MIN_SECTION_CHARS = 400;   // 섹션당 최소 글자 수 (500~800자 목표, 400자 미만 탈락)
-const BLOG_MIN_FAQ_CHARS     = 80;    // FAQ 답변 최소 글자 수
+const BLOG_MIN_SECTION_CHARS = 600;   // 섹션당 최소 글자 수 (700~1200자 목표, 600자 미만 탈락 — AdSense 얕은 콘텐츠 방어)
+const BLOG_MIN_FAQ_CHARS     = 150;   // FAQ 답변 최소 글자 수 (Featured Snippet 최소 기준)
 const BLOG_MIN_SECTION_COUNT = 4;     // 최소 섹션 수
+const BLOG_MIN_TOTAL_CHARS   = 4000;  // 글 전체 최소 글자 수 (AdSense 콘텐츠 가치 판단 기준)
+// 여행 코스 콘텐츠(트레쥴 연동) 대상 — 섹션당 최소 구체 수치 언급 개수.
+// "많은 사람들이 찾는 곳" 같은 막연한 서술만 있는 섹션은 탈락시킨다.
+// 평점(4.2), 리뷰수(7,845개), 거리(12.4km), 이동시간(8분) 등 숫자 형태로 카운트.
+const BLOG_MIN_NUMBERS_PER_SECTION = 2;
 
 /**
  * LLM으로 블로그 본문 SEO 품질을 평가한다.
@@ -418,14 +551,44 @@ function validateBlogStructure(content) {
     issues.push(`섹션 수 부족 (${sections.length}개, 최소 ${BLOG_MIN_SECTION_COUNT}개)`);
   }
 
+  // 제목에 현재 연도보다 2년 이상 오래된 연도가 있으면 탈락 (예: 2026년에 "2023년 정책 총정리")
+  const title = draft.title ?? '';
+  const currentYear = new Date().getFullYear();
+  const staleYearMatch = title.match(/20\d{2}/g);
+  if (staleYearMatch) {
+    const staleYears = staleYearMatch.filter((y) => Number(y) <= currentYear - 2);
+    if (staleYears.length > 0) {
+      issues.push(`제목에 오래된 연도 포함: "${staleYears.join(', ')}" — 현재(${currentYear})와 맞지 않아 신뢰도 저하`);
+    }
+  }
+
   const shortSections = sections.filter((s) => (s.body ?? '').length < BLOG_MIN_SECTION_CHARS);
   if (shortSections.length > 0) {
     issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${BLOG_MIN_SECTION_CHARS}자)`);
   }
 
+  // 구체 수치 검사 — FAQ가 아닌 본문 섹션만 대상 (막연한 일반론 방어)
+  const numericPattern = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
+  const thinSections = sections.filter((s) => {
+    const matches = (s.body ?? '').match(numericPattern) ?? [];
+    return matches.length < BLOG_MIN_NUMBERS_PER_SECTION;
+  });
+  if (thinSections.length > 0) {
+    issues.push(
+      `구체 수치 부족: [${thinSections.map((s) => s.heading).join(', ')}] ` +
+      `(섹션당 최소 ${BLOG_MIN_NUMBERS_PER_SECTION}개 — 평점·리뷰수·거리·시간 등 실제 수치 인용 필요)`
+    );
+  }
+
   const shortFaq = faq.filter((f) => (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
   if (shortFaq.length > 0) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
+  }
+
+  const totalChars = sections.reduce((sum, s) => sum + (s.body ?? '').length, 0)
+    + faq.reduce((sum, f) => sum + (f.a ?? '').length, 0);
+  if (totalChars < BLOG_MIN_TOTAL_CHARS) {
+    issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${BLOG_MIN_TOTAL_CHARS}자 — AdSense 콘텐츠 가치 기준)`);
   }
 
   // SEO 키워드 포함 여부 — 공백 제거 후 토큰 단위 검사 (한국어 복합어 대응)

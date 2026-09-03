@@ -4,11 +4,16 @@
  * 카테고리: Tistory REST API → SQLite 캐시(1일) → GPT-4o-mini 매칭
  * 태그:    GPT-4o-mini가 keyword + seoKeywords 기반으로 10개 생성
  */
+import { fileURLToPath } from 'url';
+import path from 'path';
+import fs from 'fs/promises';
 import axios from 'axios';
 import db from '../db/db.js';
 import { config } from '../config/index.js';
 import logger from './logger.js';
 import { throttle } from './rateLimiter.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CACHE_TTL_HOURS = 24;
 
@@ -71,7 +76,39 @@ async function fetchCategoriesFromPage(context, blogName) {
   try {
     tempPage = await context.newPage();
 
-    // 전략 1: 관리 페이지 로드 시 Tistory가 내부적으로 호출하는 category API를 인터셉트
+    await tempPage.goto(`https://${blogName}.tistory.com/manage/category/`, {
+      waitUntil: 'networkidle',
+      timeout: 20000,
+    });
+
+    // 전략 0 (최우선): 페이지가 인라인 <script>로 심어두는 window.Config.blog.categories.
+    // React가 이 데이터로 카테고리 트리를 렌더링하므로 DOM 셀렉터보다 훨씬 안정적이고,
+    // 하위 카테고리(children) id까지 그대로 들어있다 (실측: 국내여행=1400399, 해외여행=1400400).
+    try {
+      const configCategories = await tempPage.evaluate(() => {
+        // eslint-disable-next-line no-undef
+        return window.Config?.blog?.categories ?? null;
+      });
+      if (Array.isArray(configCategories) && configCategories.length > 0) {
+        const flatten = (list, parentName = null) =>
+          list.flatMap((c) => {
+            // id -3(전체보기), 0(카테고리 없음)은 실제 발행 대상 카테고리가 아니므로 제외
+            if (c.id == null || c.id < 1 || c.name === '카테고리 없음') return [];
+            const self = { id: String(c.id), name: c.name, parent: parentName };
+            const children = c.children?.length ? flatten(c.children, c.name) : [];
+            return [self, ...children];
+          });
+        const flat = flatten(configCategories);
+        if (flat.length > 0) {
+          logger.info(`[tistoryClassifier] Categories from window.Config: ${flat.map((c) => c.name).join(', ')}`);
+          return flat;
+        }
+      }
+    } catch (err) {
+      logger.warn(`[tistoryClassifier] window.Config 카테고리 추출 실패, 다른 전략 시도: ${err.message}`);
+    }
+
+    // 전략 1: 관리 페이지가 내부적으로 호출하는 category API를 인터셉트 (재요청으로 재확인)
     let intercepted = [];
     await tempPage.route('**tistory.com/apis/category**', async (route) => {
       const resp = await route.fetch();
@@ -87,10 +124,8 @@ async function fetchCategoriesFromPage(context, blogName) {
       await route.fulfill({ response: resp });
     });
 
-    await tempPage.goto(`https://${blogName}.tistory.com/manage/category/`, {
-      waitUntil: 'networkidle',
-      timeout: 20000,
-    });
+    // route 핸들러가 붙은 상태로 다시 로드해야 요청을 가로챌 수 있음
+    await tempPage.reload({ waitUntil: 'networkidle', timeout: 20000 });
     await tempPage.waitForTimeout(1500);
 
     if (intercepted.length > 0) {
@@ -133,7 +168,17 @@ async function fetchCategoriesFromPage(context, blogName) {
 
     if (categories.length > 0) return categories;
 
-    logger.warn(`[tistoryClassifier] Category page scrape returned 0 — page structure may have changed`);
+    // 셀렉터가 다 실패하면 실제 페이지 HTML을 저장해둔다 — 다음에 어떤 마크업으로
+    // 바뀌었는지 원격 세션에서 직접 볼 수 없으므로, 이 파일을 열어보고 셀렉터를 갱신한다.
+    try {
+      const html = await tempPage.content();
+      const debugPath = path.resolve(__dirname, '../../output/blog/debug_category_page.html');
+      await fs.mkdir(path.dirname(debugPath), { recursive: true });
+      await fs.writeFile(debugPath, html, 'utf8');
+      logger.warn(`[tistoryClassifier] Category page scrape returned 0 — page structure may have changed. HTML saved: ${debugPath}`);
+    } catch (dumpErr) {
+      logger.warn(`[tistoryClassifier] Category page scrape returned 0, HTML dump also failed: ${dumpErr.message}`);
+    }
     return [];
   } catch (err) {
     logger.warn(`[tistoryClassifier] Category page scrape failed: ${err.message}`);
@@ -153,6 +198,9 @@ export async function loadTistoryCategories(blogName, accessToken, context = nul
   // 0. 환경변수 직접 설정 — TISTORY_CATEGORY_MAP=카테고리명:ID,카테고리명:ID
   //    예) TISTORY_CATEGORY_MAP=경제·금융:123456,부동산:234567,재테크:345678
   const envMap = config.tistoryCategories;
+  if (!envMap) {
+    logger.warn('[tistoryClassifier] TISTORY_CATEGORY_MAP 미설정 — 카테고리 없이 발행합니다. .env에 TISTORY_CATEGORY_MAP=카테고리명:ID,... 형식으로 추가하세요.');
+  }
   if (envMap) {
     const categories = envMap.split(',').map((entry) => {
       const [name, id] = entry.split(':').map((s) => s.trim());
@@ -222,7 +270,7 @@ export async function matchBestCategory(categories, keyword, internalCategory) {
     health:        ['건강'],
     beauty:        ['뷰티', '뷰티·미용', '건강'],
     entertainment: ['연예·사회', '연예', '문화', '방송'],
-    social:        ['연예·사회', '사회', '이슈', '생활'],
+    social:        ['팁', '생활정보', '생활', '사회', '이슈'],
   };
 
   const preferredNames = QUICK_MAP[internalCategory] ?? [];

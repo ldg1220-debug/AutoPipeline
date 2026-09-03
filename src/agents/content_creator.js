@@ -13,12 +13,16 @@ const __dirname = path.dirname(__filename);
 const MOCK_TREND_PATH = path.resolve(__dirname, '../../mock/mock_trend.json');
 
 /**
- * 숏폼 대본 구조 (55초 완결형) — 5단계 스토리텔링 적용:
- *   hook     (0~8초)  : 배경(Background) — 최대 12자, ?/!로 끝남. 자기소개/인사 절대 금지.
- *   context  (8~20초) : 디테일(Detail) — 구체적 수치·상황 전개
- *   insight  (20~45초): 문제(Problem) + 반전(Twist) — 원인→과정→결과→행동
- *   summary  (45~52초): 참여 전환점 — 한 줄 정리
- *   cta      (52~55초): 참여(Engagement) — 구독 유도
+ * [역할: Writer (숏폼 + 롱폼 초안)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+ * generateLongVideoScript()의 결과는 QA 게이트 통과 여부 판단용 "초안"이며,
+ * 실제 발행되는 최종 롱폼 대본은 long_form_creator.js가 별도로 생성한다. (의도된 구조 — 합치지 말 것)
+ *
+ * 숏폼 대본 구조 (2분 30초 완결형) — 5단계 스토리텔링 적용:
+ *   hook     (0~8초)   : 배경(Background) — 최대 12자, ?/!로 끝남. 자기소개/인사 절대 금지.
+ *   context  (8~40초)  : 디테일(Detail) — 구체적 수치·상황 전개 (150~200자)
+ *   insight  (40~130초): 문제(Problem) + 반전(Twist) — 원인→과정→결과→행동 (350~450자)
+ *   summary  (130~145초): 참여 전환점 — 한 줄 정리 (60~80자)
+ *   cta      (145~150초): 참여(Engagement) — 구독 유도 (30자 이내)
  *
  * 영상 퀄리티가 최우선 — "나한테 왜 중요한가"가 모든 내용의 중심이어야 한다.
  * 첫 8초가 시청 지속률을 결정한다 — 즉시 훅으로 시작, 자기소개 없음.
@@ -124,14 +128,24 @@ async function generateContent(item, competitorCtx = '') {
   ].filter(Boolean).join('\n');
 
   const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
-  const contentPrompt = `당신은 유튜브 채널 "매일읽어주는남자"의 전속 작가입니다.
-채널의 나레이터 캐릭터 "매읽남"의 목소리로 55초짜리 숏폼 대본을 써야 합니다.
+  const contentPrompt = `${item.director_brief ? `🚨🚨🚨 최최최우선 지시 — 아래 앵글/관점을 대본 전체에 반드시 관철할 것. 이 지시를 위반하면 대본 전체가 무효다.\n━━━━━━━━━━━━━━━━━━━━━━━\n${item.director_brief}\n━━━━━━━━━━━━━━━━━━━━━━━\n\n` : ''}당신은 유튜브 채널 "매일읽어주는남자"의 전속 작가입니다.
+채널의 나레이터 캐릭터 "매읽남"의 목소리로 2분 30초(150초)짜리 숏폼 대본을 써야 합니다.
+
+⚠️ 글자수 절대 규칙 (가장 중요):
+  실측 TTS 낭독 속도: 7.0자/초 → 2분 30초(150초) = 1050자 필요
+  hook + context + insight + summary + cta 합산이 반드시 1050자 이상이어야 합니다.
+  각 섹션 목표: context 180~220자, insight 650~750자, summary 70~90자, cta 25자
+  미달 시 insight에 사례·비유·수치를 추가해 반드시 채울 것.
 
 오늘 날짜: ${today} (KST 기준)
-⚠️ AI 지식 기준점 경고: 당신의 학습 데이터는 2023~2024년 기준이지만, 지금은 2026년입니다.
-  - 2023년·2024년·2025년 수치(금리·지수·정책 등)를 "현재", "최신", "올해"로 쓰지 마세요
-  - 특정 시점 수치는 반드시 "○○년 기준" "당시" 등 연도를 명시하세요
-  - 확인되지 않은 2026년 수치는 창작하지 말고 "최근" 등 일반 표현을 쓰세요
+
+🚫 연도 표기 절대 규칙 (위반 시 전량 재작성):
+  현재는 ${today.slice(0, 4)}년입니다. 학습 데이터가 2023~2024년 기준이어도 아래 규칙을 반드시 따르세요.
+  ✗ 금지: "2023년에", "2024년 기준", "올해 2023", "2025년 현재" — 과거 연도를 현재처럼 쓰기
+  ✗ 금지: 연도 없이 검증 불가한 최신 수치를 사실처럼 제시
+  ✓ 허용: "○○년 기준 ~였습니다" (연도 명시 후 과거형)
+  ✓ 허용: "최근 몇 년간", "과거에 비해", "당시" (시점을 특정하지 않는 표현)
+  ✓ 허용: ${today.slice(0, 4)}년의 수치는 사실임이 확실할 때만
 키워드: ${item.keyword}
 카테고리: ${item.category}
 시리즈: ${seriesName}
@@ -193,13 +207,25 @@ ${trendCtx ? `\n[참고 데이터 — 아래 수치·팩트를 대본에 직접 
 ━━━━━━━━━━━━━━━━━━━━━━━
 【대본 이음 구조 — 끊기지 않게】
 ━━━━━━━━━━━━━━━━━━━━━━━
-hook → context → insight → summary → cta 는 하나의 말로 이어진다.
-각 섹션은 앞 섹션에서 자연스럽게 이어지는 연결어로 시작.
+hook → context → insight → summary → cta 전체가 **하나의 연속된 말**이다.
+각 섹션의 첫 문장은 반드시 앞 섹션 마지막 흐름을 받아서 시작한다.
+섹션 경계에서 말이 끊기거나 주제가 갑자기 바뀌면 실격.
 
-  hook → context: "맞아요, 이번 달부터~" / "바로 그거예요~"
-  context → insight: "근데 여기서 중요한 게 있어요~" / "사실 이게 핵심인데요~"
-  insight → summary: "그러니까 한 마디로 하면요~" / "결국 지금 해야 할 건요~"
-  summary → cta: "이런 얘기, 내일도 들고 올게요~" / "궁금하면 구독하고 기다려봐요~"
+  hook → context 연결 예시:
+    hook: "삼성 성과급, 사라졌다?"
+    context 시작: "맞아요. 이번 분기 삼성전자 성과급이..."  ← 훅에 직접 답함
+
+  context → insight 연결 예시:
+    context 끝: "...그게 우리한테 무슨 의미냐고요?"
+    insight 시작: "사실 이게 핵심인데요." / "여기서 놓치면 안 되는 게 있어요."
+
+  insight → summary 연결 예시:
+    insight 끝: "...결국 선택은 우리 손에 달려 있어요."
+    summary 시작: "그러니까 한 마디로 정리하면요~"
+
+  summary → cta 연결 예시:
+    summary 끝: "...이런 흐름, 앞으로도 계속될 거예요."
+    cta 시작: "내일도 이런 얘기 들고 올게요~"
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 【각 섹션 작성 기준】
@@ -211,23 +237,28 @@ hook → context → insight → summary → cta 는 하나의 말로 이어진�
    B. 통념파괴형: "집값 오른다? 착각!", "금리 내려도 손해?"
    C. 경고형: "이 지표, 무시하면 손해!", "모르면 청산당해요?"
 
-❷ context (8~20초) — 친구한테 설명하듯 배경 (50~80자, 한 문장 최대 25자)
+❷ context (8~40초) — 친구한테 설명하듯 배경 (150~180자, 한 문장 최대 25자)
    - 훅에서 자연스럽게 이어지는 연결어로 시작
+   - 무슨 일이 왜 일어났는지 구체적으로 설명
    - 수치 쓸 때 기준 명시: "1억 변동금리 기준 월 이자 5만원 올라요"
+   - 시청자가 "이게 나랑 무슨 상관?" 을 느끼게 연결
 
-❸ insight (20~45초) — 반전이 있는 핵심 인사이트 (100~130자, 한 문장 최대 25자)
-   - [원인] → [과정] → [결과] → [내가 할 행동] 순서
+❸ insight (40~130초) — 반전이 있는 핵심 인사이트 (650~750자, 한 문장 최대 25자)
+   - [원인] → [과정] → [결과] → [내가 할 행동] 순서로 전개
    - 예상 못 한 관점/해결책으로 반전 포함
    - 전문 용어 나오면 바로 쉬운 말로 풀기
+   - 구체적 사례·비유 1개 포함
+   - 핵심 포인트 2가지로 나눠 설명
 
-❹ summary (45~52초) — 핵심 한 줄 (30~40자)
+❹ summary (130~145초) — 핵심 정리 (65~80자)
    - "그러니까 한 마디로 하면요~" 식 연결어로 시작
    - 중립 결론 절대 금지. 엣지 있는 한 줄 평 또는 도발적 질문
+   - insight의 핵심 메시지를 압축해서 기억에 남게
 
-❺ cta (52~55초) — 자연스러운 구독 유도 (30자 이내)
+❺ cta (145~150초) — 자연스러운 구독 유도 (25자 이내)
    - 훅 질문에 답하는 루프 구조로 마무리
 
-${competitorCtx}${item.director_brief ? `━━━━━━━━━━━━━━━━━━━━━━━\n【디렉터 브리프 — 최우선 준수】\n${item.director_brief}\n` : ''}━━━━━━━━━━━━━━━━━━━━━━━
+${competitorCtx}━━━━━━━━━━━━━━━━━━━━━━━
 JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
 ━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -235,10 +266,10 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   "series_name": "${seriesName}",
   "shortform_script": {
     "hook": "최대 12자, ?나 !로 끝남 — 스크롤을 멈추게 하는 한 마디",
-    "context": "①무슨 일 → ②왜 → ③나에게 영향. 수치는 기준 명시 (50~80자, 한 문장 최대 25자)",
-    "insight": "[원인]→[과정]→[결과]→[내가 할 행동] 단계별 인과관계 (100~130자, 한 문장 최대 25자)",
-    "summary": "엣지 있는 한 줄 평 또는 도발적 질문 (30~40자) — 중립 결론 금지",
-    "cta": "구독 유도 문장 (30자 이내)"
+    "context": "①무슨 일 → ②왜 → ③나에게 영향. 수치는 기준 명시 (150~180자, 한 문장 최대 25자)",
+    "insight": "[원인]→[과정]→[결과]→[내가 할 행동] 단계별 인과관계. 사례·비유 포함. (650~750자, 한 문장 최대 25자)",
+    "summary": "엣지 있는 한 줄 평 또는 도발적 질문 (70~90자) — 중립 결론 금지",
+    "cta": "구독 유도 문장 (25자 이내)"
   },
   "youtube_title": "유튜브 제목: 훅을 살린 제목 (25자 이내, 클릭 유발)",
   "youtube_description": "영상 설명란 200자: 핵심 내용 요약 + 구독 유도. #해시태그 포함.",
@@ -251,12 +282,13 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
   }
 }`;
 
-  const response = await axios.post(
+  const callGpt = () => axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: contentPrompt }],
       temperature: 0.8,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
     },
     {
@@ -268,7 +300,55 @@ JSON 형식으로만 응답하세요. 다른 텍스트 포함 금지.
     }
   );
 
-  return JSON.parse(response.data.choices[0].message.content);
+  let response = await callGpt();
+  let parsed = JSON.parse(response.data.choices[0].message.content);
+
+  // 총 글자수 체크: 1050자 미만이면 insight 집중 확장
+  const sc0 = parsed.shortform_script ?? {};
+  const totalLen = (sc0.hook??'').length + (sc0.context??'').length + (sc0.insight??'').length + (sc0.summary??'').length + (sc0.cta??'').length;
+  if (totalLen < 1050) {
+    const insightLen = (sc0.insight ?? '').length;
+    const needed = Math.max(650, 1050 - totalLen + insightLen); // 총 1050자 달성을 위해 insight가 채워야 할 목표
+    logger.warn(`[content_creator] Total too short (${totalLen}자 < 1050). Expanding insight to ${needed}자...`);
+    try {
+      const expandRes = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o',
+          messages: [{
+            role: 'user',
+            content:
+              `아래는 유튜브 숏폼 대본의 insight 섹션입니다. 이것을 정확히 ${needed}자 이상으로 확장하세요.\n` +
+              `키워드: ${item.keyword}\n\n` +
+              `현재 insight:\n${sc0.insight ?? ''}\n\n` +
+              `확장 규칙:\n` +
+              `- [원인] → [과정/메커니즘] → [결과/영향] → [시청자가 할 행동] 구조 유지\n` +
+              `- 구체적 사례나 비유 1개 이상 추가\n` +
+              `- 핵심 포인트 2~3가지로 단계별 설명 추가\n` +
+              `- 한 문장 최대 25자, 구어체\n` +
+              `- 최종 글자수 반드시 ${needed}자 이상\n` +
+              `- JSON: {"insight":"확장된 내용"}`,
+          }],
+          response_format: { type: 'json_object' },
+          max_tokens: 1500,
+          temperature: 0.75,
+        },
+        {
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 40000,
+        }
+      );
+      const expanded = JSON.parse(expandRes.data.choices[0].message.content);
+      if ((expanded.insight ?? '').length > insightLen) {
+        parsed.shortform_script = { ...sc0, insight: expanded.insight };
+        logger.info(`[content_creator] Insight expanded: ${insightLen}자 → ${expanded.insight.length}자`);
+      }
+    } catch (err) {
+      logger.warn(`[content_creator] Insight expansion failed: ${err.message}`);
+    }
+  }
+
+  return parsed;
 }
 
 // ── 롱폼 대본 생성 (7~10분) ──────────────────────────────────────────────────
@@ -450,6 +530,8 @@ export async function createContents(trendData) {
 
       // TTS 정규화: 숫자·약어를 한글 발음으로 변환
       const normalizedScript = normalizeScript(generated.shortform_script);
+      const sc = generated.shortform_script ?? {};
+      logger.info(`[content_creator] Script lengths — hook:${(sc.hook??'').length}자 context:${(sc.context??'').length}자 insight:${(sc.insight??'').length}자 summary:${(sc.summary??'').length}자`);
 
       // 롱폼 대본 생성 (3~5분)
       let longVideo = null;

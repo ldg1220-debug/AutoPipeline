@@ -5,7 +5,57 @@
 
 ---
 
-## 📅 2026-05-20 (오늘)
+## 📅 2026-09-03 (오늘)
+
+### 현재 브랜치
+`claude/eager-dijkstra-uU2Q3`
+
+### 배경 (2026-08-27~ 여행 채널 전환)
+경제/재테크 채널("매일읽어주는남자")에서 여행 코스 채널("매일 떠나는 남자")로 전환 중.
+트레쥴(별도 서비스) 코스 API(`/api/content/course-brief`)와 연동해 실제 평점·동선
+데이터 기반 여행 콘텐츠를 생산. 순위 1~4(설정 교체·검색량 게이트·트레쥴 연동·
+프롬프트 재작성) 완료, 실전 발행 1회 성공(maeilg.com/236, /237).
+
+### 오늘 완료한 작업 — "글 품질 개선 + 푸터 교체 + 트레쥴 CTA" 지시서
+- **A-1** TL;DR을 섹션 첫 문장 복붙 → trip_data 기반 실제 수치(총 거리·스팟수·
+  평점·리뷰수·이동수단)로 교체 (`monetizer.js` `buildTldrBox`)
+- **A-2** 평점 언급 시 리뷰수 동반 필수 규칙 추가 (`blog_pass3_body.md`)
+- **A-3** 스팟이 여러 섹션에 중복 등장하던 문제 — Pass 2가 섹션별
+  `spot_indices`로 스팟을 배타적으로 배정, Pass 3에는 그 섹션 스팟만 전달
+  (`blog_content_enhancer.js` `sliceTripDataForSection`)
+- **A-4** 예산·준비물·교통편 같은 데이터 없는 일반론 섹션 금지 (`blog_pass2_outline.md`)
+- **A-5** 안내문 어투("~추천드립니다" 등) 금지, 사실 서술체 강제 (`blog_pass3_body.md`)
+- **A-6** 제목·본문에 trip_data의 실제 toNextMode와 모순되는 이동수단 표현 금지
+- **B** 쿠팡 파트너스 허위 고지 제거 — `getManualCoupangLink`가 매칭 실패 시
+  **완전 무관한 상품을 랜덤 폴백**하던 버그 발견, travel 카테고리는 쿠팡 매칭
+  자체를 스킵하도록 수정. 정지된 유튜브 채널 홍보 블록 → 트레쥴 앱 CTA로 교체
+- **C-1** 본문 중간 트레쥴 CTA 추가 (코스 나열 직후, appUrl 있을 때만)
+- **D** 관련 포스트가 전부 경제 글이던 문제 — `internalLinks.js`에 category
+  필터 추가, 같은 카테고리 3편 미만이면 블록 자체 숨김
+- **미착수**: A-7(지도 이미지) — Naver 정적지도 API 연동 필요, 별도 세션 보류
+- CLAUDE.md에 "규칙 4: 작업 완료 보고" 포맷 추가 (Cowork 전달용)
+
+### 기존 발행분 수동 조치 필요 (동근님)
+- maeilg.com/236, /237 — 쿠팡 고지 문구·유튜브 CTA 블록 수동 제거 필요 (코드 수정은
+  향후 발행분부터만 적용됨)
+- Tistory 카테고리에 국내여행/해외여행 생성 필요 (`npm run blog:setup-categories`),
+  `.env`의 `TISTORY_CATEGORY_MAP`을 비워 자동 탐색 사용 권장
+
+### 다음 세션에서 할 작업
+1. 위 변경사항 실전 발행으로 검증 (TL;DR 수치 정상 표시, 스팟 중복 없는지,
+   쿠팡 고지 안 뜨는지, 트레쥴 CTA 정상 삽입되는지)
+2. 순위 5(트래블페이아웃 링크), 6(네이버 원고 별도 저장), 7(주 3편 상한) 진행
+3. A-7(지도 이미지) — 여력 있으면 Naver Static Map API 연동
+
+### 알려진 이슈 / 주의사항
+- 이 세션(원격 샌드박스)에는 `node_modules` 미설치 — 실행 검증은 항상 동근님
+  로컬 실행 로그로만 가능. 문법은 매 커밋 `node --check`로 확인.
+- 로컬 git 작업 시 vim 머지 메시지 편집기가 자주 걸림 → `git commit --no-edit`
+  또는 `-m` 플래그 사용 권장 (에디터 자체를 안 띄움)
+
+---
+
+## 📅 2026-05-20
 
 ### 현재 브랜치
 `claude/automated-revenue-pipeline-cO0M2`
@@ -58,6 +108,62 @@ Blog 파이프라인 (runBlogPipeline):
 - `NAVER_CLOVA_CLIENT_ID` 미설정 시 TTS는 OpenAI TTS로 폴백
 - Shotstack `stage` 환경은 워터마크 포함 — 실제 배포 전 `production`으로 전환 필요 (M8)
 - 롱폼 Shotstack 렌더링은 섹션 수×TTS 업로드가 많아 시간 소요 큼 (폴링 120회 유지)
+- **(2026-06-19)** AdSense `maeilg.com`/`ggoondaeng.tistory.com` 중복 경고 — 도메인 중복(✅ 완료):
+  AdSense 콘솔에서 `ggoondaeng.tistory.com` 제거, `maeilg.com`만 등록 완료 (사용자 확인).
+  잔여 "가치가 별로 없는 콘텐츠" 경고(`maeilg.com`)는 콘텐츠 자체 문제로, 발행 속도
+  `BLOG_POSTS_PER_DAY` 8 하향 + `prompts/blog_pass2_outline.md` 헤딩 획일화 방지 규칙으로
+  대응 — 효과는 신규 발행 누적 후 확인 필요 (기존 발행물 일괄 개선 수단은 없음: 기존
+  `identifyUnderperformers`/`rewriteUnderperformers`는 클릭률 기준이라 콘텐츠 깊이와는
+  무관함을 확인함).
+- **(2026-06-19)** 사용자 실제 실행 로그에서 발견된 3건 수정 완료(D-020~D-022):
+  YouTube 자동완성 100% 실패 버그, OpenAI 429 캐스케이드로 인한 블로그 QA 100% 탈락,
+  YouTube 계정 삭제로 무효화된 OAuth 토큰이 매번 401/400 에러 발생시키던 것 스킵 처리.
+  남은 미해결: `competitor_analyzer`의 Naver 블로그 검색 401 — Naver Search API
+  client id/secret 자체가 만료/누락된 것으로 보임(코드 버그 아님), 사용자가 `.env`의
+  Naver API 키 재발급/확인 필요.
+- **(2026-06-19)** 사용자가 제공한 티스토리 제품 리스티클(쿠팡 파트너스) 스타일 참고자료를
+  `prompts/blog_pass_product_listicle.md`로 문서화(D-019). 기존 정보형 글과 구조가 달라
+  파이프라인에는 아직 연결 안 함 — 적용 범위(카테고리/콘텐츠 타입) 결정 필요.
+- **(2026-06-19)** Gemini 폴백 404/503 수정(D-030): 실행 로그에서 Gemini 폴백 전체가
+  실패하는 것을 확인 — `gemini-2.0-flash`/`gemini-1.5-flash`는 v1beta에서 404(모델 없음),
+  `gemini-2.5-flash`는 503(일시 과부하)이었음. 사다리를
+  `['gemini-2.5-flash', 'gemini-2.5-flash-lite']`로 축소, `retryOn503()` 추가해 일시
+  과부하는 같은 모델로 재시도. blog_content_enhancer/keyword_miner/topic_grouper/
+  qa_editor/blog_asset_builder 5개 파일 전부 수정. (OpenAI 429는 대부분 정상적으로
+  백오프 재시도 후 성공 — DALL-E 이미지 생성만 진짜 결제 한도 문제로 사용자 확인 필요)
+- **(2026-06-19)** 정부 지원 제도 운영 상태 단정 방지(D-029): "청년도약계좌"를 현재
+  신청 가능한 것처럼 서술한 사용자 지적 — Pass4(GPT)/Pass5(Gemini) 검수 기준에 정부
+  제도/금융 상품 운영 상태 단정 금지 + "최신 공고 확인" 문구 권장 규칙 추가.
+  (실시간 정책 조회는 범위 밖, 추후 검토)
+- **(2026-06-19)** 키워드 의미 검증 Gemini 폴백 + 커뮤니티명 블랙리스트(D-028): "코인투자
+  방법 디시"처럼 OpenAI 429로 LLM 의미 검증이 전체 통과되면서 디시인사이드 등 커뮤니티명이
+  섞인 자동완성이 그대로 통과된 버그 수정. `keyword_miner.js`에 `filterViaGemini` 폴백 추가,
+  `BLACKLIST_PATTERNS`에 디시/갤러리/커뮤니티/펨코/루리웹 등 정규식 추가.
+- **(2026-06-19)** OpenAI 폴백 우선순위를 Gemini로 변경(D-027): 사용자가 보유한 API 키가
+  Anthropic이 아닌 Gemini라는 점을 확인 — `blog_content_enhancer.js`에 `callGeminiFallback`
+  추가, OpenAI 실패 시 Gemini → Anthropic(키 있으면) 순서로 폴백하도록 변경.
+  `topic_grouper.js` 에스컬레이션 사다리에도 `gemini-2.5-flash` 추가
+  (`gpt-4o-mini → gpt-4o → gemini-2.5-flash → claude-sonnet-4-6`).
+- **(2026-06-19)** ⚠️ 저작권 침해 신고 대응(D-032): Google이 `maeilg.com/89`에 탑툰 웹툰
+  "신도시 마사지" 무단 게시로 저작권 침해 신고/검색결과 삭제 통지를 보냄. 원인은
+  `keyword_miner.js` 블랙리스트(이미 "마사지|탑툰" 패턴 포함)가 키워드 *신규 수집* 시점에만
+  적용되고, `app.js`가 DB pending 큐에서 키워드를 꺼내 쓰는 경로는 재검증을 하지 않아 블랙리스트
+  추가 이전에 DB에 적재된 오염 키워드가 그대로 선택된 것. `app.js` DB 큐 조회에
+  `isBlacklisted()` 재검증 추가(걸리면 `rejected` 처리), `scripts/cleanup-blacklist-keywords.js`도
+  자체 구버전 블랙리스트 대신 `keyword_miner.js`의 최신 규칙을 사용하도록 통합.
+  **사용자 후속 조치 필요**: `maeilg.com/89` 게시물 직접 삭제(반론 통지 제출 금지 — 실제
+  침해), 로컬에서 `node scripts/cleanup-blacklist-keywords.js` 1회 실행해 DB 잔여 오염
+  키워드 정리.
+- **(2026-06-19)** FAQ 답변 길이 미달 재시도 추가(D-031): 실제 실행 로그에서 "아파트청약조건"
+  글이 QA 단계 "FAQ 답변 너무 짧음: 1개" 사유로 탈락한 것을 확인 — `pass3Faq()`가 길이를
+  검증하지 않고 1회성 요청만 하던 문제. 80자 미달 시 강화된 프롬프트로 1회 재시도하도록
+  수정. (직전 로그 기준 12/13 발행 성공, Gemini 404/503 수정(D-030) 효과 확인됨. 남은
+  DALL-E 결제 한도/OpenAI 요청 속도 등급 이슈는 사용자가 OpenAI 대시보드에서 조치 필요.)
+- **(2026-06-19)** 정보형 블로그 Tistory SEO 재검토(D-023): `monetizer.js`의 hero 배너가
+  본문에 `<h1>{title}</h1>`을 직접 삽입해 Tistory 제목란이 만드는 페이지 실제 H1과 중복되던
+  문제 수정(`<p class="hero-title">`로 변경). 제목/H2 헤딩 키워드 배치 규칙, 첫 섹션 도입부
+  키워드 노출 규칙을 `blog_pass2_outline.md`/`blog_pass3_body.md`에 추가. 슬러그를 실제
+  Tistory 글 URL에 반영하는 것은 라이브 테스트로 커스텀 URL 필드 존재 여부 확인 전까지 보류.
 
 ---
 

@@ -5,6 +5,7 @@ import { parseStringPromise } from 'xml2js';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
+import { throttle } from '../utils/rateLimiter.js';
 import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -125,6 +126,7 @@ async function scoreKeywordsWithLLM(keywords) {
 키워드(${keywords.length}개):
 ${JSON.stringify(keywords.map((k) => ({ keyword: k.keyword, source_url: k.source_url })), null, 2)}`;
 
+  await throttle(1500);
   const response = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
@@ -241,12 +243,10 @@ export async function fetchTrends() {
     const freshSorted = sorted.filter((i) => !recentlyUsed.has(i.keyword));
     const sortedFinal = freshSorted.length > 0 ? freshSorted : sorted; // 모두 사용된 경우 제한 해제
 
-    // DAILY_VIDEOS 개수만큼 경제 아이템 선택 (기본값 1)
-    // health/beauty는 별도 보너스 슬롯으로 하나 추가
-    const dailyLimit   = config.runtime.dailyVideos ?? 1;
-    const economyItems = sortedFinal.filter((i) => i.category !== 'health' && i.category !== 'beauty').slice(0, dailyLimit);
-    const bestHealthOrBeauty = sortedFinal.find((i) => i.category === 'health' || i.category === 'beauty');
-    const selected     = bestHealthOrBeauty ? [...economyItems, bestHealthOrBeauty] : economyItems;
+    // DAILY_VIDEOS 개수만큼 선택 — YouTube 채널은 경제/금융/부동산/사회만 허용
+    const VIDEO_CATEGORIES = new Set(['economy', 'finance', 'realestate', 'social', 'entertainment']);
+    const dailyLimit = config.runtime.dailyVideos ?? 1;
+    const selected = sortedFinal.filter((i) => VIDEO_CATEGORIES.has(i.category)).slice(0, dailyLimit);
 
     // ── DB promised 키워드 최우선 처리 ────────────────────────────────────
     // 지난 영상 스크립트에서 "다음 에피소드" 예고한 키워드를 맨 앞에 삽입
@@ -255,6 +255,7 @@ export async function fetchTrends() {
       const promisedRows = db.prepare(
         `SELECT keyword, category, score FROM keywords
          WHERE status = 'promised'
+           AND (category IS NULL OR category IN ('economy','finance','realestate','social','entertainment'))
          ORDER BY score DESC LIMIT ?`
       ).all(dailyLimit);
 

@@ -5,8 +5,11 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
-import { throttle } from '../utils/rateLimiter.js';
+import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
+
+// [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
+// 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,47 +67,135 @@ function fillTemplate(template, vars) {
   );
 }
 
+// 보조 모델 — OpenAI 실패(레이트리밋/결제한도) 시 Gemini → Anthropic 순서로 폴백
+// gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+const FALLBACK_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+
+async function callGeminiFallback(prompt, jsonMode) {
+  if (!config.gemini?.apiKey) return null;
+  for (const model of FALLBACK_GEMINI_MODELS) {
+    try {
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            ...(jsonMode ? { generationConfig: { response_mime_type: 'application/json' } } : {}),
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+        )
+      );
+      const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (!jsonMode) return text;
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('Gemini 응답에서 JSON을 찾지 못함');
+      return JSON.parse(match[0]);
+    } catch (err) {
+      logger.warn(`[blog_content_enhancer] Gemini fallback(${model}) 실패: ${err.message}`);
+    }
+  }
+  return null;
+}
+
+async function callClaudeFallback(prompt, jsonMode) {
+  if (!config.anthropic.apiKey) return null;
+  try {
+    const res = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: jsonMode ? `${prompt}\n\n반드시 순수 JSON만 응답하세요. 다른 설명 텍스트 없이.` : prompt,
+        }],
+      },
+      {
+        headers: {
+          'x-api-key': config.anthropic.apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      }
+    );
+    const text = res.data.content?.[0]?.text ?? '';
+    if (!jsonMode) return text;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Claude 응답에서 JSON을 찾지 못함');
+    return JSON.parse(match[0]);
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] Claude fallback도 실패: ${err.message}`);
+    return null;
+  }
+}
+
+// OpenAI 실패 시 Gemini → Anthropic 순서로 시도
+async function callFallbackChain(prompt, jsonMode) {
+  const gemini = await callGeminiFallback(prompt, jsonMode);
+  if (gemini !== null) return gemini;
+  return callClaudeFallback(prompt, jsonMode);
+}
+
 // GPT-4o: 고품질 본문
 async function callGPT4o(prompt, jsonMode = true) {
-  const response = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 60000,
-    }
-  );
-  const content = response.data.choices[0].message.content;
-  return jsonMode ? JSON.parse(content) : content;
+  try {
+    const response = await retryOn429(() =>
+      axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${config.openai.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 60000,
+        }
+      )
+    );
+    const content = response.data.choices[0].message.content;
+    return jsonMode ? JSON.parse(content) : content;
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] gpt-4o 실패, Gemini/Claude로 폴백 시도: ${err.message}`);
+    const fallback = await callFallbackChain(prompt, jsonMode);
+    if (fallback !== null) return fallback;
+    throw err;
+  }
 }
 
 // GPT-4o-mini: 아웃라인 등 구조 생성 (비용 절감)
 async function callGPT4oMini(prompt) {
-  const response = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.5,
-      response_format: { type: 'json_object' },
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 90000,
-    }
-  );
-  return JSON.parse(response.data.choices[0].message.content);
+  try {
+    const response = await retryOn429(() =>
+      axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.5,
+          response_format: { type: 'json_object' },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${config.openai.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 90000,
+        }
+      )
+    );
+    return JSON.parse(response.data.choices[0].message.content);
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] gpt-4o-mini 실패, Gemini/Claude로 폴백 시도: ${err.message}`);
+    const fallback = await callFallbackChain(prompt, true);
+    if (fallback !== null) return fallback;
+    throw err;
+  }
 }
 
 // ── Pass 1: 검색 의도 분석 ──────────────────────────────────────────────────
@@ -117,9 +208,22 @@ async function pass1Intent(keyword, category, benchmarkCtx = '') {
 }
 
 // ── Pass 2: H2/H3 아웃라인 + FAQ 생성 ─────────────────────────────────────
-async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') {
+// tripData가 있으면 스팟을 섹션에 배타적으로 배정(spot_indices)하도록 요청한다 (A-3:
+// 같은 스팟이 여러 섹션에 중복 등장하는 문제 방지). 이동수단(toNextMode) 요약도 함께
+// 넘겨 제목·구조가 데이터와 모순되지 않게 한다 (A-6: "대중교통"인데 실제론 car인 경우 등).
+function summarizeTransportModes(tripData) {
+  const modes = [...new Set((tripData?.spots ?? []).map((s) => s.toNextMode).filter(Boolean))];
+  if (!modes.length) return '이동수단 데이터 없음';
+  const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+  return modes.map((m) => modeKr[m] ?? m).join(', ');
+}
+
+async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
+  const spotsForPrompt = (tripData?.spots ?? []).map((s, idx) => ({
+    index: idx, name: s.name, category: s.category, order: s.order,
+  }));
   const prompt   = fillTemplate(template, {
     keyword,
     category,
@@ -129,13 +233,34 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '') 
     competitor_structure: JSON.stringify(intent.competitor_structure),
     unique_angle:         intent.unique_angle,
     youtube_hook:         hook,
+    trip_spots:           spotsForPrompt.length ? JSON.stringify(spotsForPrompt) : '[]',
+    transport_summary:    summarizeTransportModes(tripData),
   }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
 }
 
+/**
+ * section.spot_indices(Pass 2가 배정한 스팟 인덱스 배열)가 있으면 그 스팟만 담은
+ * trip_data 서브셋을 반환한다. 배정이 없으면(구버전 아웃라인·데이터 없음) 원본을 그대로 반환.
+ */
+function sliceTripDataForSection(tripData, section) {
+  if (!tripData?.spots?.length) return tripData;
+  const indices = section.spot_indices;
+  if (!Array.isArray(indices) || indices.length === 0) return tripData;
+
+  const spots = indices
+    .map((i) => tripData.spots[i])
+    .filter(Boolean);
+  if (!spots.length) return tripData;
+
+  return { ...tripData, spots };
+}
+
 // ── Pass 3: 섹션별 본문 작성 ───────────────────────────────────────────────
-async function pass3Body(keyword, section, targetReader, outlineContext) {
+// tripData: 트레쥴 코스 API 응답 { region, days, totalDistanceKm, spots, appUrl } (C-1 스펙).
+// tradule_source.js(Part 1.7)가 채운다 — 없으면 null, 프롬프트에는 빈 배열로 대체 표기.
+async function pass3Body(keyword, section, targetReader, outlineContext, isFirstSection = false, tripData = null) {
   const template = await loadPrompt('blog_pass3_body.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const prompt = fillTemplate(template, {
@@ -145,6 +270,10 @@ async function pass3Body(keyword, section, targetReader, outlineContext) {
     target_reader: targetReader,
     context:       outlineContext,
     today,
+    trip_data:     JSON.stringify(tripData ?? []),
+    first_section_note: isFirstSection
+      ? `【검색엔진 노출 — 이 섹션은 글의 첫 번째 섹션입니다】\n첫 1~2문장 안에 키워드("${keyword}")를 그대로, 자연스럽게 포함하세요. Tistory/검색결과 미리보기는 본문 앞부분을 그대로 발췌해 보여주므로, 키워드 없이 도입부를 시작하면 검색 노출에서 손해를 봅니다.`
+      : '',
   });
   await throttle(2000);
   // 본문은 자유 텍스트 반환 (JSON 아님)
@@ -152,12 +281,18 @@ async function pass3Body(keyword, section, targetReader, outlineContext) {
 }
 
 async function pass3Faq(keyword, faqItem, targetReader) {
-  const prompt = `다음 FAQ 항목의 답변을 80~120자로 작성하세요. 키워드: ${keyword}, 독자: ${targetReader}
-질문: ${faqItem.q}
-힌트: ${faqItem.a_hint}
-답변 텍스트만 반환:`;
+  const prompt = `다음 FAQ 항목의 답변을 150~250자로 작성하세요. 독자가 이 질문에서 실제로 알고 싶어하는 핵심을 구체적 수치나 단계로 설명하세요.\n키워드: ${keyword}, 독자: ${targetReader}\n질문: ${faqItem.q}\n힌트: ${faqItem.a_hint}\n답변 텍스트만 반환:`;
   await throttle(1000);
-  return callGPT4o(prompt, false);
+  const answer = await callGPT4o(prompt, false);
+
+  if ((answer ?? '').length < 150) {
+    const retryPrompt = `다음 FAQ 항목의 답변을 반드시 150자 이상(최대 250자)으로 작성하세요. 이전 답변(${(answer ?? '').length}자)이 너무 짧아 AdSense 콘텐츠 가치 기준을 충족하지 못합니다. 구체적 예시·수치·단계를 추가해 충분한 설명을 제공하세요.\n키워드: ${keyword}, 독자: ${targetReader}\n질문: ${faqItem.q}\n힌트: ${faqItem.a_hint}\n답변 텍스트만 반환:`;
+    await throttle(1000);
+    const retryAnswer = await callGPT4o(retryPrompt, false);
+    if ((retryAnswer ?? '').length >= (answer ?? '').length) return retryAnswer;
+  }
+
+  return answer;
 }
 
 // ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
@@ -165,8 +300,23 @@ async function pass4FactCheck(keyword, sections) {
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
 
-  const prompt = `아래 블로그 본문에서 허구·검증 불가 인용과 시제 오류를 수정하세요.\n\n` +
-    `오늘 날짜: ${today}\n\n` +
+  const prompt =
+    `아래 블로그 본문에서 허구·검증 불가 인용, 시제 오류, 경제 수치 오류를 수정하세요.\n\n` +
+    `오늘 날짜: ${today} (AI 학습 데이터는 2023~2024년 기준 — 지금은 2026년임)\n\n` +
+    `【⚠️ 경제 수치 기준값 — 반드시 이 범위로 교정】\n` +
+    `- 달러/원(USD/KRW) 환율: 2024년 하반기~2025년 1,300원 중반, 2026년 현재 1,400~1,500원대\n` +
+    `  → 본문에 1,100~1,250원 등 낮은 환율이 등장하면 "최근 1,400원대 이상"으로 교체\n` +
+    `  → 특정 수치 대신 "최근 1,400원대 이상" 등 범위 표현 사용\n` +
+    `- 비트코인·코인 가격: 실시간 변동 — 특정 가격 절대 언급 금지, "시장 가격 기준" 표현 사용\n` +
+    `- 한국은행 기준금리: "최근 조정 기준" 등 일반 표현 사용 (특정 수치 지양)\n` +
+    `- 2023년 암호화폐 과세 시행: 실제로 2025년부터 시행 (2023년 시행이라고 쓰여있으면 교정)\n\n` +
+    `【⚠️ 정부 지원 제도/금융 상품 — 운영 상태 단정 금지】\n` +
+    `- AI 학습 데이터 시점 이후 특정 정부 지원 제도(예: 청년도약계좌 등 청년/서민 금융 상품,\n` +
+    `  특정 보조금·바우처)는 판매 종료·개편·후속 상품 출시로 상태가 바뀌었을 수 있음.\n` +
+    `- "지금 신청하세요", "현재 운영 중입니다"처럼 신청 가능 여부를 단정하는 표현은\n` +
+    `  "(운영 여부는 변경될 수 있으니 정부24·해당 기관 공식 홈페이지에서 최신 공고 확인 필요)"\n` +
+    `  같은 확인 권유 문구로 완화할 것.\n` +
+    `- 특정 제도명을 비중 있게 다루는 섹션에는 반드시 "최신 공고 확인" 문구를 1회 이상 포함.\n\n` +
     `【검토 대상 1 — 허구 인용】\n` +
     `1. 특정 책 제목 (따옴표로 감싼 것)\n` +
     `2. 저자 이름 직접 언급\n` +
@@ -174,13 +324,16 @@ async function pass4FactCheck(keyword, sections) {
     `4. 출처 불명의 구체적 통계 수치\n\n` +
     `【검토 대상 2 — 시제 오류】\n` +
     `5. 2023년·2024년 데이터를 "최신", "현재", "올해" 등으로 표현한 경우\n` +
-    `   → "최근 몇 년간", "과거 데이터 기준", "2023~2024년 당시" 등으로 수정\n\n` +
+    `   → "최근 몇 년간", "과거 데이터 기준", "2023~2024년 당시" 등으로 수정\n` +
+    `6. 환율 수치가 1,000~1,250원 범위로 등장하는 경우 → 위 기준값으로 교정\n\n` +
     `【수정 규칙】\n` +
     `- 허구 인용 → 일반적 표현으로 교체\n` +
     `  예) "『부의 추월차선』에서는" → "여러 재테크 전문 서적에서는"\n` +
     `  예) "2023년 조사에 따르면 73%" → "최근 조사에 따르면"\n` +
     `- 시제 오류 → 날짜 맥락을 명확히\n` +
     `  예) "현재 기준금리는 3.5%" → "2024년 기준금리는 3.5%였으며"\n` +
+    `- 경제 수치 오류 → 위 기준값 또는 일반 표현으로 교체\n` +
+    `  예) "달러 환율 1,200원" → "달러 환율 1,400원대 이상 (최근 기준)"\n` +
     `- 수정 불필요한 섹션은 원문 그대로 반환\n` +
     `- 내용의 의미와 흐름은 유지\n\n` +
     `키워드: ${keyword}\n\n` +
@@ -190,7 +343,11 @@ async function pass4FactCheck(keyword, sections) {
 
   try {
     await throttle(2000);
-    const result = await callGPT4oMini(prompt);
+    let result = await callGeminiFallback(prompt, true);
+    if (!result || !Array.isArray(result?.sections) || result.sections.length !== sections.length) {
+      logger.warn('[blog_content_enhancer] Pass 4 Gemini failed, trying OpenAI fallback');
+      result = await callGPT4oMini(prompt);
+    }
     if (Array.isArray(result?.sections) && result.sections.length === sections.length) {
       return result.sections;
     }
@@ -198,6 +355,92 @@ async function pass4FactCheck(keyword, sections) {
     logger.warn(`[blog_content_enhancer] Pass 4 fact-check failed (${err.message}), using original`);
   }
   return sections;
+}
+
+// ── Pass 5: Claude 독립 검수 ──────────────────────────────────────────────
+// GPT가 작성한 글을 다른 모델(Claude)이 교차 검증한다.
+// 같은 모델의 자기 검증 한계를 극복하기 위한 별도 에이전트.
+async function pass5GeminiReview(keyword, sections, today) {
+  if (!config.gemini?.apiKey) {
+    logger.warn('[blog_content_enhancer] GEMINI_API_KEY 없음 — Pass 5 건너뜀');
+    return { sections, issues: [], verdict: 'skipped' };
+  }
+
+  const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
+
+  const prompt =
+    `당신은 한국 경제·생활 블로그의 팩트체크 전문 편집자입니다.\n` +
+    `아래 블로그 본문은 GPT-4o가 자동 작성했습니다. 당신의 역할은 독립적으로 검수하는 것입니다.\n\n` +
+    `오늘 날짜: ${today}\n` +
+    `키워드: ${keyword}\n\n` +
+    `【검수 기준】\n` +
+    `1. 경제 수치 오류: 달러/원 환율 1,400원 이상이 정상 (1,100~1,250원 등 낮은 수치 = 오류)\n` +
+    `2. 연도·시제 오류: 2023~2024년 수치를 "현재" "올해"로 표현\n` +
+    `3. 법·제도 오류: 암호화폐 과세는 2025년 시행 (2023년 시행이라 쓰면 오류)\n` +
+    `4. 검증 불가 수치: "○○%가 ~~한다"처럼 출처 없는 구체적 통계\n` +
+    `5. 허구 제품명/브랜드명: 실존 여부 불명확한 구체적 제품\n` +
+    `6. 논리 모순: 앞뒤 내용이 충돌하는 주장\n` +
+    `7. 정부 지원 제도 운영 상태 단정: 특정 정부 지원 제도·금융 상품(예: 청년도약계좌 등)이\n` +
+    `   "현재 신청 가능"이라고 단정하는 경우 — 이런 제도는 판매 종료·개편·후속 상품 출시로\n` +
+    `   상태가 자주 바뀌므로, "최신 공고는 정부24·해당 기관 홈페이지에서 확인 필요" 문구를\n` +
+    `   추가하거나 단정적 표현을 완화할 것\n\n` +
+    `【처리 규칙】\n` +
+    `- 오류 발견 시: 해당 문장을 교정하거나 일반 표현으로 대체\n` +
+    `- 확인 불가 수치: 구체적 숫자 제거 후 "최근 추세" "전문가 권고" 등 일반 표현으로\n` +
+    `- 문제없는 섹션: 원문 그대로 반환\n` +
+    `- 내용·흐름·분량은 유지 (단순 수치 교정·표현 수정만)\n\n` +
+    `본문:\n${fullText}\n\n` +
+    `JSON으로만 응답:\n` +
+    `{\n` +
+    `  "verdict": "pass" | "corrected" | "major_issues",\n` +
+    `  "issues_found": ["발견된 문제 1줄 요약", ...],\n` +
+    `  "sections": [{"heading": "섹션 제목", "body": "교정된 본문 또는 원문"}, ...]\n` +
+    `}`;
+
+  // gemini-2.0-flash/1.5-flash는 v1beta에서 404(모델 없음) 확인됨 — 사다리에서 제외
+  const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      await throttle(2000);
+      const res = await retryOn503(() =>
+        axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { response_mime_type: 'application/json' },
+          },
+          { timeout: 90000 }
+        )
+      );
+
+      const text  = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('JSON 파싱 실패');
+      const result = JSON.parse(match[0]);
+
+      if (!Array.isArray(result.sections) || result.sections.length !== sections.length) {
+        throw new Error(`섹션 수 불일치: ${result.sections?.length} vs ${sections.length}`);
+      }
+
+      if (result.issues_found?.length > 0) {
+        logger.warn(`[blog_content_enhancer] Pass 5 이슈 발견 (${result.verdict}, ${model}): ${result.issues_found.join(' | ')}`);
+      } else {
+        logger.info(`[blog_content_enhancer] Pass 5 검수 완료 (${result.verdict}, ${model}): ${keyword}`);
+      }
+
+      return {
+        sections: result.sections,
+        issues:   result.issues_found ?? [],
+        verdict:  result.verdict,
+      };
+    } catch (err) {
+      logger.warn(`[blog_content_enhancer] Pass 5 ${model} 실패 (${err.message}), 다음 모델 시도`);
+    }
+  }
+
+  logger.warn('[blog_content_enhancer] Pass 5 모든 Gemini 모델 실패 — Pass 4 결과 사용');
+  return { sections, issues: [], verdict: 'skipped' };
 }
 
 // JSON-LD Article 스키마 생성
@@ -298,6 +541,10 @@ async function enhanceBlogDraft(content) {
 
   const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx + qaCtx;
 
+  // 트레쥴 코스 데이터 — tradule_source.js(Part 1.7)가 keywordData.contents[].trip_data에
+  // { region, days, totalDistanceKm, spots, appUrl } 형태로 주입한다. 없으면 null.
+  const tripData = content.trip_data ?? null;
+
   logger.info(`[blog_content_enhancer] Pass 1 (intent): ${keyword}`);
   const intent = await pass1Intent(keyword, category, combinedCtx);
 
@@ -307,7 +554,8 @@ async function enhanceBlogDraft(content) {
     category,
     intent,
     shortform_script?.hook ?? '',
-    combinedCtx
+    combinedCtx,
+    tripData
   );
 
   // H2/H3 섹션만 추출 (FAQ 제외)
@@ -321,8 +569,14 @@ async function enhanceBlogDraft(content) {
     (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
 
   const completedSections = [];
-  for (const section of bodySections) {
-    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext);
+  for (let i = 0; i < bodySections.length; i++) {
+    const section = bodySections[i];
+    // A-3: 같은 스팟이 여러 섹션에 중복 등장하는 문제 — Pass 2가 section.spot_indices로
+    // 스팟을 섹션에 배타적으로 배정해두면, 본문 생성 시 그 섹션에 배정된 스팟만 전달한다
+    // (배정이 없으면 전체 trip_data를 그대로 넘겨 하위 호환 유지 — spot_indices 미지원
+    // 아웃라인이거나 트레쥴 데이터 자체가 없는 경우).
+    const sectionTripData = sliceTripDataForSection(tripData, section);
+    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, sectionTripData);
     completedSections.push({ level: section.level, heading: section.heading, body });
   }
 
@@ -333,11 +587,17 @@ async function enhanceBlogDraft(content) {
     faqSections.push({ q: faqItem.q, a: answer });
   }
 
-  // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등)
+  // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등) — GPT 자기 검증
   logger.info(`[blog_content_enhancer] Pass 4 (fact-check): ${keyword}`);
   const checkedSections = await pass4FactCheck(keyword, completedSections);
 
-  const wordCount = checkedSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  // Pass 5: Claude 교차 검수 — 다른 모델로 독립 팩트체크
+  const today5 = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  logger.info(`[blog_content_enhancer] Pass 5 (Claude review): ${keyword}`);
+  const reviewResult = await pass5GeminiReview(keyword, checkedSections, today5);
+  const finalSections = reviewResult.sections;
+
+  const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);
 
   return {
@@ -348,7 +608,9 @@ async function enhanceBlogDraft(content) {
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
       seo_keywords:     blog_draft?.seo_keywords ?? [keyword],
-      sections:         checkedSections,
+      sections:         finalSections,
+      review_verdict:   reviewResult.verdict,
+      review_issues:    reviewResult.issues,
       faq:              faqSections,
       affiliate_hooks:  buildAffiliateHooks(completedSections, intent.affiliate_category),
       json_ld:          buildJsonLd(outline.title || keyword, keyword, outline.slug || ''),
