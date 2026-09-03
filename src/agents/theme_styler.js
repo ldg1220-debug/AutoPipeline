@@ -59,6 +59,14 @@ const THEMES = {
     icon:      '👥',
     label:     '사회',
   },
+  travel: {
+    primary:   '#0284c7',
+    light:     '#f0f9ff',
+    border:    '#bae6fd',
+    accent:    '#0369a1',
+    icon:      '✈️',
+    label:     '여행',
+  },
 };
 
 const DEFAULT_THEME = {

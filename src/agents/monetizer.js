@@ -9,6 +9,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
 import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../utils/internalLinks.js';
 import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
+import { isOverseasRegion } from './tradule_source.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,75 @@ const __dirname = path.dirname(__filename);
 const PARTNERS_DISCLOSURE =
   '<p class="partners-disclosure">※ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, ' +
   '이에 따른 일정액의 수수료를 제공받습니다.</p>';
+
+// ── 트래블페이아웃(travelpayouts) 제휴 링크 — 순위 5 ────────────────────────
+// marker/trs는 전 프로그램 공통 (실측). 링크 형식:
+//   https://tp.media/r?campaign_id={CID}&marker=765548&p={P}&sub_id={SUB}&trs=563085&u={ENCODED}
+const TRAVELPAYOUTS_MARKER = '765548';
+const TRAVELPAYOUTS_TRS    = '563085';
+const TRAVELPAYOUTS_PROGRAMS = {
+  yesim:  { campaignId: 224, p: 5998, url: 'https://yesim.tech/ko/', label: '예심(Yesim) eSIM — 즉시 개통' },
+  airalo: { campaignId: 541, p: 8310, url: 'https://airalo.com',     label: 'Airalo eSIM' },
+};
+const TRAVELPAYOUTS_DISCLOSURE =
+  '<p class="partners-disclosure">※ 일부 링크는 제휴 링크이며, 구매 시 소정의 수수료를 받습니다. ' +
+  '구매자가 지불하는 금액에는 차이가 없습니다.</p>';
+
+function buildTravelpayoutsLink(programKey, subId) {
+  const prog = TRAVELPAYOUTS_PROGRAMS[programKey];
+  if (!prog) return null;
+  const params = new URLSearchParams({
+    campaign_id: String(prog.campaignId),
+    marker: TRAVELPAYOUTS_MARKER,
+    p: String(prog.p),
+    sub_id: subId,
+    trs: TRAVELPAYOUTS_TRS,
+    u: prog.url,
+  });
+  return `https://tp.media/r?${params.toString()}`;
+}
+
+// sub_id 패턴 추출 — keyword_miner.js의 TRAVEL_SEED_PATTERNS와 동일한 유형 목록.
+// blog_{지역}_{패턴} 형태로 트래블페이아웃 대시보드에서 글별 전환을 구분한다.
+const KNOWN_TRAVEL_PATTERNS = ['1박2일 코스', '당일치기', '여행 코스', '가볼만한곳', '카페거리', '맛집 코스'];
+
+function buildTravelSubId(region, keyword) {
+  const matched = KNOWN_TRAVEL_PATTERNS.find((p) => keyword.includes(p));
+  const pattern = (matched || keyword).replace(/\s+/g, '');
+  return `blog_${region}_${pattern}`;
+}
+
+/**
+ * 해외 코스에만 eSIM 제휴 블록을 붙인다 (국내 코스에는 아무것도 붙이지 않음 — 지시서 §1).
+ * Klook은 도시별 고유 URL이 확인된 경우에만 쓰는데 현재 확인된 목록이 없어 제외.
+ */
+function buildTravelpayoutsBlock(content) {
+  const region = content.trip_data?.region ?? null;
+  if (!region || !isOverseasRegion(region)) return { html: '', disclosureHtml: '' };
+
+  const subId = buildTravelSubId(region, content.keyword ?? '');
+  const yesimUrl  = buildTravelpayoutsLink('yesim', subId);
+  const airaloUrl = buildTravelpayoutsLink('airalo', subId);
+  if (!yesimUrl) return { html: '', disclosureHtml: '' };
+
+  const html =
+    `<div class="cta-box" style="border:1px solid #bfdbfe;background:#f0f9ff;">` +
+    `<h3>📶 ${region} 현지 데이터, 미리 준비하기</h3>` +
+    `<p>공항에서 유심 찾아 헤매지 않아도 됩니다. eSIM은 출국 전에 앱으로 미리 설치해두면 도착하자마자 바로 연결됩니다.</p>` +
+    `<a href="${yesimUrl}" target="_blank" rel="nofollow sponsored noopener" ` +
+    `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#2563eb;` +
+    `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
+    `${TRAVELPAYOUTS_PROGRAMS.yesim.label} →</a>` +
+    (airaloUrl
+      ? ` <a href="${airaloUrl}" target="_blank" rel="nofollow sponsored noopener" ` +
+        `style="display:inline-block;margin-top:10px;margin-left:8px;padding:10px 24px;background:#fff;` +
+        `color:#2563eb;font-weight:bold;border:1px solid #2563eb;border-radius:4px;text-decoration:none;font-size:15px;">` +
+        `${TRAVELPAYOUTS_PROGRAMS.airalo.label} →</a>`
+      : '') +
+    `</div>`;
+
+  return { html, disclosureHtml: TRAVELPAYOUTS_DISCLOSURE };
+}
 
 // 카테고리별 섹션 헤더 색상
 const CATEGORY_COLOR = {
@@ -44,7 +114,22 @@ const CATEGORY_KR = {
   health:        '건강',
   entertainment: '연예·사회',
   social:        '생활·사회',
+  // travel은 고정 라벨이 아니라 trip_data.region 기준 국내/해외로 동적 판정 (buildCategoryLabel)
 };
+
+/**
+ * 본문 상단 배지 문구. travel 카테고리는 CATEGORY_KR 고정값 대신
+ * trip_data.region이 국내/해외 어디인지로 "국내여행"/"해외여행"을 판정한다
+ * (지시서 §2-1: 이전엔 이 배지만 "경제·이슈" 기본값으로 남아있었음 — 티스토리
+ * 카테고리 자체는 window.Config 수정으로 이미 맞게 잡히는 것과는 별개 경로).
+ */
+function buildCategoryLabel(content) {
+  if (content.category === 'travel') {
+    const region = content.trip_data?.region ?? null;
+    return region && isOverseasRegion(region) ? '해외여행' : '국내여행';
+  }
+  return CATEGORY_KR[content.category] ?? '경제·이슈';
+}
 
 // ── 마크다운 → HTML 변환 (GPT 출력의 **bold**, *italic*, 리스트 처리) ──────
 function markdownToHtml(text) {
@@ -500,6 +585,9 @@ async function monetizeBlogDraft(content) {
   const conclusionAffiliate = affiliateMap['conclusion_top'] ?? '';
   const bodyImages = blog_assets?.body_images ?? [];
 
+  // 순위 5: 트래블페이아웃 — 해외 코스에만 eSIM 제휴 블록 (국내는 아무것도 안 붙임, §1)
+  const { html: travelpayoutsHtml, disclosureHtml: travelpayoutsDisclosure } = buildTravelpayoutsBlock(content);
+
   // ① TL;DR 박스
   const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
 
@@ -599,7 +687,7 @@ async function monetizeBlogDraft(content) {
   // hero 배너 (제목 + 메타설명)
   const heroHtml =
     `<div class="mae-hero">` +
-    `<span class="hero-tag">${getCategoryIcon(content.category)} ${CATEGORY_KR[content.category] ?? '경제·이슈'}</span>` +
+    `<span class="hero-tag">${getCategoryIcon(content.category)} ${buildCategoryLabel(content)}</span>` +
     // Tistory 제목 입력란(#post-title-inp)이 스킨에서 페이지 실제 <h1>으로 렌더링되므로
     // 본문에 또 <h1>을 넣으면 한 페이지에 H1이 2개가 되어 SEO 감점 요인이 됨 → 비-헤딩 태그로 처리
     `<p class="hero-title">${blog_draft.title ?? keyword}</p>` +
@@ -619,6 +707,8 @@ async function monetizeBlogDraft(content) {
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문
     midBodyCta,                                   // 트레쥴 CTA — 코스 나열 직후 (C-1)
+    travelpayoutsHtml,                            // 순위 5: 해외 코스 eSIM 제휴 (국내는 빈 문자열)
+    travelpayoutsDisclosure,                      // 위 블록이 실제로 있을 때만 고지
     adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,

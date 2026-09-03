@@ -17,9 +17,31 @@ const __dirname = path.dirname(__filename);
 const PROMPTS_DIR      = path.resolve(__dirname, '../../prompts');
 const BENCHMARK_PATH   = path.resolve(__dirname, '../../output/benchmark/rules.json');
 const BENCHMARK_MAX_AGE_DAYS = 7;
+const CHANNEL_STRATEGY_PATH = path.resolve(__dirname, '../../config/channel_strategy.json');
 
 async function loadPrompt(name) {
   return fs.readFile(path.join(PROMPTS_DIR, name), 'utf8');
+}
+
+let _channelStrategyCache = null;
+
+/**
+ * channel_strategy.json의 target_audience를 로드한다.
+ * 기존엔 pipeline_director.js(영상 파이프라인)만 이 파일을 읽고 있어서, 블로그 프롬프트에는
+ * 채널 타깃이 전혀 전달되지 않았음 — target_reader를 LLM이 완전히 자유 생성하다 보니
+ * "30대 직장인"처럼 예전 경제 채널 페르소나로 드리프트하는 문제가 있었음(지시서 §2-3).
+ */
+async function loadTargetAudience() {
+  if (_channelStrategyCache) return _channelStrategyCache;
+  try {
+    const raw = await fs.readFile(CHANNEL_STRATEGY_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    _channelStrategyCache = data.target_audience ?? '';
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] channel_strategy.json 로드 실패: ${err.message}`);
+    _channelStrategyCache = '';
+  }
+  return _channelStrategyCache;
 }
 
 /**
@@ -202,7 +224,8 @@ async function callGPT4oMini(prompt) {
 async function pass1Intent(keyword, category, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass1_intent.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
-  const prompt   = fillTemplate(template, { keyword, category, today }) + benchmarkCtx;
+  const targetAudience = await loadTargetAudience();
+  const prompt   = fillTemplate(template, { keyword, category, today, target_audience: targetAudience }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
 }

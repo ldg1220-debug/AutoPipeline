@@ -32,13 +32,20 @@ const MIN_REVIEW_COUNT_FOR_RATING = 30;
 // ── 트레쥴 지역 트리 — 임의 파싱 대신 이 목록으로만 매칭한다 ──────────────────
 // 매칭 실패 시 스킵. 트레쥴 쪽 지역 목록이 늘어나면 여기 추가한다.
 // keyword_miner.js의 generateTravelSeeds()가 시드 키워드 생성에도 그대로 재사용한다.
-export const REGION_TREE = [
-  '경주', '강릉', '후쿠오카',
-  '서울', '부산', '제주', '전주', '여수', '통영', '속초', '춘천', '양양',
+export const DOMESTIC_REGIONS = [
+  '경주', '강릉', '서울', '부산', '제주', '전주', '여수', '통영', '속초', '춘천', '양양',
   '대구', '인천', '수원', '군산', '목포', '거제', '남해', '담양',
-  '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '나트랑',
+];
+export const OVERSEAS_REGIONS = [
+  '후쿠오카', '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '나트랑',
   '치앙마이', '싱가포르', '홍콩', '타이베이', '상하이', '괌', '세부',
 ];
+export const REGION_TREE = [...DOMESTIC_REGIONS, ...OVERSEAS_REGIONS];
+
+/** trip_data.region(또는 키워드에서 추출한 지역명)이 해외인지 판정한다. */
+export function isOverseasRegion(region) {
+  return OVERSEAS_REGIONS.includes(region);
+}
 
 /**
  * 키워드 앞부분에서 트레쥴 지역 트리와 일치하는 지역명을 추출한다.
