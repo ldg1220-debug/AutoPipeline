@@ -272,8 +272,11 @@ async function main() {
       }
 
       const editUrl = `https://${blogName}.tistory.com/manage/post/${postId}/`;
-      await page.goto(editUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 15000 });
+      // networkidle은 이 관리 페이지에서 계속 걸림(백그라운드 폴링으로 추정) — 실측 결과
+      // 142건 중 18건이 30초 타임아웃. domcontentloaded로 완화하고, 실제 준비 여부는
+      // 아래 waitForSelector(제목 입력창)로 판단한다.
+      await page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForSelector('#post-title-inp, input[name="title"]', { timeout: 20000 });
 
       const original = await getCurrentContent(page);
       if (original == null) {
