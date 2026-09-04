@@ -37,6 +37,65 @@ function randomDelay(minMs = 30000, maxMs = 90000) {
   );
 }
 
+// ── 순위 6: 네이버 원고 별도 저장 (반자동 발행) ─────────────────────────────
+// 네이버 블로그 글쓰기 API는 2020-05-06 종료돼 자동 발행이 불가능하다.
+// 대신 원고를 파일로 저장해두고, 사람이 직접 네이버 블로그에 복사·붙여넣기 한다
+// (편당 약 10분). 중복 콘텐츠로 잡히지 않도록 제목·도입부는 티스토리와 다르게 만든다.
+
+/**
+ * 콜론/쉼표로 나뉘는 제목이면 앞뒤 절을 바꿔 문자 그대로의 중복을 피한다.
+ * 그런 구조가 아니면 키워드를 접두로 붙여 다른 문장으로 만든다.
+ */
+function buildNaverTitle(originalTitle, keyword) {
+  const parts = (originalTitle ?? '').split(/[:,]/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[1]}, ${parts[0]}`;
+  }
+  return `${keyword} 정리 — ${originalTitle ?? keyword}`;
+}
+
+/** meta_description(Pass 2에서 별도로 작성된 요약)을 도입부로 재사용 — 본문 첫 섹션과는 다른 문장. */
+function buildNaverIntro(metaDescription, keyword) {
+  const base = (metaDescription ?? '').trim();
+  const summary = base.length > 10 ? base : `${keyword}에 대해 실제 데이터를 기준으로 정리했습니다.`;
+  return `${summary} 아래 내용은 실제 평점·동선 데이터를 바탕으로 작성했습니다.`;
+}
+
+async function saveNaverDraft(content) {
+  const draft = content.blog_draft;
+  if (!draft?.sections?.length) return null;
+
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const slug = draft.slug || content.keyword.replace(/\s+/g, '-');
+  const outDir = path.resolve(__dirname, '../../output/blog/naver');
+  const outPath = path.join(outDir, `${date}_${slug}.md`);
+
+  const naverTitle = buildNaverTitle(draft.title, content.keyword);
+  const naverIntro = buildNaverIntro(draft.meta_description, content.keyword);
+
+  const sectionsMd = draft.sections
+    .map((s) => `## ${s.heading}\n\n${s.body ?? ''}`)
+    .join('\n\n');
+
+  const faqMd = (draft.faq ?? []).length
+    ? `\n\n## 자주 묻는 질문\n\n` +
+      draft.faq.map((f) => `**Q. ${f.q}**\n\n${f.a ?? f.a_hint ?? ''}`).join('\n\n')
+    : '';
+
+  // 티스토리 링크·트레쥴 CTA 등 외부 링크는 넣지 않는다 (독립 원고로 취급 — 지시서 §3)
+  const md = `# ${naverTitle}\n\n${naverIntro}\n\n${sectionsMd}${faqMd}\n`;
+
+  try {
+    await fs.mkdir(outDir, { recursive: true });
+    await fs.writeFile(outPath, md, 'utf8');
+    logger.info(`[blog_publisher] Naver draft saved: ${outPath}`);
+    return outPath;
+  } catch (err) {
+    logger.warn(`[blog_publisher] Naver draft save failed: ${err.message}`);
+    return null;
+  }
+}
+
 // ── 이미지 업로드 헬퍼 ─────────────────────────────────────────────────────
 /**
  * 티스토리 에디터에 로컬 이미지를 업로드하고 삽입된 src URL을 반환한다.
@@ -930,7 +989,8 @@ export async function publishBlogPosts(contentData) {
           postUrl,
           content.youtube_url
         );
-        updated.push({ ...content, blog_publish: { status: 'published', url: postUrl } });
+        const naverDraftPath = await saveNaverDraft(content);
+        updated.push({ ...content, blog_publish: { status: 'published', url: postUrl, naver_draft: naverDraftPath } });
         pingSearchEngines(postUrl).catch(() => {});
       } else {
         updated.push({ ...content, blog_publish: { status: 'failed', error: 'URL not captured' } });

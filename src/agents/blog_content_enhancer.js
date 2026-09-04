@@ -17,9 +17,31 @@ const __dirname = path.dirname(__filename);
 const PROMPTS_DIR      = path.resolve(__dirname, '../../prompts');
 const BENCHMARK_PATH   = path.resolve(__dirname, '../../output/benchmark/rules.json');
 const BENCHMARK_MAX_AGE_DAYS = 7;
+const CHANNEL_STRATEGY_PATH = path.resolve(__dirname, '../../config/channel_strategy.json');
 
 async function loadPrompt(name) {
   return fs.readFile(path.join(PROMPTS_DIR, name), 'utf8');
+}
+
+let _channelStrategyCache = null;
+
+/**
+ * channel_strategy.json의 target_audience를 로드한다.
+ * 기존엔 pipeline_director.js(영상 파이프라인)만 이 파일을 읽고 있어서, 블로그 프롬프트에는
+ * 채널 타깃이 전혀 전달되지 않았음 — target_reader를 LLM이 완전히 자유 생성하다 보니
+ * "30대 직장인"처럼 예전 경제 채널 페르소나로 드리프트하는 문제가 있었음(지시서 §2-3).
+ */
+async function loadTargetAudience() {
+  if (_channelStrategyCache) return _channelStrategyCache;
+  try {
+    const raw = await fs.readFile(CHANNEL_STRATEGY_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    _channelStrategyCache = data.target_audience ?? '';
+  } catch (err) {
+    logger.warn(`[blog_content_enhancer] channel_strategy.json 로드 실패: ${err.message}`);
+    _channelStrategyCache = '';
+  }
+  return _channelStrategyCache;
 }
 
 /**
@@ -202,7 +224,8 @@ async function callGPT4oMini(prompt) {
 async function pass1Intent(keyword, category, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass1_intent.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
-  const prompt   = fillTemplate(template, { keyword, category, today }) + benchmarkCtx;
+  const targetAudience = await loadTargetAudience();
+  const prompt   = fillTemplate(template, { keyword, category, today, target_audience: targetAudience }) + benchmarkCtx;
   await throttle(2000);
   return callGPT4oMini(prompt);
 }
@@ -216,6 +239,43 @@ function summarizeTransportModes(tripData) {
   if (!modes.length) return '이동수단 데이터 없음';
   const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
   return modes.map((m) => modeKr[m] ?? m).join(', ');
+}
+
+/**
+ * 제목·헤딩에 trip_data 실제 이동수단(toNextMode)에 없는 표현이 들어있으면 걸러낸다.
+ * A-6 규칙을 프롬프트로만 지시했더니 실측(maeilg.com/245, /246)에서 두 번 다
+ * "대중교통으로"가 실제로는 차량/도보 위주인 코스 제목에 그대로 남아 재발했음 —
+ * LLM이 2차 제약을 놓치는 경우가 반복되므로 코드에서 한 번 더 강제한다.
+ */
+const TRANSPORT_MODE_WORDS = {
+  transit: ['대중교통', '버스', '지하철', '전철'],
+  bus:     ['버스'],
+  train:   ['기차', '열차'],
+  walk:    ['도보', '뚜벅이', '걸어서'],
+  car:     ['차량', '차로', '드라이브', '렌터카'],
+};
+
+function sanitizeTitleForTransport(title, tripData) {
+  if (!title || !tripData?.spots?.length) return title;
+  const actualModes = new Set(tripData.spots.map((s) => s.toNextMode).filter(Boolean));
+
+  let sanitized = title;
+  for (const [mode, words] of Object.entries(TRANSPORT_MODE_WORDS)) {
+    if (actualModes.has(mode)) continue; // 실제 데이터에 있는 이동수단이면 그대로 둠
+    for (const word of words) {
+      if (!sanitized.includes(word)) continue;
+      // "대중교통으로 즐기는 1박2일 일정" 처럼 흔한 패턴을 통째로 걷어내고, 남는 조사·공백을 정리
+      sanitized = sanitized
+        .replace(new RegExp(`${word}(으로|로)?\\s*(즐기는|이용한|여행하는|다니는)?\\s*`, 'g'), '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[,:\s]+|[,:\s]+$/g, '')
+        .trim();
+    }
+  }
+  if (sanitized !== title) {
+    logger.warn(`[blog_content_enhancer] 제목 이동수단 모순 감지 → 보정: "${title}" → "${sanitized}"`);
+  }
+  return sanitized || title; // 과도하게 지워져 빈 문자열이 되면 원본 유지 (안전장치)
 }
 
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
@@ -237,7 +297,11 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     transport_summary:    summarizeTransportModes(tripData),
   }) + benchmarkCtx;
   await throttle(2000);
-  return callGPT4oMini(prompt);
+  const outline = await callGPT4oMini(prompt);
+  if (outline?.title) {
+    outline.title = sanitizeTitleForTransport(outline.title, tripData);
+  }
+  return outline;
 }
 
 /**
