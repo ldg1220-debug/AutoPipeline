@@ -262,6 +262,105 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
   });
 }
 
+// ── Part 1.7.5: 발행 전 스팟 검수 (신규) ────────────────────────────────
+// 트레쥴이 매번 새로 뽑는 코스에는 사람이 5초면 알아채는 문제가 섞여 나온다
+// (황남시장 ★2.5/리뷰2, "경주 용황 광 옛날통닭 치킨 맥주 호프 저녁 야식" 같은
+// 상호명 등). 계획을 새로 짜는 대신, 자동 생성된 스팟 목록을 발행 전에 한 번
+// 사람이 훑어보고 이상한 것만 제외하는 저비용 검수 단계.
+const MIN_REVIEW_COUNT_WARN = 30;   // 이 미만이면 "리뷰 적음" 경고 (sanitizeSpots의 30과 동일 기준)
+const MAX_SPOT_NAME_LEN = 25;       // 이 초과면 "이름 김" 경고
+
+function formatSpotForReview(spot, idx) {
+  const ratingText = typeof spot.rating === 'number' ? `★ ${spot.rating}` : '★ -';
+  const reviewText = typeof spot.reviewCount === 'number' ? `(리뷰 ${spot.reviewCount.toLocaleString()})` : '(리뷰 -)';
+  const warnings = [];
+  if (spot.reviewCount == null || spot.reviewCount < MIN_REVIEW_COUNT_WARN) warnings.push('⚠ 리뷰 적음');
+  if ((spot.name ?? '').length > MAX_SPOT_NAME_LEN) warnings.push('⚠ 이름 김');
+  if (spot.rating == null) warnings.push('⚠ 평점 없음');
+  const num = `${idx + 1}.`.padEnd(4);
+  const name = (spot.name ?? '').padEnd(MAX_SPOT_NAME_LEN + 20);
+  return `${num}${name}${ratingText.padEnd(9)}${reviewText.padEnd(16)}${warnings.length ? '  ' + [...new Set(warnings)].join(' ') : ''}`;
+}
+
+/** readline 한 줄 입력을 Promise로 받는다. */
+function askLine(rl, question) {
+  return new Promise((resolve) => rl.question(question, resolve));
+}
+
+/**
+ * --auto 모드에서는 완전히 건너뛰고 전체 사용 (무인 실행이 입력을 기다리며 멈추면 안 됨).
+ * 각 키워드별로 스팟 목록을 보여주고, 공백 구분 번호로 제외하거나 's'로 키워드 자체를 스킵한다.
+ * 제외 후 3곳 미만이면 C-2 계약대로 그 키워드를 스킵한다. 제외 내역은 로그에 남긴다(패턴 파악용).
+ */
+async function reviewSpotsInteractive(contentData) {
+  if (autoMode) return contentData;
+
+  const targets = contentData.contents.filter((c) => c.trip_data?.spots?.length);
+  if (targets.length === 0) return contentData;
+
+  console.log('\n' + '─'.repeat(66));
+  console.log('📋 발행 전 스팟 검수 — 이상한 스팟만 번호로 제외하세요');
+  console.log('─'.repeat(66));
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  const skippedKeywords = [];
+
+  for (const content of targets) {
+    const spots = content.trip_data.spots;
+    console.log(`\n[${content.keyword}] 스팟 ${spots.length}곳 · 총 ${content.trip_data.totalDistanceKm ?? '?'}km\n`);
+    spots.forEach((s, i) => console.log('  ' + formatSpotForReview(s, i)));
+
+    const answer = (await askLine(
+      rl,
+      '\n제외할 번호 (공백 구분, 엔터 = 전체 사용, s = 이 키워드 스킵): '
+    )).trim();
+
+    if (answer.toLowerCase() === 's') {
+      content.skip_reason = '발행 전 검수에서 사용자가 스킵';
+      skippedKeywords.push(content.keyword);
+      logger.info(`[blog:pipeline] Part 1.7.5: "${content.keyword}" 사용자 스킵`);
+      continue;
+    }
+
+    if (!answer) {
+      console.log(`→ ${spots.length}곳 전체로 진행합니다`);
+      continue;
+    }
+
+    const excludeIdx = new Set(
+      answer.split(/\s+/).map((s) => parseInt(s, 10) - 1).filter((n) => Number.isFinite(n) && n >= 0 && n < spots.length)
+    );
+    if (excludeIdx.size === 0) {
+      console.log(`→ 유효한 번호 없음 — ${spots.length}곳 전체로 진행합니다`);
+      continue;
+    }
+
+    const excluded = spots.filter((_, i) => excludeIdx.has(i));
+    const remaining = spots.filter((_, i) => !excludeIdx.has(i));
+    logger.info(`[blog:pipeline] Part 1.7.5: "${content.keyword}" 스팟 ${excluded.length}개 제외: ${excluded.map((s) => s.name).join(', ')}`);
+
+    if (remaining.length < 3) {
+      // C-2 계약: 스팟 3개 미만이면 억지로 쓰지 않고 스킵
+      content.skip_reason = `검수 후 스팟 ${remaining.length}개 (최소 3개 미만)`;
+      skippedKeywords.push(content.keyword);
+      console.log(`→ 제외 후 ${remaining.length}곳뿐이라 이 키워드는 스킵합니다`);
+      continue;
+    }
+
+    content.trip_data = { ...content.trip_data, spots: remaining };
+    console.log(`→ ${remaining.length}곳으로 진행합니다`);
+  }
+
+  rl.close();
+
+  if (skippedKeywords.length > 0) {
+    console.log(`\n검수 결과 ${skippedKeywords.length}개 키워드 스킵: ${skippedKeywords.join(', ')}`);
+  }
+
+  contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+  return contentData;
+}
+
 // ── 쿠팡 링크 관리 헬퍼 ──────────────────────────────────────────────────
 
 const COUPANG_LINKS_PATH = path.resolve(__dirname, '../data/coupang/links.json');
@@ -747,6 +846,13 @@ async function main() {
 
   if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] Part 1.7 이후 남은 키워드 없음. 종료.');
+    process.exit(0);
+  }
+
+  // Part 1.7.5: 발행 전 스팟 검수 — --auto 모드는 건너뜀 (무인 실행 유지)
+  await reviewSpotsInteractive(contentData);
+  if (!contentData.contents.length) {
+    logger.warn('[blog:pipeline] Part 1.7.5 검수 이후 남은 키워드 없음. 종료.');
     process.exit(0);
   }
 
