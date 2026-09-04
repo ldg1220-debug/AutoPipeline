@@ -241,6 +241,43 @@ function summarizeTransportModes(tripData) {
   return modes.map((m) => modeKr[m] ?? m).join(', ');
 }
 
+/**
+ * 제목·헤딩에 trip_data 실제 이동수단(toNextMode)에 없는 표현이 들어있으면 걸러낸다.
+ * A-6 규칙을 프롬프트로만 지시했더니 실측(maeilg.com/245, /246)에서 두 번 다
+ * "대중교통으로"가 실제로는 차량/도보 위주인 코스 제목에 그대로 남아 재발했음 —
+ * LLM이 2차 제약을 놓치는 경우가 반복되므로 코드에서 한 번 더 강제한다.
+ */
+const TRANSPORT_MODE_WORDS = {
+  transit: ['대중교통', '버스', '지하철', '전철'],
+  bus:     ['버스'],
+  train:   ['기차', '열차'],
+  walk:    ['도보', '뚜벅이', '걸어서'],
+  car:     ['차량', '차로', '드라이브', '렌터카'],
+};
+
+function sanitizeTitleForTransport(title, tripData) {
+  if (!title || !tripData?.spots?.length) return title;
+  const actualModes = new Set(tripData.spots.map((s) => s.toNextMode).filter(Boolean));
+
+  let sanitized = title;
+  for (const [mode, words] of Object.entries(TRANSPORT_MODE_WORDS)) {
+    if (actualModes.has(mode)) continue; // 실제 데이터에 있는 이동수단이면 그대로 둠
+    for (const word of words) {
+      if (!sanitized.includes(word)) continue;
+      // "대중교통으로 즐기는 1박2일 일정" 처럼 흔한 패턴을 통째로 걷어내고, 남는 조사·공백을 정리
+      sanitized = sanitized
+        .replace(new RegExp(`${word}(으로|로)?\\s*(즐기는|이용한|여행하는|다니는)?\\s*`, 'g'), '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[,:\s]+|[,:\s]+$/g, '')
+        .trim();
+    }
+  }
+  if (sanitized !== title) {
+    logger.warn(`[blog_content_enhancer] 제목 이동수단 모순 감지 → 보정: "${title}" → "${sanitized}"`);
+  }
+  return sanitized || title; // 과도하게 지워져 빈 문자열이 되면 원본 유지 (안전장치)
+}
+
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
@@ -260,7 +297,11 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     transport_summary:    summarizeTransportModes(tripData),
   }) + benchmarkCtx;
   await throttle(2000);
-  return callGPT4oMini(prompt);
+  const outline = await callGPT4oMini(prompt);
+  if (outline?.title) {
+    outline.title = sanitizeTitleForTransport(outline.title, tripData);
+  }
+  return outline;
 }
 
 /**
