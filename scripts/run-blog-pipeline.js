@@ -274,17 +274,49 @@ function formatSpotForReview(spot, idx) {
   const ratingText = typeof spot.rating === 'number' ? `★ ${spot.rating}` : '★ -';
   const reviewText = typeof spot.reviewCount === 'number' ? `(리뷰 ${spot.reviewCount.toLocaleString()})` : '(리뷰 -)';
   const warnings = [];
-  if (spot.reviewCount == null || spot.reviewCount < MIN_REVIEW_COUNT_WARN) warnings.push('⚠ 리뷰 적음');
+  // 평점·리뷰 경고는 상호 배타적으로 표시한다 (작업지시서 §4 — "경고 피로" 방지).
+  // 관광지·거리 이름은 평점 자체가 없는 게 정상이라 "평점 없음"만 표시하고,
+  // 평점은 있는데 표본이 적은(황남시장 ★2.5/리뷰2 같은) 진짜 위험 신호만 "리뷰 적음"으로 구분한다.
+  if (spot.rating == null) {
+    warnings.push('⚠ 평점 없음');
+  } else if (spot.reviewCount == null || spot.reviewCount < MIN_REVIEW_COUNT_WARN) {
+    warnings.push('⚠ 리뷰 적음');
+  }
   if ((spot.name ?? '').length > MAX_SPOT_NAME_LEN) warnings.push('⚠ 이름 김');
-  if (spot.rating == null) warnings.push('⚠ 평점 없음');
   const num = `${idx + 1}.`.padEnd(4);
   const name = (spot.name ?? '').padEnd(MAX_SPOT_NAME_LEN + 20);
   return `${num}${name}${ratingText.padEnd(9)}${reviewText.padEnd(16)}${warnings.length ? '  ' + [...new Set(warnings)].join(' ') : ''}`;
 }
 
-/** readline 한 줄 입력을 Promise로 받는다. */
-function askLine(rl, question) {
-  return new Promise((resolve) => rl.question(question, resolve));
+const SPOT_REVIEW_TIMEOUT_SEC = 120;
+
+/**
+ * readline 한 줄 입력을 Promise로 받는다. 120초 타임아웃 포함 — 초과 시 빈 문자열(전체 사용)로
+ * 진행한다. rl.question()은 자체 타임아웃이 없어 무한 대기 위험이 있었음(작업지시서 §3) —
+ * askUserKeywordSelection과 동일하게 rl.once('line', ...) 패턴으로 직접 구현.
+ */
+function askLine(rl, question, timeoutSec = SPOT_REVIEW_TIMEOUT_SEC) {
+  return new Promise((resolve) => {
+    let answered = false;
+    process.stdout.write(question);
+
+    const onLine = (line) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      resolve(line.trim());
+    };
+
+    const timer = setTimeout(() => {
+      if (answered) return;
+      answered = true;
+      rl.removeListener('line', onLine);
+      console.log(`\n⏱ ${timeoutSec}초 초과 — 전체 사용으로 진행합니다`);
+      resolve('');
+    }, timeoutSec * 1000);
+
+    rl.once('line', onLine);
+  });
 }
 
 /**
@@ -303,6 +335,10 @@ async function reviewSpotsInteractive(contentData) {
   console.log('─'.repeat(66));
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  // readPastedInput()의 pause()가 stdin의 readableFlowing을 false로 만들어두면, 뒤이어
+  // 붙는 새 readline이 'line' 리스너를 달아도 자동으로 다시 흐르지 않는다 (작업지시서 §3) —
+  // 명시적으로 resume해서 이 단계가 조용히 멈추는 걸 막는다.
+  process.stdin.resume();
   const skippedKeywords = [];
 
   for (const content of targets) {
@@ -347,8 +383,22 @@ async function reviewSpotsInteractive(contentData) {
       continue;
     }
 
-    content.trip_data = { ...content.trip_data, spots: remaining };
-    console.log(`→ ${remaining.length}곳으로 진행합니다`);
+    // 스팟을 빼면 order·toNextMinutes/Mode·totalDistanceKm이 전부 6곳 기준 파생값으로
+    // 남아 사실과 다른 수치가 된다 (예: 5곳인데 6곳 기준 거리가 TL;DR에 그대로 인용됨).
+    // 인접 관계가 바뀌므로 이동시간·이동수단은 폐기하고, order는 다시 매긴다.
+    // totalDistanceKm은 좌표 직선거리로도 추정하지 않는다 — 원본은 도보/차량 경로 거리라
+    // 값이 달라지므로, 틀린 숫자보다 없는 숫자가 낫다.
+    content.trip_data = {
+      ...content.trip_data,
+      spots: remaining.map((s, i) => ({
+        ...s,
+        order: i + 1,
+        toNextMinutes: null,
+        toNextMode: null,
+      })),
+      totalDistanceKm: null,
+    };
+    console.log(`→ ${remaining.length}곳으로 진행합니다 (거리·이동시간은 재계산 불가로 생략)`);
   }
 
   rl.close();
