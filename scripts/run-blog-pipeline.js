@@ -262,6 +262,155 @@ async function askUserKeywordSelection(items, timeoutSec = 120) {
   });
 }
 
+// ── Part 1.7.5: 발행 전 스팟 검수 (신규) ────────────────────────────────
+// 트레쥴이 매번 새로 뽑는 코스에는 사람이 5초면 알아채는 문제가 섞여 나온다
+// (황남시장 ★2.5/리뷰2, "경주 용황 광 옛날통닭 치킨 맥주 호프 저녁 야식" 같은
+// 상호명 등). 계획을 새로 짜는 대신, 자동 생성된 스팟 목록을 발행 전에 한 번
+// 사람이 훑어보고 이상한 것만 제외하는 저비용 검수 단계.
+const MIN_REVIEW_COUNT_WARN = 30;   // 이 미만이면 "리뷰 적음" 경고 (sanitizeSpots의 30과 동일 기준)
+const MAX_SPOT_NAME_LEN = 25;       // 이 초과면 "이름 김" 경고
+
+function formatSpotForReview(spot, idx) {
+  const ratingText = typeof spot.rating === 'number' ? `★ ${spot.rating}` : '★ -';
+  const reviewText = typeof spot.reviewCount === 'number' ? `(리뷰 ${spot.reviewCount.toLocaleString()})` : '(리뷰 -)';
+  const warnings = [];
+  // 평점·리뷰 경고는 상호 배타적으로 표시한다 (작업지시서 §4 — "경고 피로" 방지).
+  // 관광지·거리 이름은 평점 자체가 없는 게 정상이라 "평점 없음"만 표시하고,
+  // 평점은 있는데 표본이 적은(황남시장 ★2.5/리뷰2 같은) 진짜 위험 신호만 "리뷰 적음"으로 구분한다.
+  if (spot.rating == null) {
+    warnings.push('⚠ 평점 없음');
+  } else if (spot.reviewCount == null || spot.reviewCount < MIN_REVIEW_COUNT_WARN) {
+    warnings.push('⚠ 리뷰 적음');
+  }
+  if ((spot.name ?? '').length > MAX_SPOT_NAME_LEN) warnings.push('⚠ 이름 김');
+  const num = `${idx + 1}.`.padEnd(4);
+  const name = (spot.name ?? '').padEnd(MAX_SPOT_NAME_LEN + 20);
+  return `${num}${name}${ratingText.padEnd(9)}${reviewText.padEnd(16)}${warnings.length ? '  ' + [...new Set(warnings)].join(' ') : ''}`;
+}
+
+const SPOT_REVIEW_TIMEOUT_SEC = 120;
+
+/**
+ * readline 한 줄 입력을 Promise로 받는다. 120초 타임아웃 포함 — 초과 시 빈 문자열(전체 사용)로
+ * 진행한다. rl.question()은 자체 타임아웃이 없어 무한 대기 위험이 있었음(작업지시서 §3) —
+ * askUserKeywordSelection과 동일하게 rl.once('line', ...) 패턴으로 직접 구현.
+ */
+function askLine(rl, question, timeoutSec = SPOT_REVIEW_TIMEOUT_SEC) {
+  return new Promise((resolve) => {
+    let answered = false;
+    process.stdout.write(question);
+
+    const onLine = (line) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      resolve(line.trim());
+    };
+
+    const timer = setTimeout(() => {
+      if (answered) return;
+      answered = true;
+      rl.removeListener('line', onLine);
+      console.log(`\n⏱ ${timeoutSec}초 초과 — 전체 사용으로 진행합니다`);
+      resolve('');
+    }, timeoutSec * 1000);
+
+    rl.once('line', onLine);
+  });
+}
+
+/**
+ * --auto 모드에서는 완전히 건너뛰고 전체 사용 (무인 실행이 입력을 기다리며 멈추면 안 됨).
+ * 각 키워드별로 스팟 목록을 보여주고, 공백 구분 번호로 제외하거나 's'로 키워드 자체를 스킵한다.
+ * 제외 후 3곳 미만이면 C-2 계약대로 그 키워드를 스킵한다. 제외 내역은 로그에 남긴다(패턴 파악용).
+ */
+async function reviewSpotsInteractive(contentData) {
+  if (autoMode) return contentData;
+
+  const targets = contentData.contents.filter((c) => c.trip_data?.spots?.length);
+  if (targets.length === 0) return contentData;
+
+  console.log('\n' + '─'.repeat(66));
+  console.log('📋 발행 전 스팟 검수 — 이상한 스팟만 번호로 제외하세요');
+  console.log('─'.repeat(66));
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  // readPastedInput()의 pause()가 stdin의 readableFlowing을 false로 만들어두면, 뒤이어
+  // 붙는 새 readline이 'line' 리스너를 달아도 자동으로 다시 흐르지 않는다 (작업지시서 §3) —
+  // 명시적으로 resume해서 이 단계가 조용히 멈추는 걸 막는다.
+  process.stdin.resume();
+  const skippedKeywords = [];
+
+  for (const content of targets) {
+    const spots = content.trip_data.spots;
+    console.log(`\n[${content.keyword}] 스팟 ${spots.length}곳 · 총 ${content.trip_data.totalDistanceKm ?? '?'}km\n`);
+    spots.forEach((s, i) => console.log('  ' + formatSpotForReview(s, i)));
+
+    const answer = (await askLine(
+      rl,
+      '\n제외할 번호 (공백 구분, 엔터 = 전체 사용, s = 이 키워드 스킵): '
+    )).trim();
+
+    if (answer.toLowerCase() === 's') {
+      content.skip_reason = '발행 전 검수에서 사용자가 스킵';
+      skippedKeywords.push(content.keyword);
+      logger.info(`[blog:pipeline] Part 1.7.5: "${content.keyword}" 사용자 스킵`);
+      continue;
+    }
+
+    if (!answer) {
+      console.log(`→ ${spots.length}곳 전체로 진행합니다`);
+      continue;
+    }
+
+    const excludeIdx = new Set(
+      answer.split(/\s+/).map((s) => parseInt(s, 10) - 1).filter((n) => Number.isFinite(n) && n >= 0 && n < spots.length)
+    );
+    if (excludeIdx.size === 0) {
+      console.log(`→ 유효한 번호 없음 — ${spots.length}곳 전체로 진행합니다`);
+      continue;
+    }
+
+    const excluded = spots.filter((_, i) => excludeIdx.has(i));
+    const remaining = spots.filter((_, i) => !excludeIdx.has(i));
+    logger.info(`[blog:pipeline] Part 1.7.5: "${content.keyword}" 스팟 ${excluded.length}개 제외: ${excluded.map((s) => s.name).join(', ')}`);
+
+    if (remaining.length < 3) {
+      // C-2 계약: 스팟 3개 미만이면 억지로 쓰지 않고 스킵
+      content.skip_reason = `검수 후 스팟 ${remaining.length}개 (최소 3개 미만)`;
+      skippedKeywords.push(content.keyword);
+      console.log(`→ 제외 후 ${remaining.length}곳뿐이라 이 키워드는 스킵합니다`);
+      continue;
+    }
+
+    // 스팟을 빼면 order·toNextMinutes/Mode·totalDistanceKm이 전부 6곳 기준 파생값으로
+    // 남아 사실과 다른 수치가 된다 (예: 5곳인데 6곳 기준 거리가 TL;DR에 그대로 인용됨).
+    // 인접 관계가 바뀌므로 이동시간·이동수단은 폐기하고, order는 다시 매긴다.
+    // totalDistanceKm은 좌표 직선거리로도 추정하지 않는다 — 원본은 도보/차량 경로 거리라
+    // 값이 달라지므로, 틀린 숫자보다 없는 숫자가 낫다.
+    content.trip_data = {
+      ...content.trip_data,
+      spots: remaining.map((s, i) => ({
+        ...s,
+        order: i + 1,
+        toNextMinutes: null,
+        toNextMode: null,
+      })),
+      totalDistanceKm: null,
+    };
+    console.log(`→ ${remaining.length}곳으로 진행합니다 (거리·이동시간은 재계산 불가로 생략)`);
+  }
+
+  rl.close();
+
+  if (skippedKeywords.length > 0) {
+    console.log(`\n검수 결과 ${skippedKeywords.length}개 키워드 스킵: ${skippedKeywords.join(', ')}`);
+  }
+
+  contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+  return contentData;
+}
+
 // ── 쿠팡 링크 관리 헬퍼 ──────────────────────────────────────────────────
 
 const COUPANG_LINKS_PATH = path.resolve(__dirname, '../data/coupang/links.json');
@@ -747,6 +896,13 @@ async function main() {
 
   if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] Part 1.7 이후 남은 키워드 없음. 종료.');
+    process.exit(0);
+  }
+
+  // Part 1.7.5: 발행 전 스팟 검수 — --auto 모드는 건너뜀 (무인 실행 유지)
+  await reviewSpotsInteractive(contentData);
+  if (!contentData.contents.length) {
+    logger.warn('[blog:pipeline] Part 1.7.5 검수 이후 남은 키워드 없음. 종료.');
     process.exit(0);
   }
 

@@ -62,12 +62,12 @@ function buildTravelSubId(region, keyword) {
  */
 function buildTravelpayoutsBlock(content) {
   const region = content.trip_data?.region ?? null;
-  if (!region || !isOverseasRegion(region)) return { html: '', disclosureHtml: '' };
+  if (!region || !isOverseasRegion(region)) return { html: '', footerHtml: '', disclosureHtml: '' };
 
   const subId = buildTravelSubId(region, content.keyword ?? '');
   const yesimUrl  = buildTravelpayoutsLink('yesim', subId);
   const airaloUrl = buildTravelpayoutsLink('airalo', subId);
-  if (!yesimUrl) return { html: '', disclosureHtml: '' };
+  if (!yesimUrl) return { html: '', footerHtml: '', disclosureHtml: '' };
 
   const html =
     `<div class="cta-box" style="border:1px solid #bfdbfe;background:#f0f9ff;">` +
@@ -85,7 +85,13 @@ function buildTravelpayoutsBlock(content) {
       : '') +
     `</div>`;
 
-  return { html, disclosureHtml: TRAVELPAYOUTS_DISCLOSURE };
+  // 푸터용 축약 버전 — 본문 중간과 똑같은 카드를 또 넣으면 도배로 보이므로(지시서: 도배 금지)
+  // 링크 한 줄만 남긴다.
+  const footerHtml =
+    `<p style="font-size:13px;color:#64748b;">📶 <a href="${yesimUrl}" target="_blank" rel="nofollow sponsored noopener">` +
+    `${region} eSIM 미리 준비하기 (${TRAVELPAYOUTS_PROGRAMS.yesim.label})</a></p>`;
+
+  return { html, footerHtml, disclosureHtml: TRAVELPAYOUTS_DISCLOSURE };
 }
 
 // 카테고리별 섹션 헤더 색상
@@ -586,7 +592,10 @@ async function monetizeBlogDraft(content) {
   const bodyImages = blog_assets?.body_images ?? [];
 
   // 순위 5: 트래블페이아웃 — 해외 코스에만 eSIM 제휴 블록 (국내는 아무것도 안 붙임, §1)
-  const { html: travelpayoutsHtml, disclosureHtml: travelpayoutsDisclosure } = buildTravelpayoutsBlock(content);
+  // 배치: 본문 중간(코스 나열 직후) 1회 + 푸터 1회 — 지시서 명시. 도배 방지를 위해
+  // 푸터는 카드 전체가 아니라 링크 한 줄(footerHtml)만 넣는다.
+  const { html: travelpayoutsHtml, footerHtml: travelpayoutsFooterHtml, disclosureHtml: travelpayoutsDisclosure } =
+    buildTravelpayoutsBlock(content);
 
   // ① TL;DR 박스
   const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
@@ -668,10 +677,12 @@ async function monetizeBlogDraft(content) {
       `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#2563eb;` +
       `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
       `트레쥴에서 ${tripRegion} 코스 보기</a>` +
+      (travelpayoutsFooterHtml || '') +
       `</div>`
     : `<div class="cta-box">` +
       `<h3>📌 매일 떠나는 남자</h3>` +
       `<p>실제 평점·동선 데이터로 검증한 여행 코스를 소개합니다.</p>` +
+      (travelpayoutsFooterHtml || '') +
       `</div>`;
 
   // 본문 중간 CTA (C-1) — 코스를 나열한 직후, appUrl 있을 때만 삽입.
@@ -715,6 +726,7 @@ async function monetizeBlogDraft(content) {
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
+    travelpayoutsFooterHtml,                      // 순위 5 §1: 푸터 배치 (본문 중간 1회 + 여기 1회)
     adsenseSlot('post_end'),
   ].filter(Boolean).join('\n\n');
 
