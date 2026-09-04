@@ -726,6 +726,7 @@ async function monetizeBlogDraft(content) {
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
+    travelpayoutsFooterHtml,                      // 순위 5 §1: 푸터 배치 (본문 중간 1회 + 여기 1회)
     adsenseSlot('post_end'),
   ].filter(Boolean).join('\n\n');
 
