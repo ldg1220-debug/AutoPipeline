@@ -668,6 +668,11 @@ async function monetizeBlogDraft(content) {
   const tripAppUrl = content.trip_data?.appUrl ?? null;
   const tripRegion = content.trip_data?.region ?? keyword;
 
+  // travelpayoutsFooterHtml은 innerHtml 배열에서 ctaBox 바로 뒤에 별도로 삽입한다
+  // (아래 참고) — 여기 ctaBox 안에는 넣지 않는다. 예전엔 여기서도 넣고 있어서
+  // 해외 글에서 같은 eSIM 문장이 CTA 박스 안·밖에 연달아 두 번 보이는 중복이 있었음
+  // (지시서 "b2af7e4 검증 결과" §1). 박스 밖(회색 텍스트)이 진한 파란 박스 안보다
+  // 시인성도 낫다.
   const ctaBox = tripAppUrl
     ? `<div class="cta-box">` +
       `<h3>📌 매일 떠나는 남자</h3>` +
@@ -677,12 +682,10 @@ async function monetizeBlogDraft(content) {
       `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#2563eb;` +
       `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
       `트레쥴에서 ${tripRegion} 코스 보기</a>` +
-      (travelpayoutsFooterHtml || '') +
       `</div>`
     : `<div class="cta-box">` +
       `<h3>📌 매일 떠나는 남자</h3>` +
       `<p>실제 평점·동선 데이터로 검증한 여행 코스를 소개합니다.</p>` +
-      (travelpayoutsFooterHtml || '') +
       `</div>`;
 
   // 본문 중간 CTA (C-1) — 코스를 나열한 직후, appUrl 있을 때만 삽입.
