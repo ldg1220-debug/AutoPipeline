@@ -7,6 +7,7 @@ import { writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import { fetchMonthlyVolumeMap } from '../utils/naverSearchAd.js';
 import { REGION_TREE, extractRegion } from './tradule_source.js';
+import { REGION_PROFILES, isValidCombo } from '../data/regionProfiles.js';
 import db from '../db/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,11 +91,23 @@ export function generateTravelSeeds(count = 30) {
   const regionsNeeded = Math.ceil(count / TRAVEL_SEED_PATTERNS.length);
   const pickedRegions = orderedRegions.slice(0, regionsNeeded);
 
-  const seeds = pickedRegions.flatMap((region) =>
-    TRAVEL_SEED_PATTERNS.map((pattern) => pattern.replace('{지역}', region))
-  );
+  // A-2: REGION_PROFILES로 지역×일정 조합을 필터한다 (예: "오사카 당일치기" 자체를 생성하지 않음)
+  const seeds = [];
+  for (const region of pickedRegions) {
+    if (!REGION_PROFILES[region]) {
+      logger.info(`[sanity] 프로파일 미등록 지역: ${region} — 테이블 추가 검토`);
+    }
+    for (const pattern of TRAVEL_SEED_PATTERNS) {
+      const patternKey = pattern.replace('{지역} ', ''); // DAY_PATTERNS 키와 맞춤 (예: "당일치기", "1박2일 코스")
+      if (!isValidCombo(region, patternKey)) {
+        logger.info(`[sanity] 비현실적 조합 차단: "${region} ${patternKey}"`);
+        continue;
+      }
+      seeds.push(pattern.replace('{지역}', region));
+    }
+  }
 
-  logger.info(`[keyword_miner] 여행 시드 생성: 지역 ${pickedRegions.length}개(${pickedRegions.join(', ')}) × 패턴 ${TRAVEL_SEED_PATTERNS.length}개`);
+  logger.info(`[keyword_miner] 여행 시드 생성: 지역 ${pickedRegions.length}개(${pickedRegions.join(', ')}) × 패턴 ${TRAVEL_SEED_PATTERNS.length}개 → 유효 ${seeds.length}개`);
   return seeds.slice(0, count);
 }
 

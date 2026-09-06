@@ -18,6 +18,7 @@ import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
+import { REGION_PROFILES } from '../data/regionProfiles.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -68,6 +69,25 @@ function extractDays(keyword) {
     return nights >= 1 ? 2 : 1; // API가 1|2만 받으므로 2박 이상도 2로 상한
   }
   return 1;
+}
+
+/**
+ * A-3(작업지시서 §A): keyword_miner의 조합 차단(A-2)을 --force-keyword로 우회한 경우를 막는
+ * 2차 방어. REGION_PROFILES에 등록된 지역이면 extractDays() 결과가 최소 일정 미만일 때
+ * (예: "오사카 당일치기" → days=1) 최소값으로 강제 조정하고 경고 로그를 남긴다.
+ * 조용히 바꾸면 나중에 왜 다른 일정으로 나갔는지 추적이 안 되므로 반드시 로그를 남긴다.
+ */
+function resolveDays(region, keyword) {
+  const raw = extractDays(keyword);
+  const profile = REGION_PROFILES[region];
+  if (!profile) return raw;
+
+  if (raw < profile.minDays) {
+    logger.warn(`[sanity] "${region} ${keyword}"(days=${raw})은 비현실적 → days=${profile.minDays}로 조정`);
+    return profile.minDays;
+  }
+  if (raw > profile.maxDays) return profile.maxDays;
+  return raw;
 }
 
 // 첫 호출은 콜드 스타트 + 캐시 미스 + Google 라이브 조회가 겹치면 8초를 넘길 수 있음(실측:
@@ -138,7 +158,7 @@ export async function attachTripData(keywordData) {
       continue;
     }
 
-    const days = extractDays(item.keyword ?? '');
+    const days = resolveDays(region, item.keyword ?? '');
     const brief = await fetchCourseBriefWithRetry(region, days);
     rawResponses[item.keyword] = brief;
 

@@ -223,6 +223,11 @@ function buildBlogStyles(category) {
 .cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:32px 24px;text-align:center;margin:36px 0;box-shadow:0 6px 24px rgba(30,58,138,.3)}
 .cta-box h3{margin:0 0 10px;font-size:20px;font-weight:700}
 .cta-box p{margin:0 0 16px;font-size:14px;opacity:.9;line-height:1.7}
+.timeline-table{margin:24px 0}
+.timeline-table h4{margin:0 0 10px;font-size:16px}
+.timeline-table table{width:100%;border-collapse:collapse;font-size:14px}
+.timeline-table th,.timeline-table td{border:1px solid #e5e7eb;padding:8px 10px;text-align:left}
+.timeline-table th{background:#f9fafb;font-weight:600}
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
 ${RELATED_POSTS_CSS}
 ${getThemeStyles(category)}
@@ -282,6 +287,40 @@ function buildTldrBulletsFromSections(sections) {
       return first ? `<li>${first}</li>` : null;
     })
     .filter(Boolean);
+}
+
+// ── B-3(작업지시서 §B): 동선 타임라인 표 ──────────────────────────────────
+// trip_data의 order/rating/toNextMinutes/toNextMode를 프로즈로 풀어쓰지 않고
+// 표로 그대로 노출한다 — 이미 있는 데이터이므로 트레쥴 응답 확장 없이 가능.
+const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+
+function formatToNext(spot) {
+  if (spot.toNextMinutes == null) return '-';
+  const mode = spot.toNextMode ? `${MODE_KR[spot.toNextMode] ?? spot.toNextMode} ` : '';
+  return `${mode}${spot.toNextMinutes}분`;
+}
+
+function formatRating(spot) {
+  if (typeof spot.rating !== 'number') return '-';
+  const reviewPart = typeof spot.reviewCount === 'number' ? ` (${spot.reviewCount.toLocaleString()})` : '';
+  return `★${spot.rating}${reviewPart}`;
+}
+
+function buildTimelineTable(tripData) {
+  const spots = tripData?.spots ?? [];
+  if (spots.length === 0) return '';
+
+  const rows = spots
+    .map((s) => `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s)}</td><td>${formatToNext(s)}</td></tr>`)
+    .join('\n');
+
+  return (
+    `<div class="timeline-table">\n` +
+    `<h4>🗺️ 동선 타임라인${tripData.days ? ` (${tripData.days === 1 ? '당일' : `${tripData.days}일`})` : ''}</h4>\n` +
+    `<table>\n<thead><tr><th>순서</th><th>장소</th><th>평점</th><th>다음까지</th></tr></thead>\n` +
+    `<tbody>\n${rows}\n</tbody>\n</table>\n` +
+    `</div>`
+  );
 }
 
 // ── ① 키워드 하이라이트 (각 키워드 첫 등장만) ─────────────────────────────
@@ -599,6 +638,7 @@ async function monetizeBlogDraft(content) {
 
   // ① TL;DR 박스
   const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
+  const timelineHtml = buildTimelineTable(content.trip_data);
 
   // ① 키워드 태그 클라우드
   const tagCloudHtml = buildKeywordTags(seoKeywords);
@@ -718,6 +758,7 @@ async function monetizeBlogDraft(content) {
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
+    timelineHtml,                                 // B-3: 동선 타임라인 표
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문
     midBodyCta,                                   // 트레쥴 CTA — 코스 나열 직후 (C-1)

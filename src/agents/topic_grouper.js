@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
+import { extractRegion } from './tradule_source.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -336,6 +337,11 @@ export async function groupSimilarTopics(contentData) {
     }
   }
 
+  // A-4(작업지시서 §A): 지역 혼재 그룹을 무조건 분해한다.
+  // LLM 리뷰어가 "여행 코스 추천"이라는 형식 유사성만 보고 서로 다른 지역(예: 오사카+여수+부산)을
+  // 하나로 묶어 85점으로 통과시킨 사례가 있었음 — 리뷰 점수와 무관하게 코드로 강제 분리한다.
+  groups = enforceSameRegion(groups, keywords);
+
   // 그룹핑 결과 로그
   groups.forEach((g) => {
     const names = g.indices.map((i) => keywords[i]).join(', ');
@@ -378,6 +384,29 @@ export async function groupSimilarTopics(contentData) {
     original_count:      keywords.length,
     grouped_count:       groupedContents.length,
   };
+}
+
+/**
+ * 그룹에 서로 다른 지역의 키워드가 섞여 있으면 지역별로 쪼갠다.
+ * (indices 기반 groups를 받아 같은 형태로 반환 — reasoning은 원본 유지)
+ */
+function enforceSameRegion(groups, keywords) {
+  return groups.flatMap((g) => {
+    const byRegion = new Map();
+    for (const idx of g.indices) {
+      const region = extractRegion(keywords[idx]) ?? '__no_region__';
+      if (!byRegion.has(region)) byRegion.set(region, []);
+      byRegion.get(region).push(idx);
+    }
+    if (byRegion.size <= 1) return [g];
+
+    const regionNames = [...byRegion.keys()];
+    logger.warn(
+      `[sanity] 그룹에 지역 ${regionNames.length}개 혼재 → 분리: ${regionNames.join(', ')} ` +
+      `(원 그룹: ${g.indices.map((i) => keywords[i]).join(', ')})`
+    );
+    return regionNames.map((region) => ({ indices: byRegion.get(region), reasoning: g.reasoning }));
+  });
 }
 
 // ── 콘텐츠 병합 ────────────────────────────────────────────────────────────
