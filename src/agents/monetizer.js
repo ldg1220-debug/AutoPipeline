@@ -306,6 +306,20 @@ function formatRating(spot) {
   return `★${spot.rating}${reviewPart}`;
 }
 
+// 지시서 §2(2026-09-08): course-brief의 imageUrl(번호 마커 + 동선 라인 지도, 트레쥴 워터마크
+// 포함)을 본문에 삽입한다. 이 글에만 있는 자산이라 무관한 Pexels 스톡 사진보다 신뢰도가 높음.
+// null이면(옛 캐시·GCP Maps 미활성 지역 등) 조용히 생략 — 창작 금지(C-2 원칙과 동일 취지).
+function buildCourseMapImage(tripData) {
+  if (!tripData?.imageUrl) return '';
+  const label = `${tripData.region ?? ''} ${tripData.days === 1 ? '당일' : `${tripData.days ?? ''}일`} 코스`.trim();
+  return (
+    `<div class="blog-img-wrap">\n` +
+    `<img src="${tripData.imageUrl}" alt="${label} 지도" loading="lazy" />\n` +
+    `<p class="photo-credit">코스 지도 · 트레쥴</p>\n` +
+    `</div>`
+  );
+}
+
 function buildTimelineTable(tripData) {
   const spots = tripData?.spots ?? [];
   if (spots.length === 0) return '';
@@ -638,6 +652,7 @@ async function monetizeBlogDraft(content) {
 
   // ① TL;DR 박스
   const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
+  const courseMapHtml = buildCourseMapImage(content.trip_data);
   const timelineHtml = buildTimelineTable(content.trip_data);
 
   // ① 키워드 태그 클라우드
@@ -758,6 +773,7 @@ async function monetizeBlogDraft(content) {
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
+    courseMapHtml,                                // §2(2026-09-08): 코스 지도 (트레쥴 워터마크) — 본문 첫 이미지
     timelineHtml,                                 // B-3: 동선 타임라인 표
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문

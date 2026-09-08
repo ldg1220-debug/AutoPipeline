@@ -221,13 +221,36 @@ async function callGPT4oMini(prompt) {
 }
 
 // ── Pass 1: 검색 의도 분석 ──────────────────────────────────────────────────
+// 프롬프트의 "이렇게 하지 말 것" 부정 예시(예: "30대 직장인, 재테크 관심자")를 LLM이
+// 오히려 그대로 베껴 쓰는 사례가 실측(maeilg.com/248)에서 재발했음 — 프롬프트 문구만으로는
+// 막히지 않으므로 target_reader 응답에서도 코드로 한 번 더 걸러낸다
+// (sanitizeTitleForTransport와 같은 패턴).
+const STALE_PERSONA_PATTERNS = [
+  /\d0대\s*직장인/,        // "30대 직장인" 등
+  /재테크\s*관심자?/,
+  /투자\s*(초보|관심)/,
+  /경제\s*뉴스레터\s*구독자/,
+];
+
+function sanitizeTargetReader(targetReader) {
+  if (!targetReader) return targetReader;
+  const hit = STALE_PERSONA_PATTERNS.find((re) => re.test(targetReader));
+  if (!hit) return targetReader;
+  logger.warn(`[blog_content_enhancer] target_reader에 구 경제채널 페르소나 잔존 감지 → 기본값으로 대체: "${targetReader}"`);
+  return '여행 코스를 계획 중인 국내·해외 자유여행자';
+}
+
 async function pass1Intent(keyword, category, benchmarkCtx = '') {
   const template = await loadPrompt('blog_pass1_intent.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
   const targetAudience = await loadTargetAudience();
   const prompt   = fillTemplate(template, { keyword, category, today, target_audience: targetAudience }) + benchmarkCtx;
   await throttle(2000);
-  return callGPT4oMini(prompt);
+  const intent = await callGPT4oMini(prompt);
+  if (intent?.target_reader) {
+    intent.target_reader = sanitizeTargetReader(intent.target_reader);
+  }
+  return intent;
 }
 
 // ── Pass 2: H2/H3 아웃라인 + FAQ 생성 ─────────────────────────────────────

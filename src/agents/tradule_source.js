@@ -179,6 +179,9 @@ export async function attachTripData(keywordData) {
         totalDistanceKm: brief.totalDistanceKm ?? null,
         spots:           sanitizeSpots(brief.spots),
         appUrl:          brief.appUrl ?? null,
+        // 코스 지도 이미지(번호 마커 + 동선 라인, 트레쥴 워터마크 포함) — 지시서 §2:
+        // 그 글에만 있는 자산이라 Pexels 무관 스톡 사진보다 신뢰도가 높음. null이면 본문에서 생략.
+        imageUrl:        brief.imageUrl ?? null,
       },
     });
     logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${brief.spots.length}개 확보`);
