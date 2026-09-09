@@ -223,11 +223,26 @@ function buildBlogStyles(category) {
 .cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:32px 24px;text-align:center;margin:36px 0;box-shadow:0 6px 24px rgba(30,58,138,.3)}
 .cta-box h3{margin:0 0 10px;font-size:20px;font-weight:700}
 .cta-box p{margin:0 0 16px;font-size:14px;opacity:.9;line-height:1.7}
+.timeline-table{margin:24px 0}
+.timeline-table h4{margin:0 0 10px;font-size:16px}
+.timeline-table table{width:100%;border-collapse:collapse;font-size:14px}
+.timeline-table th,.timeline-table td{border:1px solid #e5e7eb;padding:8px 10px;text-align:left}
+.timeline-table th{background:#f9fafb;font-weight:600}
+.distance-disclosure{font-size:12px;color:#9ca3af;margin:-8px 0 16px}
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
 ${RELATED_POSTS_CSS}
 ${getThemeStyles(category)}
 </style>`;
 }
+
+// ── 임시 조치(지시서 2026-09-08, 원복: 2026-09-09): 이동거리/시간 표기 ──────────
+// course-brief의 totalDistanceKm/toNextMinutes/toNextMode가 한때 직선거리(하버사인) ÷
+// 고정 속도(walk 4.8km/h, car 24~25km/h) 추정값이었던 시기(09-08 실측: 경주/통영/오사카
+// d3 오차 0.01~0.04km)에 켜뒀던 스위치. 트레쥴이 같은 날 밤 실제 경로 조회를 붙였음을
+// 09-09 프로덕션 재실측으로 확인(통영 d1 API 37.6km ↔ 직선 합 23.47km = 1.60배, 구간
+// 속도도 더 이상 고정값이 아님) — false로 되돌림. 같은 상황이 재발하면 이 스위치 하나만
+// true로 켜면 되므로 삭제하지 않고 남겨둔다.
+const STRAIGHT_LINE_DISTANCE_MODE = false;
 
 // ── ① TL;DR 박스 ──────────────────────────────────────────────────────────
 // 지시서 A-1: "~라면 ~가 중요합니다" 식 섹션 첫 문장 복붙은 요약이 아니라 정보 0.
@@ -246,12 +261,18 @@ function buildTldrBox(sections, tripData) {
 
 function buildTldrBulletsFromTripData(tripData) {
   const spots = tripData.spots ?? [];
-  const totalHours = spots.reduce((sum, s) => sum + (s.toNextMinutes ?? 0), 0) / 60;
   const bullets = [];
 
-  const distancePart = tripData.totalDistanceKm ? `총 이동 ${tripData.totalDistanceKm}km · ` : '';
-  const timePart = totalHours > 0 ? ` · 약 ${totalHours < 1 ? Math.round(totalHours * 60) + '분' : totalHours.toFixed(1) + '시간'}` : '';
-  bullets.push(`<li>${distancePart}${spots.length}곳${timePart}</li>`);
+  if (STRAIGHT_LINE_DISTANCE_MODE) {
+    // 소요시간·이동수단은 직선거리 추정이라 근거 없음 — 거리만, 출처를 명시해 남긴다.
+    const distancePart = tripData.totalDistanceKm ? `직선거리 기준 약 ${tripData.totalDistanceKm}km · ` : '';
+    bullets.push(`<li>${distancePart}${spots.length}곳</li>`);
+  } else {
+    const totalHours = spots.reduce((sum, s) => sum + (s.toNextMinutes ?? 0), 0) / 60;
+    const distancePart = tripData.totalDistanceKm ? `총 이동 ${tripData.totalDistanceKm}km · ` : '';
+    const timePart = totalHours > 0 ? ` · 약 ${totalHours < 1 ? Math.round(totalHours * 60) + '분' : totalHours.toFixed(1) + '시간'}` : '';
+    bullets.push(`<li>${distancePart}${spots.length}곳${timePart}</li>`);
+  }
 
   const route = spots
     .map((s) => {
@@ -263,13 +284,21 @@ function buildTldrBulletsFromTripData(tripData) {
     .join(' → ');
   bullets.push(`<li>${route}</li>`);
 
-  const modes = [...new Set(spots.map((s) => s.toNextMode).filter(Boolean))];
-  if (modes.length) {
-    const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
-    bullets.push(`<li>이동수단: ${modes.map((m) => modeKr[m] ?? m).join(', ')} 기준</li>`);
+  if (!STRAIGHT_LINE_DISTANCE_MODE) {
+    const modes = [...new Set(spots.map((s) => s.toNextMode).filter(Boolean))];
+    if (modes.length) {
+      const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+      bullets.push(`<li>이동수단: ${modes.map((m) => modeKr[m] ?? m).join(', ')} 기준</li>`);
+    }
   }
 
   return bullets;
+}
+
+/** 거리 관련 문구 아래 1회만 노출하는 직선거리 고지 — STRAIGHT_LINE_DISTANCE_MODE일 때만. */
+function buildStraightLineDisclosure(tripData) {
+  if (!STRAIGHT_LINE_DISTANCE_MODE || !tripData?.spots?.length) return '';
+  return `<p class="distance-disclosure">※ 거리는 장소 간 직선거리 기준입니다. 실제 이동 거리와 시간은 경로에 따라 더 깁니다.</p>`;
 }
 
 function buildTldrBulletsFromSections(sections) {
@@ -282,6 +311,63 @@ function buildTldrBulletsFromSections(sections) {
       return first ? `<li>${first}</li>` : null;
     })
     .filter(Boolean);
+}
+
+// ── B-3(작업지시서 §B): 동선 타임라인 표 ──────────────────────────────────
+// trip_data의 order/rating/toNextMinutes/toNextMode를 프로즈로 풀어쓰지 않고
+// 표로 그대로 노출한다 — 이미 있는 데이터이므로 트레쥴 응답 확장 없이 가능.
+const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+
+function formatToNext(spot) {
+  // 직선거리 모드에서는 toNextMinutes/toNextMode도 같은 직선거리÷고정속도 추정값이라
+  // TL;DR과 동일한 이유로 신뢰할 수 없음 — 표에서도 시간·이동수단 대신 "-"만 남긴다.
+  if (STRAIGHT_LINE_DISTANCE_MODE) return '-';
+  if (spot.toNextMinutes == null) return '-';
+  const mode = spot.toNextMode ? `${MODE_KR[spot.toNextMode] ?? spot.toNextMode} ` : '';
+  return `${mode}${spot.toNextMinutes}분`;
+}
+
+function formatRating(spot) {
+  if (typeof spot.rating !== 'number') return '-';
+  const reviewPart = typeof spot.reviewCount === 'number' ? ` (${spot.reviewCount.toLocaleString()})` : '';
+  return `★${spot.rating}${reviewPart}`;
+}
+
+// 지시서 §2(2026-09-08): course-brief의 imageUrl(번호 마커 + 동선 라인 지도, 트레쥴 워터마크
+// 포함)을 본문에 삽입한다. 이 글에만 있는 자산이라 무관한 Pexels 스톡 사진보다 신뢰도가 높음.
+// null이면(옛 캐시·GCP Maps 미활성 지역 등) 조용히 생략 — 창작 금지(C-2 원칙과 동일 취지).
+function buildCourseMapImage(tripData) {
+  if (!tripData?.imageUrl) return '';
+  const label = `${tripData.region ?? ''} ${tripData.days === 1 ? '당일' : `${tripData.days ?? ''}일`} 코스`.trim();
+  return (
+    `<div class="blog-img-wrap">\n` +
+    `<img src="${tripData.imageUrl}" alt="${label} 지도" loading="lazy" />\n` +
+    `<p class="photo-credit">코스 지도 · 트레쥴</p>\n` +
+    `</div>`
+  );
+}
+
+function buildTimelineTable(tripData) {
+  const spots = tripData?.spots ?? [];
+  if (spots.length === 0) return '';
+
+  // 직선거리 모드에서는 "다음까지"가 전부 "-"가 되는 무의미한 열이라 아예 뺀다(순서/장소/평점만).
+  const showNextCol = !STRAIGHT_LINE_DISTANCE_MODE;
+  const nextTh  = showNextCol ? '<th>다음까지</th>' : '';
+  const rows = spots
+    .map((s) => {
+      const nextTd = showNextCol ? `<td>${formatToNext(s)}</td>` : '';
+      return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s)}</td>${nextTd}</tr>`;
+    })
+    .join('\n');
+
+  return (
+    `<div class="timeline-table">\n` +
+    `<h4>🗺️ 동선 타임라인${tripData.days ? ` (${tripData.days === 1 ? '당일' : `${tripData.days}일`})` : ''}</h4>\n` +
+    `<table>\n<thead><tr><th>순서</th><th>장소</th><th>평점</th>${nextTh}</tr></thead>\n` +
+    `<tbody>\n${rows}\n</tbody>\n</table>\n` +
+    `</div>`
+  );
 }
 
 // ── ① 키워드 하이라이트 (각 키워드 첫 등장만) ─────────────────────────────
@@ -599,6 +685,9 @@ async function monetizeBlogDraft(content) {
 
   // ① TL;DR 박스
   const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
+  const distanceDisclosureHtml = buildStraightLineDisclosure(content.trip_data); // 임시 조치(2026-09-08), 1회만
+  const courseMapHtml = buildCourseMapImage(content.trip_data);
+  const timelineHtml = buildTimelineTable(content.trip_data);
 
   // ① 키워드 태그 클라우드
   const tagCloudHtml = buildKeywordTags(seoKeywords);
@@ -718,6 +807,9 @@ async function monetizeBlogDraft(content) {
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
+    distanceDisclosureHtml,                       // 임시 조치(2026-09-08): 직선거리 기준 고지 (거리 언급 직후 1회)
+    courseMapHtml,                                // §2(2026-09-08): 코스 지도 (트레쥴 워터마크) — 본문 첫 이미지
+    timelineHtml,                                 // B-3: 동선 타임라인 표
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문
     midBodyCta,                                   // 트레쥴 CTA — 코스 나열 직후 (C-1)

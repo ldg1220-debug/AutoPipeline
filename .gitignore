@@ -25,5 +25,5 @@ output/analytics/*
 output/backup/*
 !output/backup/.gitkeep
 
-# SQLite DB (로컬 전용)
-data/
+# SQLite DB (로컬 전용) — 루트 data/ 만 무시 (src/data/ 는 소스코드이므로 제외 대상 아님)
+/data/
