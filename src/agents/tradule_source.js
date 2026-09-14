@@ -113,7 +113,7 @@ async function fetchCourseBrief(region, days) {
   }
 }
 
-async function fetchCourseBriefWithRetry(region, days) {
+export async function fetchCourseBriefWithRetry(region, days) {
   let result = await fetchCourseBrief(region, days);
   if (!result) {
     await new Promise((r) => setTimeout(r, RETRY_GAP_MS));
@@ -126,7 +126,7 @@ async function fetchCourseBriefWithRetry(region, days) {
  * 리뷰 수가 적어 신뢰할 수 없는 평점을 null로 치환한다 (장소 자체는 코스에 유지).
  * 응답값만 쓰는 C-2 원칙을 지키면서, 신뢰도 낮은 값이 본문에 그대로 실리는 것만 막는다.
  */
-function sanitizeSpots(spots) {
+export function sanitizeSpots(spots) {
   return (spots ?? []).map((spot) => {
     const reviewCount = spot.reviewCount ?? null;
     const trustworthy = typeof reviewCount === 'number' && reviewCount >= MIN_REVIEW_COUNT_FOR_RATING;
