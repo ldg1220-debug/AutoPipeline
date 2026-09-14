@@ -1,10 +1,17 @@
 #!/usr/bin/env node
 /**
- * write-kin-answer.js — 네이버 지식iN 답변 초안 생성기 (지시서 2026-09-14).
+ * write-kin-answer.js — 네이버 지식iN 답변 초안 생성기 (지시서 2026-09-14, 템플릿 명세 2026-09-15).
  *
  * 블로그 파이프라인에서 "발행"만 뺀 것. course-brief 데이터로 답변 초안을 만들고,
  * 붙여넣기는 사람이 직접 한다 — 자동 등록은 절대 만들지 않는다(§2, 지식iN 공개 API
  * 없음 · 계정 정지 위험).
+ *
+ * 출력 구조는 5블록 고정(2026-09-15 지시서 §2):
+ *   [A] 도입 1~2문장   — LLM 생성, 프롬프트는 prompts/kin_answer.md
+ *   [B] 일차별 코스     — 코드가 trip_data로 결정적으로 조립(LLM이 장소·평점을 안 만듦)
+ *   [C] 팁 1~2문장      — 리뷰 근거(2건 이상)가 있을 때만 LLM 생성, 없으면 블록 자체를 뺌
+ *   [D] 개인 코멘트 자리 — 고정 문구, LLM이 절대 채우지 않음
+ *   [E] 링크 0~1줄      — history.json 조건 통과 시에만
  *
  * 사용법:
  *   node scripts/write-kin-answer.js --region 오사카 --days 2 \
@@ -21,9 +28,6 @@
  *
  * 출력: output/kin/{date}_{region}_{days}일.md
  * 이력: output/kin/history.json — { date, region, questionUrl:null, linkIncluded }
- *
- * §3: LLM이 팁을 지어내지 않는다 — 리뷰 원문에서 근거를 못 찾으면 반드시 빈칸으로 둔다.
- * §7: 홍보성 문구·구 경제채널 페르소나·과장 표현은 코드로 필터한다.
  */
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -33,12 +37,12 @@ import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import {
   REGION_TREE,
-  extractRegion,
   fetchCourseBriefWithRetry,
   sanitizeSpots,
 } from '../src/agents/tradule_source.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROMPT_PATH = path.resolve(__dirname, '../prompts/kin_answer.md');
 
 // ── 인자 파싱 ────────────────────────────────────────────────────────────
 function getArg(name, fallback = null) {
@@ -60,18 +64,40 @@ const wantsLink  = hasFlag('link');
 
 const OUT_DIR      = path.resolve(__dirname, '../output/kin');
 const HISTORY_PATH = path.join(OUT_DIR, 'history.json');
-const LINK_HISTORY_WINDOW = 5; // 최근 N건 중 1건 초과 링크 금지 (§5)
+const LINK_HISTORY_WINDOW = 5;   // 최근 N건 중 1건 초과 링크 금지 (§5)
+const MAX_SPOTS_PER_DAY   = 6;   // §3-B: 하루 장소 수 3~6곳, 넘으면 앞에서 자르기
+const D_BLOCK_TEXT = '(여기에 직접 한 줄 — 안 쓰면 그냥 지우고 올리세요)';
+
+// ── 프롬프트 로드 (prompts/kin_answer.md, 마커로 두 섹션 분리) ──────────────
+async function loadPrompts() {
+  const raw = await fs.readFile(PROMPT_PATH, 'utf8');
+  const [introTpl, tipTpl] = raw.split('<!-- ===TIP_PROMPT=== -->');
+  if (!tipTpl) throw new Error(`${PROMPT_PATH}에 <!-- ===TIP_PROMPT=== --> 마커가 없습니다.`);
+  return { introTpl: introTpl.trim(), tipTpl: tipTpl.trim() };
+}
+function fillTemplate(tpl, vars) {
+  return Object.entries(vars).reduce(
+    (acc, [k, v]) => acc.replaceAll(`{${k}}`, v ?? ''),
+    tpl
+  );
+}
 
 // ── §7: 금지 표현 필터 ──────────────────────────────────────────────────
-// sanitizeTargetReader(blog_content_enhancer.js)와 동일 패턴 — 리터럴 문구를
-// 프롬프트에 "쓰지 마라"고 적으면 LLM이 오히려 베끼는 사례가 있었으므로, 프롬프트
-// 지시에 더해 생성된 텍스트도 코드로 한 번 더 걸러낸다.
+// sanitizeTargetReader(blog_content_enhancer.js)와 동일 패턴 — 프롬프트로 "쓰지 마라"고
+// 적으면 LLM이 오히려 베끼는 사례가 있었으므로, 생성된 텍스트도 코드로 한 번 더 걸러낸다.
 const BANNED_PATTERNS = [
   { re: /제가\s*만든\s*앱/g, label: '홍보 문구("제가 만든 앱")' },
-  { re: /저희\s*서비스/g, label: '홍보 문구("저희 서비스")' },
+  { re: /저희\s*서비스|우리\s*서비스/g, label: '홍보 문구("저희/우리 서비스")' },
   { re: /\d0대\s*직장인/g, label: '구 경제채널 페르소나' },
   { re: /무조건/g, label: '과장 표현("무조건")' },
-  { re: /반드시\s*필수/g, label: '과장 표현' },
+  { re: /(반드시\s*)?필수(?!\S)/g, label: '과장 표현("필수")' },
+  { re: /(?<!안\s?)꼭\s/g, label: '과장 표현("꼭")' },
+  { re: /안녕하세요[!~.]*/g, label: '인사말' },
+  { re: /도움이\s*되셨길|도움\s*되셨으면/g, label: '맺음말' },
+  { re: /정말\s*(좋아요|매력적|훌륭)/g, label: '감상 표현' },
+  { re: /[•※]|^-\s/gm, label: '불릿 기호' },
+  // 이모지 범위(일반적인 것만) — 과도한 유니코드 매칭은 피하고 흔한 대역만
+  { re: /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, label: '이모지' },
 ];
 
 function filterBannedPhrases(text) {
@@ -83,7 +109,7 @@ function filterBannedPhrases(text) {
       result = result.replace(re, '');
     }
   }
-  return { text: result, hits };
+  return { text: result.replace(/\s{2,}/g, ' ').trim(), hits };
 }
 
 // ── LLM 호출 (가벼운 단독 호출 — 블로그 파이프라인의 무거운 폴백 사다리는 쓰지 않음) ──
@@ -138,11 +164,9 @@ async function fetchPlaceReviewSnippets(placeId) {
     const data = res.data ?? {};
     const raw = data.reviews ?? data.topReviews ?? data.userReviews ?? [];
     if (!Array.isArray(raw) || raw.length === 0) return [];
-    return raw.slice(0, 3).map((r) => ({
+    return raw.slice(0, 5).map((r) => ({
       text:   r.text ?? r.content ?? r.comment ?? '',
       rating: r.rating ?? null,
-      // 실측 확인(2026-09-14): 필드명은 `when` ("1달 전" 형식) — 다른 후보는 혹시 모를
-      // 스키마 변경 대비로 남겨둔다.
       age:    r.when ?? r.relativeTime ?? r.time ?? r.date ?? '',
     })).filter((r) => r.text);
   } catch (err) {
@@ -162,6 +186,7 @@ async function resolveSpots() {
       const place = await fetchPlaceByName(names[i]);
       spots.push({
         order:       i + 1,
+        day:         1,
         name:        place?.name ?? names[i],
         placeId:     place?.placeId ?? null,
         rating:      place?.rating ?? null,
@@ -188,7 +213,7 @@ async function resolveSpots() {
   };
 }
 
-/** 평점 없는 스팟은 기본 제외(§10 확인표) + --exclude 이름 부분일치 제외. 검수 기록에 남긴다. */
+/** [B] 규칙: 평점 없는 스팟은 기본 제외 + --exclude 이름 부분일치 제외. 검수 기록에 남긴다. */
 function reviewSpots(rawSpots) {
   const excludeNames = excludeArg.split(',').map((s) => s.trim()).filter(Boolean);
   const kept = [];
@@ -208,6 +233,115 @@ function reviewSpots(rawSpots) {
     kept.push(spot);
   }
   return { kept, excluded };
+}
+
+// ── [B] 일차별 코스 블록 — 코드가 결정적으로 조립 (LLM이 장소·평점을 만들지 않음) ──
+function formatSpotLine(spot) {
+  const ratingPart = typeof spot.reviewCount === 'number'
+    ? `★${spot.rating} (리뷰 ${spot.reviewCount.toLocaleString()})`
+    : `★${spot.rating}`;
+  return `${spot.name} ${ratingPart}`;
+}
+
+/**
+ * §3-B: `**N일차 (권역, 총 N km)**` 형식이 요구되지만, 현재 course-brief 스키마에는
+ * 일차별 권역명·일차별 거리 필드가 없다(트레쥴 지시서 2026-09-07에서 다른 지역의
+ * 일차별 거리가 언급된 적은 있으나 이 저장소의 attachTripData/course-brief 매핑은
+ * 트립 전체 totalDistanceKm만 받음). 없는 값을 지어내지 않기 위해 1일 코스에 한해
+ * totalDistanceKm을 헤딩에 붙이고, 권역명과 멀티데이 일차별 거리는 생략한다
+ * (지시서와 다르게 한 것으로 보고).
+ */
+function buildCourseBlock(tripData, keptSpots) {
+  const byDay = new Map();
+  for (const spot of keptSpots) {
+    const day = spot.day ?? 1;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(spot);
+  }
+
+  const dayNumbers = [...byDay.keys()].sort((a, b) => a - b);
+  const blocks = [];
+  for (const day of dayNumbers) {
+    let spots = byDay.get(day).slice(0, MAX_SPOTS_PER_DAY);
+    const kmSuffix = (dayNumbers.length === 1 && tripData.totalDistanceKm)
+      ? ` (총 ${tripData.totalDistanceKm}km)`
+      : '';
+    const heading = `**${day}일차${kmSuffix}**`;
+
+    // 첫 장소는 그대로, 이후 장소는 "→ N분 · " (직전 장소의 toNextMinutes)를 앞에 붙인다.
+    const lines = spots.map((spot, i) => {
+      if (i === 0) return formatSpotLine(spot);
+      const prev = spots[i - 1];
+      const prefix = typeof prev.toNextMinutes === 'number' ? `→ ${prev.toNextMinutes}분 · ` : '';
+      return `${prefix}${formatSpotLine(spot)}`;
+    });
+    blocks.push(`${heading}\n${lines.join('\n')}`);
+  }
+  return blocks.join('\n\n');
+}
+
+// ── [C] 팁 — 리뷰 2건 이상 근거가 있을 때만 (없으면 블록 자체를 뺀다) ──────────
+async function buildTipBlock(keptSpots, tipTpl) {
+  const top = keptSpots.slice(0, 3);
+  for (const spot of top) {
+    let placeId = spot.placeId ?? null;
+    if (!placeId) {
+      const place = await fetchPlaceByName(spot.name);
+      placeId = place?.placeId ?? null;
+    }
+    const reviews = await fetchPlaceReviewSnippets(placeId);
+    if (reviews.length < 2) continue; // §3: 리뷰 2건 이상일 때만
+
+    const reviewTexts = reviews.map((r) => `- "${r.text}"(${r.rating ? `★${r.rating}` : '평점 미상'}${r.age ? `, ${r.age}` : ''})`).join('\n');
+    const prompt = fillTemplate(tipTpl, { spot_name: spot.name, review_texts: reviewTexts });
+    const raw = await callLLM(prompt);
+    const { text, hits } = filterBannedPhrases(raw);
+    if (hits.length) logger.warn(`[write-kin-answer] [C] 금지 표현 감지·제거: ${hits.join(', ')}`);
+    if (!text) continue;
+
+    const evidenceNote = reviews.map((r) => `"${r.text}"(${r.rating ? `★${r.rating}` : '평점 미상'}${r.age ? `, ${r.age}` : ''})`).join(' / ');
+    return { tipText: text, evidenceNote, spotName: spot.name };
+  }
+  return null; // 근거 부족 — [C] 블록 생략
+}
+
+// ── [A] 도입 — LLM 생성, 기존 도입부와 겹치지 않게 ─────────────────────────
+async function loadExistingIntrosForRegion(regionName) {
+  try {
+    const files = await fs.readdir(OUT_DIR);
+    const matches = files.filter((f) => f.endsWith('.md') && f.includes(regionName));
+    const intros = [];
+    for (const f of matches.slice(-5)) {
+      const content = await fs.readFile(path.join(OUT_DIR, f), 'utf8');
+      const marker = content.split('## 복붙 영역 ↓↓↓')[1];
+      if (marker) {
+        const firstLine = marker.split('\n').find((l) => l.trim().length > 0);
+        if (firstLine) intros.push(firstLine.trim());
+      }
+    }
+    return intros;
+  } catch {
+    return [];
+  }
+}
+
+async function buildIntroBlock(tripData, keptSpots, existingIntros, introTpl) {
+  const day1Names = keptSpots.filter((s) => (s.day ?? 1) === 1).slice(0, 3).map((s) => s.name);
+  const prompt = fillTemplate(introTpl, {
+    question,
+    region: tripData.region,
+    days: String(tripData.days),
+    tone: tone ?? '(질문에 명시된 조건 없음)',
+    spots_summary: day1Names.join(', '),
+    avoid_intros: existingIntros.length ? existingIntros.map((s) => `- ${s}`).join('\n') : '(없음)',
+  });
+  const raw = await callLLM(prompt);
+  const { text, hits } = filterBannedPhrases(raw);
+  if (hits.length) logger.warn(`[write-kin-answer] [A] 금지 표현 감지·제거: ${hits.join(', ')}`);
+  if (text.length > 150) {
+    logger.warn(`[write-kin-answer] [A] 도입 길이 초과(${text.length}자, 권장 40~120자) — 그대로 사용, 수동 검토 권장`);
+  }
+  return text;
 }
 
 // ── 링크 이력 (§5) ──────────────────────────────────────────────────────
@@ -238,80 +372,6 @@ function decideLinkInclusion(history, wantsLinkFlag) {
   return { include: true, reason: `최근 ${recent.length}건 중 링크 0건` };
 }
 
-// ── 중복 문장 회피 (§6) ─────────────────────────────────────────────────
-async function loadExistingIntrosForRegion(regionName) {
-  try {
-    const files = await fs.readdir(OUT_DIR);
-    const matches = files.filter((f) => f.endsWith('.md') && f.includes(regionName));
-    const intros = [];
-    for (const f of matches.slice(-5)) {
-      const content = await fs.readFile(path.join(OUT_DIR, f), 'utf8');
-      const marker = content.split('## 복붙 영역 ↓↓↓')[1];
-      if (marker) {
-        const firstLine = marker.split('\n').find((l) => l.trim().length > 0);
-        if (firstLine) intros.push(firstLine.trim());
-      }
-    }
-    return intros;
-  } catch {
-    return [];
-  }
-}
-
-// ── 답변 본문 생성 ──────────────────────────────────────────────────────
-function formatSpotLine(spot) {
-  const ratingPart = typeof spot.rating === 'number'
-    ? `★${spot.rating}${typeof spot.reviewCount === 'number' ? ` (리뷰 ${spot.reviewCount.toLocaleString()})` : ''}`
-    : '';
-  return `${spot.name}${ratingPart ? ' ' + ratingPart : ''}`;
-}
-
-async function buildAnswerBody(tripData, keptSpots, existingIntros) {
-  const spotsList = keptSpots.map((s, i) => `${i + 1}. ${formatSpotLine(s)}`).join('\n');
-  const avoidBlock = existingIntros.length
-    ? `\n\n아래 문장들과 겹치지 않게 쓸 것(이미 쓴 도입부들):\n${existingIntros.map((s) => `- ${s}`).join('\n')}`
-    : '';
-  const toneBlock = tone ? `\n질문자 조건: ${tone}` : '';
-
-  const prompt = `당신은 여행 코스를 안내하는 네이버 지식iN 답변자입니다. 아래 정보만 사용해 답변 본문을 작성하세요.
-과장하지 말고, 가보지 않은 곳을 다녀온 것처럼 쓰지 마세요("저는 가봤는데" 같은 1인칭 경험 서술 금지).
-"제가 만든 앱", "저희 서비스" 같은 홍보 문구를 쓰지 마세요. "무조건", "필수" 같은 과장 표현도 쓰지 마세요.
-지역·나이대 페르소나는 질문에 주어진 것만 쓰고 임의로 만들지 마세요.
-
-질문: ${question}
-지역: ${tripData.region} / 일정: ${tripData.days}일${toneBlock}
-스팟 목록(이 순서·이름·평점만 사용, 다른 장소를 지어내지 말 것):
-${spotsList}
-${avoidBlock}
-
-형식: 일차별로 나눠 스팟을 나열하는 짧은 안내문(200~400자). 평점이 있는 곳만 평점을 언급하고, 없는 곳은 평점을 언급하지 마세요. 마크다운으로 "**N일차**" 헤딩을 쓰세요.`;
-
-  const raw = await callLLM(prompt);
-  const { text, hits } = filterBannedPhrases(raw);
-  if (hits.length) {
-    logger.warn(`[write-kin-answer] 금지 표현 감지·제거: ${hits.join(', ')}`);
-  }
-  return text;
-}
-
-/** §3: 리뷰 근거가 있는 스팟만 팁 문장을 만든다. 없으면 절대 지어내지 않고 문자열을 비운다. */
-async function buildTipLine(keptSpots) {
-  const top = keptSpots.slice(0, 3);
-  const evidences = [];
-  for (const spot of top) {
-    let placeId = spot.placeId ?? null;
-    if (!placeId) {
-      const place = await fetchPlaceByName(spot.name);
-      placeId = place?.placeId ?? null;
-    }
-    const reviews = await fetchPlaceReviewSnippets(placeId);
-    for (const r of reviews) {
-      evidences.push(`"${r.text}"(${r.rating ? `★${r.rating}` : '평점 미상'}${r.age ? `, ${r.age}` : ''}) — ${spot.name}`);
-    }
-  }
-  return evidences; // 비어있으면 호출부가 빈칸으로 남긴다
-}
-
 // ── main ─────────────────────────────────────────────────────────────────
 async function main() {
   if (!question) {
@@ -319,6 +379,7 @@ async function main() {
     process.exit(1);
   }
 
+  const { introTpl, tipTpl } = await loadPrompts();
   const tripData = await resolveSpots();
   const { kept, excluded } = reviewSpots(tripData.spots);
 
@@ -328,22 +389,40 @@ async function main() {
   }
 
   const existingIntros = await loadExistingIntrosForRegion(tripData.region);
-  const bodyMd = await buildAnswerBody(tripData, kept, existingIntros);
-  const evidences = await buildTipLine(kept);
 
+  // [A] 도입
+  const introText = await buildIntroBlock(tripData, kept, existingIntros, introTpl);
+  // [B] 코스 — 코드가 결정적으로 조립
+  const courseBlock = buildCourseBlock(tripData, kept);
+  // [C] 팁 — 근거 부족 시 null(블록 생략)
+  const tip = await buildTipBlock(kept, tipTpl);
+
+  // [E] 링크
   const history = await loadHistory();
   const linkDecision = decideLinkInclusion(history, wantsLink);
-  const linkLine = linkDecision.include && tripData.appUrl
-    ? `\n\n이 코스를 앱에서 바로 열어보실 수 있습니다: ${tripData.appUrl}`
-    : '';
+  const linkBlock = linkDecision.include && tripData.appUrl
+    ? `지도로 보시려면: ${tripData.appUrl}`
+    : null;
 
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const slug = `${date}_${tripData.region || 'custom'}_${tripData.days}일`;
   const outPath = path.join(OUT_DIR, `${slug}.md`);
 
-  const tipBlock = evidences.length
-    ? `리뷰 근거: ${evidences.join(' / ')}`
-    : '(리뷰 근거를 찾지 못함 — 지어내지 않음. 필요하면 아래 빈칸에 직접 채울 것)';
+  // 5블록 순서 고정: A → B → C → D → E
+  const answerParts = [introText, courseBlock];
+  if (tip) answerParts.push(tip.tipText);
+  answerParts.push(D_BLOCK_TEXT);
+  if (linkBlock) answerParts.push(linkBlock);
+  const answerBody = answerParts.join('\n\n');
+
+  const totalChars = answerBody.replace(D_BLOCK_TEXT, '').length;
+  if (totalChars < 400 || totalChars > 1000) {
+    logger.warn(`[write-kin-answer] 전체 길이 ${totalChars}자 — 권장 범위(400~700, 상한 1000) 밖. 수동 검토 권장.`);
+  }
+
+  const tipRecordLine = tip
+    ? `리뷰 근거: ${tip.evidenceNote}`
+    : '(리뷰 근거를 찾지 못함 — 지어내지 않음. [C] 블록 생략됨)';
 
   const md = `# [질문] ${question.slice(0, 40)}${question.length > 40 ? '...' : ''}
 질문 링크: (붙여넣기)
@@ -351,16 +430,15 @@ async function main() {
 ---
 ## 복붙 영역 ↓↓↓
 
-${bodyMd}${linkLine}
-
-(여기에 직접 한 줄)
+${answerBody}
 
 ## 복붙 영역 ↑↑↑
 ---
 ### 검수 기록
 제외한 스팟: ${excluded.length ? excluded.join(', ') : '없음'}
-${tipBlock}
+${tipRecordLine}
 링크 포함: ${linkDecision.include ? '예' : `아니오 (${linkDecision.reason})`}
+전체 길이: ${totalChars}자
 `;
 
   await fs.mkdir(OUT_DIR, { recursive: true });
@@ -376,10 +454,9 @@ ${tipBlock}
 
   console.log(`✅ 저장됨: ${outPath}`);
   console.log(`   스팟 ${kept.length}개 사용 / ${excluded.length}개 제외`);
-  console.log(`   링크 포함: ${linkDecision.include ? '예' : `아니오 (${linkDecision.reason})`}`);
-  if (!evidences.length) {
-    console.log(`   ⚠️ 리뷰 근거를 못 찾았습니다 — 원고 하단 빈칸을 직접 채워주세요.`);
-  }
+  console.log(`   전체 길이: ${totalChars}자`);
+  console.log(`   [C] 팁 블록: ${tip ? '포함' : '생략(리뷰 근거 부족)'}`);
+  console.log(`   [E] 링크: ${linkDecision.include ? '포함' : `생략 (${linkDecision.reason})`}`);
 }
 
 main().catch((err) => {
