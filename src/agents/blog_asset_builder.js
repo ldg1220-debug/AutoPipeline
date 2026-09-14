@@ -7,6 +7,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
+import { extractRegion, isOverseasRegion } from './tradule_source.js';
 
 // [역할: Image Maker] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 가이드 파일(prompts/image_guide.md)에 정의된 규칙을 LLM 프롬프트에 주입하고,
@@ -34,6 +35,8 @@ async function loadImageGuide() {
 }
 
 // 카테고리별 Pexels 검색 쿼리 (블로그 가로형 이미지용)
+// travel은 지역마다 완전히 다른 장소이므로 고정 문자열이 아니라
+// buildTravelPexelsQuery()가 trip_data.region 기반으로 매번 만든다 (아래 참고).
 const PEXELS_QUERY = {
   finance:       'money finance investment korean',
   economy:       'economy business news chart graph',
@@ -42,6 +45,41 @@ const PEXELS_QUERY = {
   entertainment: 'entertainment media korean drama',
   social:        'society people community korea',
 };
+
+// 트레쥴 지역 트리(DOMESTIC_REGIONS/OVERSEAS_REGIONS)의 한글 지역명 → Pexels 영문 검색어.
+// 이 맵이 없던 시기엔 travel 카테고리가 PEXELS_QUERY에 항목이 없어 `${keyword} korea`로
+// 폴백했는데, 해외 지역(예: "발리")에도 "korea"가 그대로 붙어 완전히 무관한 한국 사진이
+// 나오는 버그가 있었다(실측: 발리 글에 한국 번화가 사진).
+const REGION_EN_NAMES = {
+  // 국내
+  '경주': 'Gyeongju', '강릉': 'Gangneung', '서울': 'Seoul', '부산': 'Busan',
+  '제주': 'Jeju', '전주': 'Jeonju', '여수': 'Yeosu', '통영': 'Tongyeong',
+  '속초': 'Sokcho', '춘천': 'Chuncheon', '양양': 'Yangyang', '대구': 'Daegu',
+  '인천': 'Incheon', '수원': 'Suwon', '군산': 'Gunsan', '목포': 'Mokpo',
+  '거제': 'Geoje', '남해': 'Namhae', '담양': 'Damyang',
+  // 해외
+  '후쿠오카': 'Fukuoka', '오사카': 'Osaka', '도쿄': 'Tokyo', '삿포로': 'Sapporo',
+  '나고야': 'Nagoya', '오키나와': 'Okinawa', '방콕': 'Bangkok', '다낭': 'Da Nang',
+  '나트랑': 'Nha Trang', '치앙마이': 'Chiang Mai', '싱가포르': 'Singapore',
+  '홍콩': 'Hong Kong', '타이베이': 'Taipei', '상하이': 'Shanghai', '괌': 'Guam', '세부': 'Cebu',
+};
+
+/**
+ * travel 카테고리 전용 Pexels 쿼리 생성. trip_data.region(또는 키워드에서 추출한 지역명)이
+ * REGION_EN_NAMES에 있으면 그 지역 영문명으로, 없으면(지역 매칭 실패 키워드 — 예:
+ * "신혼 여행지 추천"처럼 특정 지역이 없는 리스티클) 지역을 특정하지 않는 일반 여행
+ * 사진으로 폴백한다. 원본 한글 키워드를 그대로 영문 쿼리에 섞지 않는다 — Pexels는
+ * 한글 토큰을 무시하고 남은 영단어(예: "korea")만으로 매칭해 엉뚱한 사진을 반환하기 쉽다.
+ */
+function buildTravelPexelsQuery(content) {
+  const region = content?.trip_data?.region ?? extractRegion(content?.keyword ?? '');
+  const en = region ? REGION_EN_NAMES[region] : null;
+  if (en) {
+    const overseas = isOverseasRegion(region);
+    return `${en} travel landmarks${overseas ? '' : ' korea'}`;
+  }
+  return 'travel destination scenery landscape';
+}
 
 // ── 전역 Pexels ID 추적 (포스트 간 이미지 중복 방지) ─────────────────────────
 const GLOBAL_USED_IDS_PATH = path.resolve(__dirname, '../../output/blog/pexels_used_ids.json');
@@ -77,6 +115,7 @@ function buildThumbnailPrompt(content) {
     health:        'clean white background, green accents, wellness lifestyle, fresh minimalist',
     entertainment: 'vibrant colorful background, media entertainment, dynamic composition',
     social:        'warm tones, people silhouettes, community, social connection',
+    travel:        'vivid travel photography style, scenic destination, warm natural light, wanderlust mood',
   }[content.category] ?? 'clean gradient background, modern flat design';
 
   return (
@@ -137,11 +176,15 @@ async function generateDalleThumbnail(content, destPath) {
 }
 
 // ── Pexels 이미지 소싱 (카테고리 기반 — 폴백용) ──────────────────────────
-async function fetchPexelsImages(keyword, category, count, destDir) {
+// content를 넘기면 travel 카테고리는 buildTravelPexelsQuery()로 지역 기반 쿼리를 쓴다
+// (하위 호환: content 없이 keyword/category만 넘기는 기존 호출부도 그대로 동작).
+async function fetchPexelsImages(keyword, category, count, destDir, content = null) {
   const apiKey = config.pexels.apiKey;
   if (!apiKey) return [];
 
-  const query = PEXELS_QUERY[category] ?? `${keyword} korea`;
+  const query = category === 'travel'
+    ? buildTravelPexelsQuery(content ?? { keyword, category })
+    : (PEXELS_QUERY[category] ?? `${keyword} korea`);
   const res = await axios.get('https://api.pexels.com/v1/search', {
     params: { query, per_page: count + 5, orientation: 'landscape', page: Math.floor(Math.random() * 4) + 1 },
     headers: { Authorization: apiKey },
@@ -188,7 +231,10 @@ const HEADING_EN_MAP = {
   '투자': 'investment portfolio finance',
 };
 
-function buildSectionQuery(keyword, sectionHeading, category) {
+function buildSectionQuery(keyword, sectionHeading, category, content = null) {
+  // travel은 HEADING_EN_MAP이 전부 경제 채널 시절 헤딩(금리/부동산/주식 등)이라
+  // 여행 섹션 헤딩과는 매치되지 않고 늘 아래 폴백으로 빠짐 — 지역 기반 쿼리를 바로 쓴다.
+  if (category === 'travel') return buildTravelPexelsQuery(content ?? { keyword, category });
   for (const [kr, en] of Object.entries(HEADING_EN_MAP)) {
     if ((sectionHeading ?? '').includes(kr)) return `${en} korea business`;
   }
@@ -199,8 +245,9 @@ function buildSectionQuery(keyword, sectionHeading, category) {
  * 섹션 헤딩 기반으로 각 섹션에 맞는 이미지를 검색한다.
  * 섹션마다 다른 쿼리를 사용해 내용과 관련된 이미지를 가져온다.
  * 같은 포스트 내에서 동일한 Pexels 사진이 재사용되지 않도록 ID를 추적한다.
+ * content를 넘기면 travel 카테고리는 trip_data.region 기반 쿼리를 쓴다.
  */
-async function fetchSectionImages(sections, keyword, category, destDir, sharedGlobalIds = null) {
+async function fetchSectionImages(sections, keyword, category, destDir, sharedGlobalIds = null, content = null) {
   const apiKey = config.pexels.apiKey;
   if (!apiKey || !sections?.length) return [];
 
@@ -211,7 +258,7 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
 
   for (let i = 0; i < count; i++) {
     const section = sections[i];
-    const query = buildSectionQuery(keyword, section.heading ?? '', category);
+    const query = buildSectionQuery(keyword, section.heading ?? '', category, content);
     try {
       await throttle(300);
       // per_page를 10으로 늘려서 중복 회피 여지 확보
@@ -556,11 +603,11 @@ async function buildAssets(content, sharedGlobalIds = null) {
       await throttle(500);
       const sections = content.blog_draft?.sections ?? [];
       if (sections.length > 0) {
-        result.body_images = await fetchSectionImages(sections, content.keyword, content.category, assetDir, sharedGlobalIds);
+        result.body_images = await fetchSectionImages(sections, content.keyword, content.category, assetDir, sharedGlobalIds, content);
         logger.info(`[blog_asset_builder] Section images ×${result.body_images.length}: ${content.keyword}`);
       } else {
         // 섹션 없으면 카테고리 기반 폴백
-        result.body_images = await fetchPexelsImages(content.keyword, content.category, 3, assetDir);
+        result.body_images = await fetchPexelsImages(content.keyword, content.category, 3, assetDir, content);
         logger.info(`[blog_asset_builder] Category images ×${result.body_images.length}: ${content.keyword}`);
       }
     } catch (err) {
@@ -586,7 +633,9 @@ async function buildAssets(content, sharedGlobalIds = null) {
       // 전역 Set(포스트 간 중복 방지) + 현재 포스트 body_images ID 합산
       const excludedIds = sharedGlobalIds ?? new Set();
       for (const b of result.body_images) { if (b.pexels_id) excludedIds.add(b.pexels_id); }
-      const thumbQuery = PEXELS_QUERY[content.category] ?? `${content.keyword} korea`;
+      const thumbQuery = content.category === 'travel'
+        ? buildTravelPexelsQuery(content)
+        : (PEXELS_QUERY[content.category] ?? `${content.keyword} korea`);
       await throttle(300);
       const thumbRes = await axios.get('https://api.pexels.com/v1/search', {
         params: { query: thumbQuery, per_page: 15, orientation: 'landscape', page: 1 },
