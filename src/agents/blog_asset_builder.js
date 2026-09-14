@@ -57,11 +57,11 @@ const REGION_EN_NAMES = {
   '속초': 'Sokcho', '춘천': 'Chuncheon', '양양': 'Yangyang', '대구': 'Daegu',
   '인천': 'Incheon', '수원': 'Suwon', '군산': 'Gunsan', '목포': 'Mokpo',
   '거제': 'Geoje', '남해': 'Namhae', '담양': 'Damyang',
-  // 해외
+  // 해외 — OVERSEAS_REGIONS(tradule_source.js)와 동기화. 괌·홍콩·싱가포르·세부는
+  // 실제 course-brief 응답으로 검증되지 않아 제외(2026-09-14 리뷰).
   '후쿠오카': 'Fukuoka', '오사카': 'Osaka', '도쿄': 'Tokyo', '삿포로': 'Sapporo',
   '나고야': 'Nagoya', '오키나와': 'Okinawa', '방콕': 'Bangkok', '다낭': 'Da Nang',
-  '나트랑': 'Nha Trang', '치앙마이': 'Chiang Mai', '싱가포르': 'Singapore',
-  '홍콩': 'Hong Kong', '타이베이': 'Taipei', '상하이': 'Shanghai', '괌': 'Guam', '세부': 'Cebu',
+  '나트랑': 'Nha Trang', '치앙마이': 'Chiang Mai', '타이베이': 'Taipei', '상하이': 'Shanghai',
 };
 
 /**
