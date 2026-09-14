@@ -106,11 +106,12 @@ async function callLLM(prompt) {
   return res.data.choices[0].message.content.trim();
 }
 
-// ── 트레쥴 places API (미검증 — 실패 시 조용히 스킵) ────────────────────────
-// 지시서 근거: 별도 work-order(2bd3e8ff, "계획 탭 지도에서 장소 정보가 좌표만")에서
-// 실측된 응답 스키마: { placeId, name, nativeName, category, rating, reviewCount, address }.
-// /api/places/details의 리뷰 필드명은 이 세션에서 직접 확인한 적이 없다 — 여러 후보
-// 필드명을 시도하고, 전부 없으면 리뷰 없음으로 처리한다(§3: 근거 없으면 절대 지어내지 않음).
+// ── 트레쥴 places API ────────────────────────────────────────────────────
+// /api/places/search 스키마(work-order 2bd3e8ff 실측): { placeId, name, nativeName,
+// category, rating, reviewCount, address }.
+// /api/places/details 스키마(2026-09-14 실측 확인): { photoNames, reviews: [{ author,
+// rating, text, when }], rating, reviewCount, openNow }. reviews[].text/rating/when을
+// 그대로 쓴다. 응답 실패·리뷰 0건이면 리뷰 없음으로 처리한다(§3: 근거 없으면 지어내지 않음).
 async function fetchPlaceByName(name) {
   try {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
@@ -140,7 +141,9 @@ async function fetchPlaceReviewSnippets(placeId) {
     return raw.slice(0, 3).map((r) => ({
       text:   r.text ?? r.content ?? r.comment ?? '',
       rating: r.rating ?? null,
-      age:    r.relativeTime ?? r.time ?? r.date ?? '',
+      // 실측 확인(2026-09-14): 필드명은 `when` ("1달 전" 형식) — 다른 후보는 혹시 모를
+      // 스키마 변경 대비로 남겨둔다.
+      age:    r.when ?? r.relativeTime ?? r.time ?? r.date ?? '',
     })).filter((r) => r.text);
   } catch (err) {
     logger.warn(`[write-kin-answer] places/details 실패(placeId=${placeId}): ${err.message}`);
