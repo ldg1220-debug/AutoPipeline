@@ -61,6 +61,30 @@ function buildNaverIntro(metaDescription, keyword) {
   return `${summary} 아래 내용은 실제 평점·동선 데이터를 바탕으로 작성했습니다.`;
 }
 
+/**
+ * trip_data.spots를 마크다운 표로 만든다 — 티스토리 monetizer.js의 buildTimelineTable과
+ * 같은 정보(순서·장소·평점·리뷰수)를 원고에도 남긴다. 지시서(2026-09-14) §2: "평점·리뷰수
+ * 표는 그대로 — 이게 차별점입니다". 이동시간·수단은 네이버 원고에는 넣지 않는다(직선거리
+ * 추정 이슈와 별개로, 복붙용 원고라 표를 단순하게 유지).
+ */
+function buildNaverSpotsTable(tripData) {
+  const spots = tripData?.spots ?? [];
+  if (!spots.length) return '';
+  const rows = spots.map((s) => {
+    const rating = typeof s.rating === 'number'
+      ? `★${s.rating}${typeof s.reviewCount === 'number' ? ` (${s.reviewCount.toLocaleString()})` : ''}`
+      : '-';
+    return `| ${s.order ?? ''} | ${s.name} | ${rating} |`;
+  });
+  return `\n\n## 코스 한눈에 보기\n\n| 순서 | 장소 | 평점(리뷰수) |\n|---|---|---|\n${rows.join('\n')}\n`;
+}
+
+/** 코스 지도 이미지 경로 안내 — 네이버는 API 업로드가 안 되므로 복붙 시 직접 첨부해야 한다. */
+function buildNaverImageNote(tripData) {
+  if (!tripData?.imageUrl) return '';
+  return `\n\n> 📎 코스 지도 첨부용 이미지: ${tripData.imageUrl}\n> (네이버 블로그에 직접 다운로드해 첨부하세요 — 자동 업로드 불가)\n`;
+}
+
 async function saveNaverDraft(content) {
   const draft = content.blog_draft;
   if (!draft?.sections?.length) return null;
@@ -72,6 +96,8 @@ async function saveNaverDraft(content) {
 
   const naverTitle = buildNaverTitle(draft.title, content.keyword);
   const naverIntro = buildNaverIntro(draft.meta_description, content.keyword);
+  const spotsTableMd = buildNaverSpotsTable(content.trip_data);
+  const imageNoteMd  = buildNaverImageNote(content.trip_data);
 
   const sectionsMd = draft.sections
     .map((s) => `## ${s.heading}\n\n${s.body ?? ''}`)
@@ -82,8 +108,9 @@ async function saveNaverDraft(content) {
       draft.faq.map((f) => `**Q. ${f.q}**\n\n${f.a ?? f.a_hint ?? ''}`).join('\n\n')
     : '';
 
-  // 티스토리 링크·트레쥴 CTA 등 외부 링크는 넣지 않는다 (독립 원고로 취급 — 지시서 §3)
-  const md = `# ${naverTitle}\n\n${naverIntro}\n\n${sectionsMd}${faqMd}\n`;
+  // 티스토리 링크·트레쥴 CTA·eSIM 제휴 링크는 넣지 않는다 (독립 원고로 취급, 네이버는
+  // 외부 제휴 링크에 엄격함 — 지시서 §2)
+  const md = `# ${naverTitle}\n\n${naverIntro}${imageNoteMd}${spotsTableMd}\n\n${sectionsMd}${faqMd}\n`;
 
   try {
     await fs.mkdir(outDir, { recursive: true });

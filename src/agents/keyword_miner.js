@@ -221,7 +221,7 @@ async function applySearchVolumeGate(candidates) {
     return candidates;
   }
 
-  const minVolume = config.naverSearchAd.minMonthlyVolume ?? 300;
+  const minVolume = config.naverSearchAd.minMonthlyVolume ?? 1000;
   const volumeMap = await fetchMonthlyVolumeMap(candidates.map((c) => c.keyword));
 
   const passed = [];
@@ -230,9 +230,20 @@ async function applySearchVolumeGate(candidates) {
   for (const c of candidates) {
     const norm = c.keyword.replace(/\s+/g, '');
     const volume = volumeMap[norm];
-    // 데이터가 아예 없는 경우(API가 해당 키워드를 인식 못함)는 판단 불가 — fail-open으로 통과
-    if (volume === undefined || volume >= minVolume) {
-      passed.push(c);
+    if (volume === undefined) {
+      // 데이터가 아예 없는 경우(API가 해당 키워드를 인식 못함) — 판단 불가.
+      // autoMode(무인 실행)는 게이트를 건너뛰는 결과와 같아지므로 fail-closed로 탈락시킨다
+      // (maeilg.com 3개월 클릭 14회 실측 — "판단 불가 → 통과"가 사실상 게이트 무력화였음).
+      // 수동 실행은 사람이 결과를 보고 판단할 수 있으니 fail-open으로 통과시켜 후보로만 남긴다.
+      if (config.runtime.autoMode) {
+        dropped.push(`${c.keyword}(volume 없음)`);
+      } else {
+        passed.push({ ...c, search_volume: null });
+      }
+      continue;
+    }
+    if (volume >= minVolume) {
+      passed.push({ ...c, search_volume: volume });
     } else {
       dropped.push(`${c.keyword}(${volume})`);
     }
@@ -241,11 +252,15 @@ async function applySearchVolumeGate(candidates) {
   if (dropped.length > 0) {
     logger.info(`[keyword_miner] 검색량 게이트 탈락 (임계값 ${minVolume}): ${dropped.join(', ')}`);
   }
+  if (passed.length > 0) {
+    logger.info(`[keyword_miner] 검색량 게이트 통과 (임계값 ${minVolume}): ` +
+      passed.map((c) => `${c.keyword}(${c.search_volume ?? '?'})`).join(', '));
+  }
 
   return passed;
 }
 
-function classifyCategory(keyword) {
+export function classifyCategory(keyword) {
   for (const [category, words] of Object.entries(CATEGORY_MAP)) {
     if (words.some((w) => keyword.includes(w))) return category;
   }

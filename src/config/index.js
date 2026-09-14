@@ -94,12 +94,14 @@ export const config = {
     clientSecret: process.env.NAVER_DATALAB_CLIENT_SECRET,
   },
   // 검색량 게이트는 네이버 검색광고 키워드도구(searchad.naver.com, 별개 시스템)로 대체.
-  // 절대 월간 검색수(PC+모바일)를 반환하므로 "월 300건 이상" 같은 의미 있는 기준을 쓸 수 있음.
+  // 절대 월간 검색수(PC+모바일)를 반환하므로 "월 1,000건 이상" 같은 의미 있는 기준을 쓸 수 있음.
+  // 2026-09-14: 300 → 1000으로 상향 (maeilg.com 3개월 클릭 14회 실측 — 임계값 300은
+  // 사실상 게이트가 통과만 시키고 있었음. 지시서 "네이버 원고 전환 + 옛 경제 글 정리" §3).
   naverSearchAd: {
     apiKey:      process.env.NAVER_SEARCHAD_API_KEY,
     secretKey:   process.env.NAVER_SEARCHAD_SECRET_KEY,
     customerId:  process.env.NAVER_SEARCHAD_CUSTOMER_ID,
-    minMonthlyVolume: Number(process.env.NAVER_MIN_MONTHLY_VOLUME ?? 300),
+    minMonthlyVolume: Number(process.env.NAVER_MIN_MONTHLY_VOLUME ?? 1000),
   },
   // 네이버 블로그 글쓰기 API는 2020-05-06 종료됨(광고성 글 대량 게재 방지) — 자동 발행 불가.
   // B-2-1: 반자동 운용 — blog_publisher.js가 원고를 output/blog/naver_*.md 로 별도 저장,
@@ -186,6 +188,8 @@ export const config = {
     testLimit:        process.env.TEST_LIMIT ? parseInt(process.env.TEST_LIMIT, 10) : null,
     maxRetry:         parseInt(process.env.MAX_RETRY || '1', 10),
     // AdSense 콘텐츠 가치 경고(2026-06) 이후 8로 하향 — .env.example 참고
-    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '8', 10),
+    // 2026-09-14: Search Console 실측 근거로 8 → 1로 하향 (지시서 "네이버 원고 전환 +
+    // 옛 경제 글 정리" §2 — "티스토리 주 2~3편"). .env.example 참고.
+    blogPostsPerDay:  parseInt(process.env.BLOG_POSTS_PER_DAY || '1', 10),
   },
 };
