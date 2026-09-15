@@ -190,7 +190,10 @@ export async function attachTripData(keywordData) {
         // — 멀티데이 코스 "N일차 (총 Nkm)" 헤딩에 사용. 둘 다 응답에 없을 수 있으므로 null 허용.
         ratingSource:    brief.ratingSource ?? null,
         distanceSource:  brief.distanceSource ?? null,
-        dayTotals:       brief.dayTotals ?? null, // { "1": 15.2, "2": 8.3, ... } 형태로 기대
+        // 2026-09-15 첫 실전 발행(maeilg.com/258) 실측: 값이 숫자가 아니라
+        // { "1": { distanceKm: 15.2, spots: 6 }, ... } 형태 객체로 옴 — 사용부(write-kin-answer.js
+        // extractDayKm())가 숫자·객체 둘 다 방어적으로 처리하도록 이미 수정됨.
+        dayTotals:       brief.dayTotals ?? null,
       },
     });
     logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${brief.spots.length}개 확보`);

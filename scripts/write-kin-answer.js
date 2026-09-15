@@ -255,6 +255,17 @@ function formatSpotLine(spot, ratingSource = null) {
 }
 
 /**
+ * tripData.dayTotals의 값 형태가 숫자(예: 4.9)인지 객체(예: { distanceKm: 15.2, spots: 6 })인지
+ * 미확정이었어서(2026-09-15 첫 실전 발행 실측: 객체 형태로 옴) 둘 다 방어적으로 처리한다.
+ */
+function extractDayKm(entry) {
+  if (entry == null) return null;
+  if (typeof entry === 'number') return entry;
+  if (typeof entry === 'object') return entry.distanceKm ?? entry.km ?? entry.total ?? null;
+  return null;
+}
+
+/**
  * §3-B: `**N일차 (권역, 총 N km)**` 형식.
  * - 거리: course-brief 응답에 `dayTotals`(선택 필드, 2026-09-15 트레쥴 회신 기준 아직
  *   미구현 — 요청은 넣어둔 상태)가 있으면 일차별 거리를 그대로 쓴다. 없으면 1일 코스에
@@ -282,7 +293,11 @@ function buildCourseBlock(tripData, keptSpots) {
     // 있으면 멀티데이에서도 일차별 거리를 쓴다. 없으면(단일 일정일 때만) trip 전체 거리로 대체.
     // 종일시설만 있는 날은 dayKm이 0(스팟 1곳이라 구간 자체가 없음) — 0은 falsy라 아래
     // 삼항연산이 자연히 "거리 표기 생략"으로 떨어진다(의도적 동작, 회신에서 요청받음).
-    const dayKm = tripData.dayTotals?.[String(day)] ?? tripData.dayTotals?.[day] ?? null;
+    // 2026-09-15 실측 확인(maeilg.com/258): dayTotals 항목이 숫자가 아니라
+    // { distanceKm, spots } 형태 객체로 옴 — "(총 [object Object]km)"로 깨졌던 버그.
+    // extractDayKm()이 숫자·객체 둘 다 방어적으로 처리한다.
+    const dayEntry = tripData.dayTotals?.[String(day)] ?? tripData.dayTotals?.[day] ?? null;
+    const dayKm = extractDayKm(dayEntry);
     // straightLine이면 거리 자체도 추정값이므로 "총"이 아니라 "직선거리 약"으로 출처를 밝힌다.
     const kmLabel = straightLine ? '직선거리 약' : '총';
     const kmSuffix = dayKm
