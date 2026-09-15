@@ -194,7 +194,7 @@ async function resolveSpots() {
         category:    place?.category ?? null,
       });
     }
-    return { spots: sanitizeSpots(spots), totalDistanceKm: null, days, region: region ?? '' };
+    return { spots: sanitizeSpots(spots), totalDistanceKm: null, days, region: region ?? '', dayTotals: null, ratingSource: null };
   }
 
   if (!region || !REGION_TREE.includes(region)) {
@@ -210,6 +210,10 @@ async function resolveSpots() {
     days:            brief.days ?? days,
     region:          brief.region ?? region,
     appUrl:          brief.appUrl ?? null,
+    // 2026-09-15: dayTotals는 트레쥴 쪽에 선택 항목으로 요청된 상태 — 아직 응답에 없을 수
+    // 있음. 있으면 멀티데이 "N일차 (총 Nkm)" 헤딩에 쓰고, 없으면 지어내지 않고 생략한다.
+    dayTotals:       brief.dayTotals ?? null,
+    ratingSource:    brief.ratingSource ?? null,
   };
 }
 
@@ -236,20 +240,24 @@ function reviewSpots(rawSpots) {
 }
 
 // ── [B] 일차별 코스 블록 — 코드가 결정적으로 조립 (LLM이 장소·평점을 만들지 않음) ──
-function formatSpotLine(spot) {
+// ratingSource(2026-09-15 확인 필드, 예: "Google"/"Kakao")가 있으면 평점 옆에 출처를
+// 표기한다 — 이전 지시서에서 "무표기가 제일 위험"이라고 지적된 항목(B-4).
+function formatSpotLine(spot, ratingSource = null) {
+  const sourceSuffix = ratingSource ? `, ${ratingSource}` : '';
   const ratingPart = typeof spot.reviewCount === 'number'
-    ? `★${spot.rating} (리뷰 ${spot.reviewCount.toLocaleString()})`
-    : `★${spot.rating}`;
+    ? `★${spot.rating} (리뷰 ${spot.reviewCount.toLocaleString()}${sourceSuffix})`
+    : `★${spot.rating}${ratingSource ? ` (${ratingSource})` : ''}`;
   return `${spot.name} ${ratingPart}`;
 }
 
 /**
- * §3-B: `**N일차 (권역, 총 N km)**` 형식이 요구되지만, 현재 course-brief 스키마에는
- * 일차별 권역명·일차별 거리 필드가 없다(트레쥴 지시서 2026-09-07에서 다른 지역의
- * 일차별 거리가 언급된 적은 있으나 이 저장소의 attachTripData/course-brief 매핑은
- * 트립 전체 totalDistanceKm만 받음). 없는 값을 지어내지 않기 위해 1일 코스에 한해
- * totalDistanceKm을 헤딩에 붙이고, 권역명과 멀티데이 일차별 거리는 생략한다
- * (지시서와 다르게 한 것으로 보고).
+ * §3-B: `**N일차 (권역, 총 N km)**` 형식.
+ * - 거리: course-brief 응답에 `dayTotals`(선택 필드, 2026-09-15 트레쥴 회신 기준 아직
+ *   미구현 — 요청은 넣어둔 상태)가 있으면 일차별 거리를 그대로 쓴다. 없으면 1일 코스에
+ *   한해 트립 전체 totalDistanceKm으로 대체하고, 멀티데이인데 dayTotals도 없으면 거리
+ *   표기 자체를 생략한다(없는 값을 지어내지 않음).
+ * - 권역명: 트레쥴 쪽 판단으로 응답에 넣지 않기로 확정됨(사람이 붙이는 이름이라 자동
+ *   판정하면 틀림) — 영구히 생략.
  */
 function buildCourseBlock(tripData, keptSpots) {
   const byDay = new Map();
@@ -263,17 +271,22 @@ function buildCourseBlock(tripData, keptSpots) {
   const blocks = [];
   for (const day of dayNumbers) {
     let spots = byDay.get(day).slice(0, MAX_SPOTS_PER_DAY);
-    const kmSuffix = (dayNumbers.length === 1 && tripData.totalDistanceKm)
-      ? ` (총 ${tripData.totalDistanceKm}km)`
-      : '';
+    // 2026-09-15: dayTotals(선택 필드, 트레쥴 회신 기준 아직 없을 수 있음)가 있으면
+    // 멀티데이에서도 일차별 거리를 쓴다. 없으면(단일 일정일 때만) trip 전체 거리로 대체.
+    const dayKm = tripData.dayTotals?.[String(day)] ?? tripData.dayTotals?.[day] ?? null;
+    const kmSuffix = dayKm
+      ? ` (총 ${dayKm}km)`
+      : (dayNumbers.length === 1 && tripData.totalDistanceKm)
+        ? ` (총 ${tripData.totalDistanceKm}km)`
+        : '';
     const heading = `**${day}일차${kmSuffix}**`;
 
     // 첫 장소는 그대로, 이후 장소는 "→ N분 · " (직전 장소의 toNextMinutes)를 앞에 붙인다.
     const lines = spots.map((spot, i) => {
-      if (i === 0) return formatSpotLine(spot);
+      if (i === 0) return formatSpotLine(spot, tripData.ratingSource);
       const prev = spots[i - 1];
       const prefix = typeof prev.toNextMinutes === 'number' ? `→ ${prev.toNextMinutes}분 · ` : '';
-      return `${prefix}${formatSpotLine(spot)}`;
+      return `${prefix}${formatSpotLine(spot, tripData.ratingSource)}`;
     });
     blocks.push(`${heading}\n${lines.join('\n')}`);
   }

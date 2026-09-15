@@ -274,10 +274,13 @@ function buildTldrBulletsFromTripData(tripData) {
     bullets.push(`<li>${distancePart}${spots.length}곳${timePart}</li>`);
   }
 
+  // ratingSource(2026-09-15 확인 필드, 예: "Google"/"Kakao")가 있으면 평점 옆에 출처
+  // 표기 — 이전 지시서 지적("무표기가 제일 위험", B-4) 대응. 없으면 생략.
+  const sourceSuffix = tripData.ratingSource ? `, ${tripData.ratingSource}` : '';
   const route = spots
     .map((s) => {
       const ratingPart = (typeof s.rating === 'number' && typeof s.reviewCount === 'number')
-        ? `(★${s.rating}, 리뷰 ${s.reviewCount.toLocaleString()})`
+        ? `(★${s.rating}, 리뷰 ${s.reviewCount.toLocaleString()}${sourceSuffix})`
         : '';
       return `${s.name}${ratingPart}`;
     })
@@ -327,9 +330,10 @@ function formatToNext(spot) {
   return `${mode}${spot.toNextMinutes}분`;
 }
 
-function formatRating(spot) {
+function formatRating(spot, ratingSource = null) {
   if (typeof spot.rating !== 'number') return '-';
-  const reviewPart = typeof spot.reviewCount === 'number' ? ` (${spot.reviewCount.toLocaleString()})` : '';
+  const sourceSuffix = ratingSource ? `, ${ratingSource}` : '';
+  const reviewPart = typeof spot.reviewCount === 'number' ? ` (${spot.reviewCount.toLocaleString()}${sourceSuffix})` : (ratingSource ? ` (${ratingSource})` : '');
   return `★${spot.rating}${reviewPart}`;
 }
 
@@ -357,7 +361,7 @@ function buildTimelineTable(tripData) {
   const rows = spots
     .map((s) => {
       const nextTd = showNextCol ? `<td>${formatToNext(s)}</td>` : '';
-      return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s)}</td>${nextTd}</tr>`;
+      return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s, tripData.ratingSource)}</td>${nextTd}</tr>`;
     })
     .join('\n');
 

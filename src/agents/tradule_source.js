@@ -185,6 +185,12 @@ export async function attachTripData(keywordData) {
         // 코스 지도 이미지(번호 마커 + 동선 라인, 트레쥴 워터마크 포함) — 지시서 §2:
         // 그 글에만 있는 자산이라 Pexels 무관 스톡 사진보다 신뢰도가 높음. null이면 본문에서 생략.
         imageUrl:        brief.imageUrl ?? null,
+        // 2026-09-15 실측 확인(트레쥴 응답 스키마 회신): 평점·거리 출처 표기 의무 대응(B-4,
+        // 이전 지시서에서 "무표기가 제일 위험" 지적됨) 및 일차별 거리(dayTotals, 있으면만)
+        // — 멀티데이 코스 "N일차 (총 Nkm)" 헤딩에 사용. 둘 다 응답에 없을 수 있으므로 null 허용.
+        ratingSource:    brief.ratingSource ?? null,
+        distanceSource:  brief.distanceSource ?? null,
+        dayTotals:       brief.dayTotals ?? null, // { "1": 15.2, "2": 8.3, ... } 형태로 기대
       },
     });
     logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${brief.spots.length}개 확보`);
