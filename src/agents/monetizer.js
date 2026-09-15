@@ -235,14 +235,15 @@ ${getThemeStyles(category)}
 </style>`;
 }
 
-// ── 임시 조치(지시서 2026-09-08, 원복: 2026-09-09): 이동거리/시간 표기 ──────────
-// course-brief의 totalDistanceKm/toNextMinutes/toNextMode가 한때 직선거리(하버사인) ÷
-// 고정 속도(walk 4.8km/h, car 24~25km/h) 추정값이었던 시기(09-08 실측: 경주/통영/오사카
-// d3 오차 0.01~0.04km)에 켜뒀던 스위치. 트레쥴이 같은 날 밤 실제 경로 조회를 붙였음을
-// 09-09 프로덕션 재실측으로 확인(통영 d1 API 37.6km ↔ 직선 합 23.47km = 1.60배, 구간
-// 속도도 더 이상 고정값이 아님) — false로 되돌림. 같은 상황이 재발하면 이 스위치 하나만
-// true로 켜면 되므로 삭제하지 않고 남겨둔다.
-const STRAIGHT_LINE_DISTANCE_MODE = false;
+// ── 이동거리/시간 표기 — distanceSource 기반 자동 판정 (2026-09-15부터) ──────────
+// 과거(09-08~09-09)엔 수동 스위치(STRAIGHT_LINE_DISTANCE_MODE)로 전환했으나, 트레쥴이
+// 응답에 distanceSource("route" | "straight")를 실어주는 것을 확인(2026-09-15 회신) —
+// 경로 조회 실패 시 응답별로 "straight"가 될 수 있으므로 포스트마다 자동 판정한다.
+// distanceSource가 없는(구버전 캐시 등) 경우는 "route"로 간주 — 지금까지 실제 경로였던
+// 기간이 훨씬 길고, 없다고 직선거리로 단정하면 오히려 불필요한 고지가 남발될 수 있음.
+function isStraightLineDistance(tripData) {
+  return tripData?.distanceSource === 'straight';
+}
 
 // ── ① TL;DR 박스 ──────────────────────────────────────────────────────────
 // 지시서 A-1: "~라면 ~가 중요합니다" 식 섹션 첫 문장 복붙은 요약이 아니라 정보 0.
@@ -262,8 +263,9 @@ function buildTldrBox(sections, tripData) {
 function buildTldrBulletsFromTripData(tripData) {
   const spots = tripData.spots ?? [];
   const bullets = [];
+  const straightLine = isStraightLineDistance(tripData);
 
-  if (STRAIGHT_LINE_DISTANCE_MODE) {
+  if (straightLine) {
     // 소요시간·이동수단은 직선거리 추정이라 근거 없음 — 거리만, 출처를 명시해 남긴다.
     const distancePart = tripData.totalDistanceKm ? `직선거리 기준 약 ${tripData.totalDistanceKm}km · ` : '';
     bullets.push(`<li>${distancePart}${spots.length}곳</li>`);
@@ -287,7 +289,7 @@ function buildTldrBulletsFromTripData(tripData) {
     .join(' → ');
   bullets.push(`<li>${route}</li>`);
 
-  if (!STRAIGHT_LINE_DISTANCE_MODE) {
+  if (!straightLine) {
     const modes = [...new Set(spots.map((s) => s.toNextMode).filter(Boolean))];
     if (modes.length) {
       const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
@@ -298,9 +300,9 @@ function buildTldrBulletsFromTripData(tripData) {
   return bullets;
 }
 
-/** 거리 관련 문구 아래 1회만 노출하는 직선거리 고지 — STRAIGHT_LINE_DISTANCE_MODE일 때만. */
+/** 거리 관련 문구 아래 1회만 노출하는 직선거리 고지 — distanceSource==='straight'일 때만. */
 function buildStraightLineDisclosure(tripData) {
-  if (!STRAIGHT_LINE_DISTANCE_MODE || !tripData?.spots?.length) return '';
+  if (!isStraightLineDistance(tripData) || !tripData?.spots?.length) return '';
   return `<p class="distance-disclosure">※ 거리는 장소 간 직선거리 기준입니다. 실제 이동 거리와 시간은 경로에 따라 더 깁니다.</p>`;
 }
 
@@ -321,10 +323,10 @@ function buildTldrBulletsFromSections(sections) {
 // 표로 그대로 노출한다 — 이미 있는 데이터이므로 트레쥴 응답 확장 없이 가능.
 const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
 
-function formatToNext(spot) {
-  // 직선거리 모드에서는 toNextMinutes/toNextMode도 같은 직선거리÷고정속도 추정값이라
-  // TL;DR과 동일한 이유로 신뢰할 수 없음 — 표에서도 시간·이동수단 대신 "-"만 남긴다.
-  if (STRAIGHT_LINE_DISTANCE_MODE) return '-';
+function formatToNext(spot, straightLine) {
+  // distanceSource==='straight'일 때는 toNextMinutes/toNextMode도 같은 직선거리÷고정속도
+  // 추정값이라 TL;DR과 동일한 이유로 신뢰할 수 없음 — 표에서도 시간·이동수단 대신 "-"만 남긴다.
+  if (straightLine) return '-';
   if (spot.toNextMinutes == null) return '-';
   const mode = spot.toNextMode ? `${MODE_KR[spot.toNextMode] ?? spot.toNextMode} ` : '';
   return `${mode}${spot.toNextMinutes}분`;
@@ -355,12 +357,14 @@ function buildTimelineTable(tripData) {
   const spots = tripData?.spots ?? [];
   if (spots.length === 0) return '';
 
-  // 직선거리 모드에서는 "다음까지"가 전부 "-"가 되는 무의미한 열이라 아예 뺀다(순서/장소/평점만).
-  const showNextCol = !STRAIGHT_LINE_DISTANCE_MODE;
+  // distanceSource==='straight'일 때는 "다음까지"가 전부 "-"가 되는 무의미한 열이라
+  // 아예 뺀다(순서/장소/평점만).
+  const straightLine = isStraightLineDistance(tripData);
+  const showNextCol = !straightLine;
   const nextTh  = showNextCol ? '<th>다음까지</th>' : '';
   const rows = spots
     .map((s) => {
-      const nextTd = showNextCol ? `<td>${formatToNext(s)}</td>` : '';
+      const nextTd = showNextCol ? `<td>${formatToNext(s, straightLine)}</td>` : '';
       return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s, tripData.ratingSource)}</td>${nextTd}</tr>`;
     })
     .join('\n');

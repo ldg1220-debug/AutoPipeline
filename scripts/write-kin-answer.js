@@ -194,7 +194,7 @@ async function resolveSpots() {
         category:    place?.category ?? null,
       });
     }
-    return { spots: sanitizeSpots(spots), totalDistanceKm: null, days, region: region ?? '', dayTotals: null, ratingSource: null };
+    return { spots: sanitizeSpots(spots), totalDistanceKm: null, days, region: region ?? '', dayTotals: null, ratingSource: null, distanceSource: null };
   }
 
   if (!region || !REGION_TREE.includes(region)) {
@@ -210,10 +210,14 @@ async function resolveSpots() {
     days:            brief.days ?? days,
     region:          brief.region ?? region,
     appUrl:          brief.appUrl ?? null,
-    // 2026-09-15: dayTotals는 트레쥴 쪽에 선택 항목으로 요청된 상태 — 아직 응답에 없을 수
-    // 있음. 있으면 멀티데이 "N일차 (총 Nkm)" 헤딩에 쓰고, 없으면 지어내지 않고 생략한다.
+    // 2026-09-15 회신: dayTotals는 실제로 옴(경주/오사카 실측 확인) — 있으면 멀티데이
+    // "N일차 (총 Nkm)" 헤딩에 쓰고, 없으면 지어내지 않고 생략한다.
     dayTotals:       brief.dayTotals ?? null,
+    // 항상 옴(2026-09-15 회신, 확인된 4개 지역 전부 "google"). 값 그대로 평점 옆에 표기.
     ratingSource:    brief.ratingSource ?? null,
+    // "route"(실제 경로) | "straight"(경로 조회 실패 시 직선거리 추정) — 회신에 따르면
+    // 경로 조회 실패는 응답별로 발생할 수 있으므로 매 실행마다 이 값을 보고 판정한다.
+    distanceSource:  brief.distanceSource ?? null,
   };
 }
 
@@ -260,6 +264,9 @@ function formatSpotLine(spot, ratingSource = null) {
  *   판정하면 틀림) — 영구히 생략.
  */
 function buildCourseBlock(tripData, keptSpots) {
+  // distanceSource==='straight'(경로 조회 실패로 직선거리 추정)일 때는 toNextMinutes도
+  // 신뢰할 수 없으므로 "→ N분 ·" 구간을 생략한다(monetizer.js와 동일 판단 기준).
+  const straightLine = tripData.distanceSource === 'straight';
   const byDay = new Map();
   for (const spot of keptSpots) {
     const day = spot.day ?? 1;
@@ -271,21 +278,26 @@ function buildCourseBlock(tripData, keptSpots) {
   const blocks = [];
   for (const day of dayNumbers) {
     let spots = byDay.get(day).slice(0, MAX_SPOTS_PER_DAY);
-    // 2026-09-15: dayTotals(선택 필드, 트레쥴 회신 기준 아직 없을 수 있음)가 있으면
-    // 멀티데이에서도 일차별 거리를 쓴다. 없으면(단일 일정일 때만) trip 전체 거리로 대체.
+    // 2026-09-15 회신: dayTotals는 실제로 옴(경주 d1 4.9km, 오사카 d3 15.2/17.9/0km 등).
+    // 있으면 멀티데이에서도 일차별 거리를 쓴다. 없으면(단일 일정일 때만) trip 전체 거리로 대체.
+    // 종일시설만 있는 날은 dayKm이 0(스팟 1곳이라 구간 자체가 없음) — 0은 falsy라 아래
+    // 삼항연산이 자연히 "거리 표기 생략"으로 떨어진다(의도적 동작, 회신에서 요청받음).
     const dayKm = tripData.dayTotals?.[String(day)] ?? tripData.dayTotals?.[day] ?? null;
+    // straightLine이면 거리 자체도 추정값이므로 "총"이 아니라 "직선거리 약"으로 출처를 밝힌다.
+    const kmLabel = straightLine ? '직선거리 약' : '총';
     const kmSuffix = dayKm
-      ? ` (총 ${dayKm}km)`
+      ? ` (${kmLabel} ${dayKm}km)`
       : (dayNumbers.length === 1 && tripData.totalDistanceKm)
-        ? ` (총 ${tripData.totalDistanceKm}km)`
+        ? ` (${kmLabel} ${tripData.totalDistanceKm}km)`
         : '';
     const heading = `**${day}일차${kmSuffix}**`;
 
     // 첫 장소는 그대로, 이후 장소는 "→ N분 · " (직전 장소의 toNextMinutes)를 앞에 붙인다.
+    // straightLine이면 이 구간 자체를 생략(신뢰할 수 없는 추정값이므로).
     const lines = spots.map((spot, i) => {
       if (i === 0) return formatSpotLine(spot, tripData.ratingSource);
       const prev = spots[i - 1];
-      const prefix = typeof prev.toNextMinutes === 'number' ? `→ ${prev.toNextMinutes}분 · ` : '';
+      const prefix = (!straightLine && typeof prev.toNextMinutes === 'number') ? `→ ${prev.toNextMinutes}분 · ` : '';
       return `${prefix}${formatSpotLine(spot, tripData.ratingSource)}`;
     });
     blocks.push(`${heading}\n${lines.join('\n')}`);
@@ -451,6 +463,7 @@ ${answerBody}
 제외한 스팟: ${excluded.length ? excluded.join(', ') : '없음'}
 ${tipRecordLine}
 링크 포함: ${linkDecision.include ? '예' : `아니오 (${linkDecision.reason})`}
+거리 출처: ${tripData.distanceSource ?? '알 수 없음'}${tripData.distanceSource === 'straight' ? ' (경로 조회 실패 — 직선거리 추정치, 이동시간 구간 생략됨)' : ''}
 전체 길이: ${totalChars}자
 `;
 
