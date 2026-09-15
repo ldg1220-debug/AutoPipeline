@@ -37,9 +37,12 @@ export const DOMESTIC_REGIONS = [
   '경주', '강릉', '서울', '부산', '제주', '전주', '여수', '통영', '속초', '춘천', '양양',
   '대구', '인천', '수원', '군산', '목포', '거제', '남해', '담양',
 ];
+// 싱가포르·홍콩·세부·괌은 실제 course-brief 응답으로 검증되지 않아 제외함(2026-09-14
+// 리뷰 지적) — 발리와 같은 위험(트레쥴이 실제로 지원하는지 확인 없이 하드코딩)이라
+// /api/content/regions(PR #227, 198곳)로 목록을 넓히기 전까지는 실측 확인된 지역만 유지.
 export const OVERSEAS_REGIONS = [
   '후쿠오카', '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '나트랑',
-  '치앙마이', '싱가포르', '홍콩', '타이베이', '상하이', '괌', '세부',
+  '치앙마이', '타이베이', '상하이',
 ];
 export const REGION_TREE = [...DOMESTIC_REGIONS, ...OVERSEAS_REGIONS];
 
@@ -110,7 +113,7 @@ async function fetchCourseBrief(region, days) {
   }
 }
 
-async function fetchCourseBriefWithRetry(region, days) {
+export async function fetchCourseBriefWithRetry(region, days) {
   let result = await fetchCourseBrief(region, days);
   if (!result) {
     await new Promise((r) => setTimeout(r, RETRY_GAP_MS));
@@ -123,7 +126,7 @@ async function fetchCourseBriefWithRetry(region, days) {
  * 리뷰 수가 적어 신뢰할 수 없는 평점을 null로 치환한다 (장소 자체는 코스에 유지).
  * 응답값만 쓰는 C-2 원칙을 지키면서, 신뢰도 낮은 값이 본문에 그대로 실리는 것만 막는다.
  */
-function sanitizeSpots(spots) {
+export function sanitizeSpots(spots) {
   return (spots ?? []).map((spot) => {
     const reviewCount = spot.reviewCount ?? null;
     const trustworthy = typeof reviewCount === 'number' && reviewCount >= MIN_REVIEW_COUNT_FOR_RATING;
@@ -182,6 +185,12 @@ export async function attachTripData(keywordData) {
         // 코스 지도 이미지(번호 마커 + 동선 라인, 트레쥴 워터마크 포함) — 지시서 §2:
         // 그 글에만 있는 자산이라 Pexels 무관 스톡 사진보다 신뢰도가 높음. null이면 본문에서 생략.
         imageUrl:        brief.imageUrl ?? null,
+        // 2026-09-15 실측 확인(트레쥴 응답 스키마 회신): 평점·거리 출처 표기 의무 대응(B-4,
+        // 이전 지시서에서 "무표기가 제일 위험" 지적됨) 및 일차별 거리(dayTotals, 있으면만)
+        // — 멀티데이 코스 "N일차 (총 Nkm)" 헤딩에 사용. 둘 다 응답에 없을 수 있으므로 null 허용.
+        ratingSource:    brief.ratingSource ?? null,
+        distanceSource:  brief.distanceSource ?? null,
+        dayTotals:       brief.dayTotals ?? null, // { "1": 15.2, "2": 8.3, ... } 형태로 기대
       },
     });
     logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${brief.spots.length}개 확보`);

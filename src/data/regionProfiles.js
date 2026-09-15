@@ -47,15 +47,13 @@ export const REGION_PROFILES = {
   '나고야':   { scope: 'overseas-near', minDays: 2, maxDays: 4 },
   '오키나와': { scope: 'overseas-near', minDays: 2, maxDays: 5 },
   '타이베이': { scope: 'overseas-near', minDays: 2, maxDays: 4 },
-  '괌':       { scope: 'overseas-near', minDays: 2, maxDays: 5 },
-  '홍콩':     { scope: 'overseas-near', minDays: 2, maxDays: 4 },
   '방콕':     { scope: 'overseas-far', minDays: 3, maxDays: 5 },
   '다낭':     { scope: 'overseas-far', minDays: 3, maxDays: 5 },
   '나트랑':   { scope: 'overseas-far', minDays: 3, maxDays: 5 },
   '치앙마이': { scope: 'overseas-far', minDays: 3, maxDays: 5 },
-  '싱가포르': { scope: 'overseas-far', minDays: 3, maxDays: 5 },
   '상하이':   { scope: 'overseas-far', minDays: 3, maxDays: 5 },
-  '세부':     { scope: 'overseas-far', minDays: 3, maxDays: 5 },
+  // 괌·홍콩·싱가포르·세부는 OVERSEAS_REGIONS(tradule_source.js)에서 제외됨 — 실측
+  // 검증 전까지 여기서도 함께 제외 (2026-09-14 리뷰).
 };
 
 /** 키워드 시드용 패턴별 days 환산 — keyword_miner.generateTravelSeeds()/isValidCombo()에서 사용. */

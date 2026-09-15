@@ -451,3 +451,18 @@
   `node scripts/cleanup-blacklist-keywords.js` 1회 실행해 DB에 남아있는 다른 블랙리스트
   키워드도 즉시 정리 권장.
 - **관련 파일**: `src/agents/keyword_miner.js`, `src/app.js`, `scripts/cleanup-blacklist-keywords.js`
+
+### D-036: 미검증 해외 지역(괌·홍콩·싱가포르·세부) OVERSEAS_REGIONS에서 제외
+- **결정**: `OVERSEAS_REGIONS`(`tradule_source.js`)에 하드코딩돼 있던 괌·홍콩·싱가포르·세부
+  4곳을 제외. 실제 `course-brief` 응답으로 좌표·스팟 존재를 검증한 적이 없어, 이전에
+  같은 이유로 목록에 추가하지 않기로 한 발리와 동일한 위험(트레쥴 미지원 지역에
+  `--force-keyword`로 진입 시 trip_data 없이 진행되고, 이미지 검색도 엉뚱한 결과)을 안고
+  있음이 리뷰로 지적됨. `regionProfiles.js`(REGION_PROFILES)와 `blog_asset_builder.js`
+  (REGION_EN_NAMES)도 함께 동기화.
+- **버린 대안**: 트레쥴의 `/api/content/regions`(PR #227, 국내 61·해외 137 = 198곳)로
+  즉시 목록을 확장 — 채택하지 않음. 이 엔드포인트가 실제로 배포·정상 응답하는지 트레쥴
+  쪽 확인(거부 응답이 아닌 정상 응답)이 먼저 필요하다는 지적을 따름. 확인되면 후속
+  작업으로 REGION_TREE를 이 API 기반으로 교체하는 편이 하드코딩 35곳보다 훨씬 큰
+  소재 풀(198곳)을 얻음 — 별도 지시서로 진행 예정.
+- **관련 파일**: `src/agents/tradule_source.js`, `src/data/regionProfiles.js`,
+  `src/agents/blog_asset_builder.js`
