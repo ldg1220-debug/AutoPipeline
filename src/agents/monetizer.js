@@ -223,6 +223,10 @@ function buildBlogStyles(category) {
 .cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:32px 24px;text-align:center;margin:36px 0;box-shadow:0 6px 24px rgba(30,58,138,.3)}
 .cta-box h3{margin:0 0 10px;font-size:20px;font-weight:700}
 .cta-box p{margin:0 0 16px;font-size:14px;opacity:.9;line-height:1.7}
+/* 트레쥴 코스 CTA(본문 중간·푸터 공용) — 지시서 2026-09-16 §3: 광고 배너처럼 보이던
+   .cta-box 대신 연회색 + 왼쪽 세로선의 슬림한 한 줄 링크로 축소 */
+.tradule-cta{background:#f8fafc;border-left:4px solid #2563eb;border-radius:0 8px 8px 0;padding:14px 18px;margin:28px 0;font-size:15px}
+.tradule-cta a{color:#1e40af;font-weight:600;text-decoration:none}
 .timeline-table{margin:24px 0}
 .timeline-table h4{margin:0 0 10px;font-size:16px}
 .timeline-table table{width:100%;border-collapse:collapse;font-size:14px}
@@ -765,34 +769,30 @@ async function monetizeBlogDraft(content) {
   const tripAppUrl = content.trip_data?.appUrl ?? null;
   const tripRegion = content.trip_data?.region ?? keyword;
 
-  // travelpayoutsFooterHtml은 innerHtml 배열에서 ctaBox 바로 뒤에 별도로 삽입한다
-  // (아래 참고) — 여기 ctaBox 안에는 넣지 않는다. 예전엔 여기서도 넣고 있어서
-  // 해외 글에서 같은 eSIM 문장이 CTA 박스 안·밖에 연달아 두 번 보이는 중복이 있었음
-  // (지시서 "b2af7e4 검증 결과" §1). 박스 밖(회색 텍스트)이 진한 파란 박스 안보다
-  // 시인성도 낫다.
-  const ctaBox = tripAppUrl
-    ? `<div class="cta-box">` +
-      `<h3>📌 매일 떠나는 남자</h3>` +
-      `<p>실제 평점·동선 데이터로 검증한 여행 코스를 소개합니다.</p>` +
-      `<p>이 코스를 앱에서 그대로 열어보세요 →</p>` +
-      `<a href="${tripAppUrl}" target="_blank" rel="noopener" ` +
-      `style="display:inline-block;margin-top:10px;padding:10px 24px;background:#2563eb;` +
-      `color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">` +
-      `트레쥴에서 ${tripRegion} 코스 보기</a>` +
-      `</div>`
-    : `<div class="cta-box">` +
-      `<h3>📌 매일 떠나는 남자</h3>` +
-      `<p>실제 평점·동선 데이터로 검증한 여행 코스를 소개합니다.</p>` +
-      `</div>`;
+  // §5(지시서 2026-09-16): 트레쥴 쪽 "계획 덮어쓰기" 버그 재발 — CTA(course-open)를 누르면
+  // 로그인 상태 독자의 기존 계획이 덮어써질 수 있음. 트레쥴이 수정 완료를 알려줄 때까지
+  // appUrl 링크를 전부 끈다(본문 중간·푸터 둘 다). 비로그인 독자는 영향 없지만, 로그인
+  // 독자가 실제로 계획을 잃는 사고보다 링크 하나 며칠 빠지는 쪽이 낫다는 판단.
+  // 트레쥴이 수정을 알려오면 이 스위치 하나만 false로 되돌리면 된다.
+  const TRADULE_LINK_PAUSED = true;
+  const effectiveAppUrl = TRADULE_LINK_PAUSED ? null : tripAppUrl;
+
+  // §3(지시서 2026-09-16): 진한 파란 그라데이션 박스가 광고 배너처럼 보인다는 피드백 —
+  // 제목·설명 줄 삭제, 패딩 32px→14px, 버튼→텍스트 링크로 슬림화. 본문 중간 CTA와
+  // 같은 모양(.tradule-cta)으로 통일해 일관성을 맞춘다. appUrl이 없으면(정지 상태 포함)
+  // 아무것도 넣을 말이 없으므로 블록 자체를 비운다 — 예전처럼 링크 없는 빈 박스를 남기지 않는다.
+  const ctaBox = effectiveAppUrl
+    ? `<div class="tradule-cta"><a href="${effectiveAppUrl}" target="_blank" rel="noopener">` +
+      `트레쥴에서 ${tripRegion} 코스 보기 →</a></div>`
+    : '';
 
   // 본문 중간 CTA (C-1) — 코스를 나열한 직후, appUrl 있을 때만 삽입.
   // "글마다 배너 3개씩 도배 금지"(C-4) — 본문 1 + 푸터 1로 제한.
-  const midBodyCta = tripAppUrl
-    ? `<blockquote class="tradule-mid-cta" style="border-left:4px solid #2563eb;padding:12px 16px;` +
-      `margin:24px 0;background:#eff6ff;border-radius:0 8px 8px 0;">` +
+  const midBodyCta = effectiveAppUrl
+    ? `<div class="tradule-cta">` +
       `이 코스를 지도에서 보고 순서를 바꾸거나 장소를 추가하려면<br>` +
-      `<a href="${tripAppUrl}" target="_blank" rel="noopener"><strong>트레쥴에서 ${tripRegion} 코스 열기</strong></a>` +
-      `</blockquote>`
+      `<a href="${effectiveAppUrl}" target="_blank" rel="noopener"><strong>트레쥴에서 ${tripRegion} 코스 열기</strong></a>` +
+      `</div>`
     : '';
 
   // hero 배너 (제목 + 메타설명)
