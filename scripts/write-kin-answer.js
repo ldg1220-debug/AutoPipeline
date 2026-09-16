@@ -488,8 +488,11 @@ ${tipRecordLine}
   history.push({
     date: new Date().toISOString(),
     region: tripData.region,
+    days: tripData.days,
+    questionPreview: question.slice(0, 60),
     questionUrl: null,
     linkIncluded: linkDecision.include,
+    outPath,
   });
   await saveHistory(history);
 

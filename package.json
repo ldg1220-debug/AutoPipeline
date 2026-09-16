@@ -6,6 +6,7 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
+    "cli": "node cli.js",
     "dev": "node --watch src/app.js",
     "agent:trend": "node src/agents/trend_scraper.js",
     "agent:content": "node src/agents/content_creator.js",

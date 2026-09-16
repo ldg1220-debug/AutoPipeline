@@ -38,6 +38,10 @@ const forceKeyword = forceKwIdx !== -1 ? args[forceKwIdx + 1] : null;
 const forceCatIdx = args.indexOf('--force-category');
 const forceCategory = forceCatIdx !== -1 ? args[forceCatIdx + 1] : 'economy';
 const autoMode = args.includes('--auto') || !process.stdin.isTTY;
+// --draft-only: 티스토리 발행(Part 5)과 그 이후 발행 의존 단계(6/6.5/7)를 건너뛰고
+// monetized_{date}.json까지만 만든다 — cli.js 대화형 런처의 "초안만 만들기" 기본값용
+// (지시서 2026-09-16 §4: "기본값을 초안만으로 두세요 — 실수로 발행되는 것보다 낫다").
+const draftOnly = args.includes('--draft-only');
 
 /**
  * 각 키워드를 서로 내용이 겹치지 않는 독립적인 글 주제 2~3개로 확장한다.
@@ -990,6 +994,19 @@ async function main() {
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 4 실패 (계속 진행): ${err.message}`);
     monetizedData = assetData;
+  }
+
+  // --draft-only: 여기서 멈춘다. Part 5(발행)와 이후 발행 의존 단계는 건너뛰고
+  // monetized_{date}.json 경로만 안내한다.
+  if (draftOnly) {
+    const elapsedDraft = ((Date.now() - start) / 1000).toFixed(1);
+    logger.info(`[blog:pipeline] --draft-only: 발행 건너뜀 (${elapsedDraft}s)`);
+    console.log('\n초안 생성 완료 (발행 안 함):');
+    monetizedData.contents?.forEach((c) => {
+      console.log(`  - ${c.keyword}`);
+    });
+    console.log(`\n  ${outDir}/blog/monetized_${date}.json`);
+    return;
   }
 
   // Part 5: Publisher
