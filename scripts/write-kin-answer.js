@@ -113,23 +113,65 @@ function filterBannedPhrases(text) {
 }
 
 // ── LLM 호출 (가벼운 단독 호출 — 블로그 파이프라인의 무거운 폴백 사다리는 쓰지 않음) ──
-async function callLLM(prompt) {
-  if (!config.openai.apiKey) {
-    throw new Error('OPENAI_API_KEY 미설정 — 답변 초안 생성 불가');
+// blog_content_enhancer.js의 폴백 순서(OpenAI → Gemini → Claude)와 동일하게 맞춘다.
+// 지시서 2026-09-16 §4 지적: OPENAI_API_KEY가 비어 있어도 블로그가 정상 발행되고
+// 있다면(다른 제공자로 돎) 이 스크립트만 OpenAI 전용이라 바로 실패하는 게 앞뒤가
+// 안 맞음. 키가 하나도 없을 때만 명확한 에러로 안내한다.
+async function callOpenAI(prompt) {
+  if (!config.openai.apiKey) return null;
+  try {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.6 },
+      { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 60000 }
+    );
+    return res.data.choices[0].message.content.trim();
+  } catch (err) {
+    logger.warn(`[write-kin-answer] OpenAI 실패, 다음 제공자로 폴백: ${err.message}`);
+    return null;
   }
-  const res = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.6,
-    },
-    {
-      headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-      timeout: 60000,
+}
+
+async function callGemini(prompt) {
+  if (!config.gemini?.apiKey) return null;
+  for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite']) {
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.gemini.apiKey}`,
+        { contents: [{ parts: [{ text: prompt }] }] },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 60000 }
+      );
+      const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (text.trim()) return text.trim();
+    } catch (err) {
+      logger.warn(`[write-kin-answer] Gemini(${model}) 실패: ${err.message}`);
     }
-  );
-  return res.data.choices[0].message.content.trim();
+  }
+  return null;
+}
+
+async function callClaude(prompt) {
+  if (!config.anthropic?.apiKey) return null;
+  try {
+    const res = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      { model: 'claude-sonnet-4-6', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] },
+      { headers: { 'x-api-key': config.anthropic.apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 60000 }
+    );
+    return (res.data.content?.[0]?.text ?? '').trim();
+  } catch (err) {
+    logger.warn(`[write-kin-answer] Claude 실패: ${err.message}`);
+    return null;
+  }
+}
+
+async function callLLM(prompt) {
+  if (!config.openai?.apiKey && !config.gemini?.apiKey && !config.anthropic?.apiKey) {
+    throw new Error('OPENAI_API_KEY/GEMINI_API_KEY/ANTHROPIC_API_KEY 전부 미설정 — 답변 초안 생성 불가');
+  }
+  const result = (await callOpenAI(prompt)) ?? (await callGemini(prompt)) ?? (await callClaude(prompt));
+  if (result == null) throw new Error('OpenAI/Gemini/Claude 전부 실패 — 답변 초안 생성 불가');
+  return result;
 }
 
 // ── 트레쥴 places API ────────────────────────────────────────────────────

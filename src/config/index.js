@@ -19,8 +19,15 @@ const REQUIRED_FOR_PRODUCTION = [
   'TISTORY_BLOG_NAME',
 ];
 
-for (const key of REQUIRED_FOR_PRODUCTION) {
-  warnIfMissing(key);
+// cli.js(대화형 런처)는 여행 채널 운영에 안 쓰는 유튜브 관련 경고 4줄이 매번 떠서
+// "뭔가 고장났나" 싶게 만든다는 지적(지시서 2026-09-16 §4) — 런처가 스스로 설정하는
+// AUTOPIPELINE_QUIET_STARTUP=true일 때만 이 시작 경고를 건너뛴다. 필요한 정보는
+// cli.js의 "설정 확인" 메뉴가 별도로 보여준다. --auto 무인 실행 등 이 env가 없는
+// 모든 기존 경로는 동작이 그대로다.
+if (process.env.AUTOPIPELINE_QUIET_STARTUP !== 'true') {
+  for (const key of REQUIRED_FOR_PRODUCTION) {
+    warnIfMissing(key);
+  }
 }
 
 export const config = {
