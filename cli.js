@@ -94,7 +94,7 @@ function askMultilineNav(rl, question) {
 /** y/n + 내비게이션. */
 async function askYesNoNav(rl, question, defaultYes = false) {
   while (true) {
-    const raw = await ask(rl, `${question} (${defaultYes ? 'Y/n' : 'y/N'}, ${NAV_HINT}) > `);
+    const raw = await ask(rl, `${question} (${defaultYes ? 'Y/n' : 'y/N'}) ${NAV_HINT} > `);
     const nav = interpretNav(raw);
     if (nav) return nav;
     if (!raw) return defaultYes;
@@ -176,7 +176,7 @@ async function pickRegionNav(rl, regions) {
     if (page < maxPage) console.log(`  m  더 보기 (${page + 2}/${maxPage + 1}페이지)`);
     console.log(`  직접 입력: 지역명을 그대로 치세요`);
 
-    const answer = await askNav(rl, `선택 (${NAV_HINT}) > `);
+    const answer = await askNav(rl, `선택 ${NAV_HINT} > `);
     if (typeof answer === 'symbol') return answer;
     if (answer.toLowerCase() === 'm' && page < maxPage) {
       page++;
@@ -198,7 +198,7 @@ async function pickDaysNav(rl) {
   DAY_OPTIONS.forEach((d, i) => console.log(`  ${i + 1}  ${d.label}`));
   return askChoiceHelp(
     rl,
-    `선택 (${NAV_HINT}) > `,
+    `선택 ${NAV_HINT} > `,
     (answer) => {
       const num = Number(answer);
       if (Number.isInteger(num) && num >= 1 && num <= DAY_OPTIONS.length) return DAY_OPTIONS[num - 1];
@@ -209,17 +209,39 @@ async function pickDaysNav(rl) {
   );
 }
 
-// ── 자식 프로세스 실행 (구현 노트 참고) ──────────────────────────────────────
-function runScript(scriptPath, args) {
+function createRl() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  rl.on('SIGINT', () => {
+    console.log('\n\n중단했습니다.');
+    rl.close();
+    process.exit(0);
+  });
+  return rl;
+}
+
+/**
+ * 자식 프로세스 실행 (구현 노트 참고).
+ *
+ * 버그 수정(2026-09-16 실측): 런처의 readline 인터페이스가 stdin에 계속 붙어있는
+ * 채로 자식을 stdio:'inherit'로 띄우면, 자식의 자체 프롬프트(예: run-blog-pipeline.js
+ * 의 주제 선택)에 입력한 키가 런처 쪽 listener와 경합해 유실될 수 있다(실측: "1"을
+ * 쳤는데 120초 타임아웃으로 자동 선택됨). 자식을 띄우기 직전 런처의 readline을
+ * 완전히 닫아 stdin을 넘겨주고, 자식이 끝나면 새 readline을 만들어 돌려준다 —
+ * 호출부가 그 새 인터페이스로 자신의 rl을 교체해야 한다.
+ */
+function runScript(rl, scriptPath, args) {
   return new Promise((resolve) => {
+    rl.close();
+    process.stdin.resume();
     const child = spawn(process.execPath, [scriptPath, ...args], {
       stdio: 'inherit',
       cwd: __dirname,
     });
-    child.on('exit', (code) => resolve(code ?? 0));
+    const finish = (code) => resolve({ code, rl: createRl() });
+    child.on('exit', (code) => finish(code ?? 0));
     child.on('error', (err) => {
       console.log(`  ❌ 실행 실패: ${err.message}`);
-      resolve(1);
+      finish(1);
     });
   });
 }
@@ -238,7 +260,7 @@ async function flowBlog(rl, regions, extractRegion) {
       console.log('  또는 지역·일수를 바로 입력해도 됩니다 (예: 경주 2박3일)');
       const raw = await ask(rl, `선택 > `);
       const nav = interpretNav(raw);
-      if (nav === HOME) return;
+      if (nav === HOME) return rl;
       // step 0에는 "이전"이 없으므로 BACK은 같은 단계 반복
 
       if (raw === '' || raw === '1') { state.mode = 'structured'; step = 1; continue; }
@@ -255,7 +277,7 @@ async function flowBlog(rl, regions, extractRegion) {
       }
       console.log(`\n  지역: ${region}    일수: ${dayGuess.label}`);
       const confirmed = await askYesNoNav(rl, '맞습니까?', true);
-      if (confirmed === HOME) return;
+      if (confirmed === HOME) return rl;
       if (confirmed === BACK || confirmed === false) { step = 0; continue; }
       state.mode = 'direct';
       state.region = region;
@@ -266,7 +288,7 @@ async function flowBlog(rl, regions, extractRegion) {
 
     if (step === 1) {
       const r = await pickRegionNav(rl, regions);
-      if (r === HOME) return;
+      if (r === HOME) return rl;
       if (r === BACK) { step = 0; continue; }
       state.region = r;
       step = 2;
@@ -275,7 +297,7 @@ async function flowBlog(rl, regions, extractRegion) {
 
     if (step === 2) {
       const d = await pickDaysNav(rl);
-      if (d === HOME) return;
+      if (d === HOME) return rl;
       if (d === BACK) { step = 1; continue; }
       state.days = d;
       step = 3;
@@ -286,8 +308,8 @@ async function flowBlog(rl, regions, extractRegion) {
       console.log('\n[발행]');
       console.log('  1  초안만 만들기 (발행 안 함)   ← 기본값');
       console.log('  2  티스토리 발행까지');
-      const raw = await askNav(rl, `선택 (${NAV_HINT}) > `);
-      if (raw === HOME) return;
+      const raw = await askNav(rl, `선택 ${NAV_HINT} > `);
+      if (raw === HOME) return rl;
       if (raw === BACK) { step = state.mode === 'structured' ? 2 : 0; continue; }
       state.publishNow = raw === '2';
       step = 4;
@@ -300,9 +322,9 @@ async function flowBlog(rl, regions, extractRegion) {
       console.log(`  ${keyword} · ${state.publishNow ? '티스토리 발행까지' : '초안만'}`);
       console.log('────────────────────────────');
       const proceed = await askYesNoNav(rl, '이대로 실행할까요?', true);
-      if (proceed === HOME) return;
+      if (proceed === HOME) return rl;
       if (proceed === BACK) { step = 3; continue; }
-      if (!proceed) { console.log('  취소했습니다.'); return; }
+      if (!proceed) { console.log('  취소했습니다.'); return rl; }
 
       const args = [];
       if (state.mode !== 'auto') {
@@ -311,9 +333,9 @@ async function flowBlog(rl, regions, extractRegion) {
       if (!state.publishNow) args.push('--draft-only');
 
       console.log('\n… 파이프라인 실행 중\n');
-      const code = await runScript(path.join(__dirname, 'scripts/run-blog-pipeline.js'), args);
+      const { code, rl: newRl } = await runScript(rl, path.join(__dirname, 'scripts/run-blog-pipeline.js'), args);
       if (code !== 0) console.log(`\n  ⚠ 종료 코드 ${code} — 위 로그에서 어느 단계인지 확인해주세요.`);
-      return;
+      return newRl;
     }
   }
 }
@@ -327,7 +349,7 @@ async function flowKin(rl, regions) {
   while (true) {
     if (step === 0) {
       const r = await pickRegionNav(rl, regions);
-      if (r === HOME) return;
+      if (r === HOME) return rl;
       if (r === BACK) continue; // 첫 단계 — 그대로 반복
       state.region = r;
       step = 1;
@@ -336,7 +358,7 @@ async function flowKin(rl, regions) {
 
     if (step === 1) {
       const d = await pickDaysNav(rl);
-      if (d === HOME) return;
+      if (d === HOME) return rl;
       if (d === BACK) { step = 0; continue; }
       state.days = d;
       step = 2;
@@ -345,9 +367,9 @@ async function flowKin(rl, regions) {
 
     if (step === 2) {
       const q = await askMultilineNav(rl, '\n[질문 원문] (붙여넣고 빈 줄 + Enter, 첫 줄에 b=뒤로)');
-      if (q === HOME) return;
+      if (q === HOME) return rl;
       if (q === BACK) { step = 1; continue; }
-      if (!q) { console.log('  질문이 비어있어 취소합니다.'); return; }
+      if (!q) { console.log('  질문이 비어있어 취소합니다.'); return rl; }
       state.question = q;
       step = 3;
       continue;
@@ -355,7 +377,7 @@ async function flowKin(rl, regions) {
 
     if (step === 3) {
       const link = await askYesNoNav(rl, '\n[옵션] 링크 포함? (최근 5건 중 1건 — 포함 가능)', false);
-      if (link === HOME) return;
+      if (link === HOME) return rl;
       if (link === BACK) { step = 2; continue; }
       state.wantsLink = link;
       step = 4;
@@ -368,17 +390,17 @@ async function flowKin(rl, regions) {
       console.log(`  질문: "${state.question.slice(0, 40)}${state.question.length > 40 ? '…' : ''}"`);
       console.log('────────────────────────────');
       const proceed = await askYesNoNav(rl, '이대로 실행할까요?', true);
-      if (proceed === HOME) return;
+      if (proceed === HOME) return rl;
       if (proceed === BACK) { step = 3; continue; }
-      if (!proceed) { console.log('  취소했습니다.'); return; }
+      if (!proceed) { console.log('  취소했습니다.'); return rl; }
 
       const args = ['--region', state.region, '--days', String(state.days.apiDays), '--question', state.question];
       if (state.wantsLink) args.push('--link');
 
       console.log('\n… 코스 조회 중\n');
-      const code = await runScript(path.join(__dirname, 'scripts/write-kin-answer.js'), args);
+      const { code, rl: newRl } = await runScript(rl, path.join(__dirname, 'scripts/write-kin-answer.js'), args);
       if (code !== 0) console.log(`\n  ⚠ 코스 조회 실패 — 지역 이름을 확인하세요 (종료 코드 ${code}).`);
-      return;
+      return newRl;
     }
   }
 }
@@ -390,11 +412,11 @@ async function flowRecent(rl) {
     history = JSON.parse(await fs.readFile(KIN_HISTORY_PATH, 'utf8'));
   } catch {
     console.log('  아직 지식iN 실행 이력이 없습니다 (output/kin/history.json).');
-    return;
+    return rl;
   }
   if (history.length === 0) {
     console.log('  실행 이력이 없습니다.');
-    return;
+    return rl;
   }
 
   const recent = history.slice(-10).reverse();
@@ -406,7 +428,7 @@ async function flowRecent(rl) {
 
   const choice = await askChoiceHelp(
     rl,
-    `\n다시 실행할 번호 (엔터 = 취소, ${NAV_HINT}) > `,
+    `\n다시 실행할 번호 (엔터 = 취소) ${NAV_HINT} > `,
     (a) => {
       if (a === '') return { cancel: true };
       const num = Number(a);
@@ -415,24 +437,25 @@ async function flowRecent(rl) {
     },
     `1~${recent.length} 중 번호를 입력하거나 엔터로 취소하세요.`
   );
-  if (choice === HOME || choice === BACK) return;
-  if (choice.cancel) { console.log('  취소했습니다.'); return; }
+  if (choice === HOME || choice === BACK) return rl;
+  if (choice.cancel) { console.log('  취소했습니다.'); return rl; }
 
   const entry = choice.entry;
   console.log(`\n이전 실행: ${entry.region} · ${entry.days ?? '?'}일`);
   if (entry.questionPreview) console.log(`이전 질문(미리보기): "${entry.questionPreview}..."`);
   const question = await askMultilineNav(rl, '\n같은 질문을 다시 쓰거나 새로 입력하세요 (빈 줄 + Enter로 종료)');
-  if (question === HOME || question === BACK || !question) { console.log('  취소했습니다.'); return; }
+  if (question === HOME || question === BACK || !question) { console.log('  취소했습니다.'); return rl; }
 
   const days = DAY_OPTIONS.find((d) => d.apiDays === entry.days) ?? DAY_OPTIONS[1];
   const wantsLink = await askYesNoNav(rl, '링크 포함?', false);
-  if (wantsLink === HOME || wantsLink === BACK) return;
+  if (wantsLink === HOME || wantsLink === BACK) return rl;
 
   const args = ['--region', entry.region, '--days', String(days.apiDays), '--question', question];
   if (wantsLink) args.push('--link');
 
   console.log('\n… 코스 조회 중\n');
-  await runScript(path.join(__dirname, 'scripts/write-kin-answer.js'), args);
+  const { rl: newRl } = await runScript(rl, path.join(__dirname, 'scripts/write-kin-answer.js'), args);
+  return newRl;
 }
 
 // ── 흐름 4: 설정 확인 ───────────────────────────────────────────────────
@@ -501,13 +524,7 @@ async function main() {
   const { config } = await import('./src/config/index.js');
   const { DOMESTIC_REGIONS, OVERSEAS_REGIONS, extractRegion } = await import('./src/agents/tradule_source.js');
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
-  rl.on('SIGINT', () => {
-    console.log('\n\n중단했습니다.');
-    rl.close();
-    process.exit(0);
-  });
-
+  let rl = createRl();
   let regions = null;
 
   while (true) {
@@ -533,9 +550,9 @@ async function main() {
       if (['1', '2', '3'].includes(choice)) {
         if (!regions) regions = await fetchRegions(config, DOMESTIC_REGIONS, OVERSEAS_REGIONS);
       }
-      if (choice === '1') await flowBlog(rl, regions, extractRegion);
-      else if (choice === '2') await flowKin(rl, regions);
-      else if (choice === '3') await flowRecent(rl);
+      if (choice === '1') rl = await flowBlog(rl, regions, extractRegion);
+      else if (choice === '2') rl = await flowKin(rl, regions);
+      else if (choice === '3') rl = await flowRecent(rl);
       else console.log('  ⚠ 0~4 중에서 선택해주세요.');
     } catch (err) {
       // §3/§8: 스택 트레이스를 그대로 뱉지 않는다.
