@@ -301,7 +301,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
         // 실측(2026-09-18): AI 추정도 실패하면 바로 목록으로 떨어져서 "종합형" 질문
         // 자체가 안 뜨던 틈새 — 지역을 아예 못 찾은 경우에도 같은 질문을 넣는다.
         console.log(`  ⚠ "${raw}"에서 지역을 알아보지 못했습니다.`);
-        const isThemeNoRegion = await askYesNoNav(rl, '특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', false);
+        const isThemeNoRegion = await askYesNoNav(rl, '특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', true);
         if (isThemeNoRegion === HOME) return rl;
         if (isThemeNoRegion === true) {
           state.mode = 'theme';
@@ -323,7 +323,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
         // 묶이면 안 되는 종합형 주제일 수 있다 — 코스 가이드(스팟·동선)가 아니라
         // 사실 검증(factSearch)만으로 충분히 근거를 갖출 수 있는 글이라, 지역
         // 매칭을 강제하지 않는 경로를 제공한다.
-        const isTheme = await askYesNoNav(rl, '이 키워드가 특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', false);
+        const isTheme = await askYesNoNav(rl, '이 키워드가 특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', true);
         if (isTheme === HOME) return rl;
         if (isTheme === true) {
           state.mode = 'theme';
@@ -439,7 +439,7 @@ async function flowKin(rl, regions) {
     }
 
     if (step === 3) {
-      const link = await askYesNoNav(rl, '\n[옵션] 링크 포함? (최근 5건 중 1건 — 포함 가능)', false);
+      const link = await askYesNoNav(rl, '\n[옵션] 링크 포함? (최근 5건 중 1건 — 포함 가능)', true);
       if (link === HOME) return rl;
       if (link === BACK) { step = 2; continue; }
       state.wantsLink = link;
@@ -510,7 +510,7 @@ async function flowRecent(rl) {
   if (question === HOME || question === BACK || !question) { console.log('  취소했습니다.'); return rl; }
 
   const days = DAY_OPTIONS.find((d) => d.apiDays === entry.days) ?? DAY_OPTIONS[1];
-  const wantsLink = await askYesNoNav(rl, '링크 포함?', false);
+  const wantsLink = await askYesNoNav(rl, '링크 포함?', true);
   if (wantsLink === HOME || wantsLink === BACK) return rl;
 
   const args = ['--region', entry.region, '--days', String(days.apiDays), '--question', question];
