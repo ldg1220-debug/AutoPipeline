@@ -580,6 +580,26 @@ function validateBlogStructure(content) {
     );
   }
 
+  // 이동수단 표현 과다 반복 검사 (작업지시서 2026-09-18 §3) — 실측: maeilg.com/260
+  // "대중교통" 30회, /262 23회. sanitizeTitleForTransport는 제목만 걸러내고 본문에는
+  // 방어가 없어서 trip_data 없이도 LLM이 같은 표현을 습관적으로 반복하고 있었음.
+  // trip_data가 없으면(종합형 글) 이동수단을 뒷받침할 근거 자체가 없으므로 더 엄격하게(3회
+  // 이상)본다. 경고만 남기지 않고 REJECTED로 재작성 루프를 태운다(기존 QA 탈락→재작성
+  // 흐름 재사용 — 본문을 정규식으로 직접 잘라내는 것보다 LLM이 문맥에 맞게 다시 쓰게 하는
+  // 편이 문장을 덜 망가뜨림).
+  const MAX_WORD_REPEAT = 20;
+  const TRANSPORT_WORDS_QA = ['대중교통', '차량으로', '도보로', '버스로', '지하철로'];
+  const fullBody = sections.map((s) => s.body ?? '').join(' ');
+  const hasTripData = (content.trip_data?.spots?.length ?? 0) > 0;
+  for (const word of TRANSPORT_WORDS_QA) {
+    const count = (fullBody.match(new RegExp(word, 'g')) ?? []).length;
+    if (count > MAX_WORD_REPEAT) {
+      issues.push(`단어 과다 반복: "${word}" ${count}회 (기준 ${MAX_WORD_REPEAT}회 초과)`);
+    } else if (!hasTripData && count >= 3) {
+      issues.push(`이동수단 표현 근거 없이 반복: "${word}" ${count}회 (trip_data 없음 — 실제 이동수단 데이터가 없는 종합형 글)`);
+    }
+  }
+
   const shortFaq = faq.filter((f) => (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
   if (shortFaq.length > 0) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);

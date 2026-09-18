@@ -9,7 +9,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle } from '../utils/rateLimiter.js';
 import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../utils/internalLinks.js';
 import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
-import { isOverseasRegion } from './tradule_source.js';
+import { isOverseasRegion, extractRegion } from './tradule_source.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -129,10 +129,18 @@ const CATEGORY_KR = {
  * (지시서 §2-1: 이전엔 이 배지만 "경제·이슈" 기본값으로 남아있었음 — 티스토리
  * 카테고리 자체는 window.Config 수정으로 이미 맞게 잡히는 것과는 별개 경로).
  */
+/**
+ * 실측 버그(2026-09-18, 작업지시서 §5-①): 하노이/규슈처럼 trip_data가 없는(지역 매칭
+ * 실패) 해외 키워드에서 배지가 "국내여행"으로 잘못 표시됨 — region이 null이면 무조건
+ * "국내여행"을 기본값으로 찍고 있었기 때문. trip_data.region이 없으면 키워드 텍스트에서
+ * extractRegion()으로 한 번 더 찾아보고, 그래도 못 찾으면(정말 지역이 특정 안 되는
+ * 종합형 글) 국내/해외를 단정하지 말고 중립 라벨을 쓴다.
+ */
 function buildCategoryLabel(content) {
   if (content.category === 'travel') {
-    const region = content.trip_data?.region ?? null;
-    return region && isOverseasRegion(region) ? '해외여행' : '국내여행';
+    const region = content.trip_data?.region ?? extractRegion(content.keyword ?? '');
+    if (!region) return '여행'; // 국내/해외 단정 불가 — 지어내지 않음
+    return isOverseasRegion(region) ? '해외여행' : '국내여행';
   }
   return CATEGORY_KR[content.category] ?? '경제·이슈';
 }
@@ -229,7 +237,8 @@ function buildBlogStyles(category) {
 .tradule-cta a{color:#1e40af;font-weight:600;text-decoration:none}
 .timeline-table{margin:24px 0}
 .timeline-table h4{margin:0 0 10px;font-size:16px}
-.timeline-table table{width:100%;border-collapse:collapse;font-size:14px}
+.timeline-table h5{margin:16px 0 8px;font-size:14px;font-weight:700;color:#374151}
+.timeline-table table{width:100%;border-collapse:collapse;font-size:14px;margin-bottom:12px}
 .timeline-table th,.timeline-table td{border:1px solid #e5e7eb;padding:8px 10px;text-align:left}
 .timeline-table th{background:#f9fafb;font-weight:600}
 .distance-disclosure{font-size:12px;color:#9ca3af;margin:-8px 0 16px}
@@ -257,8 +266,12 @@ function isStraightLineDistance(tripData) {
 // 지시서 A-1: "~라면 ~가 중요합니다" 식 섹션 첫 문장 복붙은 요약이 아니라 정보 0.
 // trip_data가 있으면 실제 수치·동선(거리·스팟수·평점·리뷰수)만으로 구성하고,
 // 없을 때만 기존 방식(섹션 첫 문장)으로 폴백한다.
-function buildTldrBox(sections, tripData) {
-  const bullets = tripData?.spots?.length ? buildTldrBulletsFromTripData(tripData) : buildTldrBulletsFromSections(sections);
+function buildTldrBox(sections, tripData, factCheck) {
+  // 2026-09-18: trip_data 없는 종합형 글의 TL;DR이 본문 첫 문장을 그대로 복사해
+  // "읽을 이유가 없다"는 지적 — fact_check(검증된 사실)가 있으면 그 수치로 대체한다.
+  const bullets = tripData?.spots?.length
+    ? buildTldrBulletsFromTripData(tripData)
+    : (factCheck?.verifiedFacts?.length ? buildTldrBulletsFromFactCheck(factCheck) : buildTldrBulletsFromSections(sections));
   if (!bullets.length) return '';
   return (
     `<div class="tldr-box">\n` +
@@ -305,6 +318,15 @@ function buildTldrBulletsFromTripData(tripData) {
     }
   }
 
+  return bullets;
+}
+
+/** trip_data 없는 종합형 글의 TL;DR — 검증된 사실(factSearch)의 수치를 그대로 목록화. */
+function buildTldrBulletsFromFactCheck(factCheck) {
+  const bullets = factCheck.verifiedFacts.slice(0, 4).map((f) => `<li>${f}</li>`);
+  if (factCheck.sources?.length) {
+    bullets.push(`<li>출처 ${factCheck.sources.length}건 확인됨</li>`);
+  }
   return bullets;
 }
 
@@ -361,6 +383,20 @@ function buildCourseMapImage(tripData) {
   );
 }
 
+/** tripData.dayTotals 값이 숫자든 { distanceKm, spots } 객체든 방어적으로 처리
+ *  (실측 확인: write-kin-answer.js와 동일한 스키마 이슈, 2026-09-18). */
+function extractDayKm(entry) {
+  if (entry == null) return null;
+  if (typeof entry === 'number') return entry;
+  if (typeof entry === 'object') return entry.distanceKm ?? entry.km ?? entry.total ?? null;
+  return null;
+}
+
+/**
+ * 일차별로 표를 나눈다 (작업지시서 2026-09-18 "본문이 검정 글 덩어리" §1 — "1번이
+ * 전부입니다"). 예전엔 스팟을 순서대로 한 표에 다 넣어서 "1일차/2일차" 구분이 안
+ * 보였다. write-kin-answer.js의 day-그룹 로직과 같은 방식.
+ */
 function buildTimelineTable(tripData) {
   const spots = tripData?.spots ?? [];
   if (spots.length === 0) return '';
@@ -369,20 +405,42 @@ function buildTimelineTable(tripData) {
   // 아예 뺀다(순서/장소/평점만).
   const straightLine = isStraightLineDistance(tripData);
   const showNextCol = !straightLine;
-  const nextTh  = showNextCol ? '<th>다음까지</th>' : '';
-  const rows = spots
-    .map((s) => {
+  const nextTh = showNextCol ? '<th>다음까지</th>' : '';
+
+  const byDay = new Map();
+  for (const spot of spots) {
+    const day = spot.day ?? 1;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(spot);
+  }
+  const dayNumbers = [...byDay.keys()].sort((a, b) => a - b);
+  const kmLabel = straightLine ? '직선거리 약' : '이동';
+
+  const blocks = dayNumbers.map((day) => {
+    const daySpots = byDay.get(day);
+    const dayEntry = tripData.dayTotals?.[String(day)] ?? tripData.dayTotals?.[day] ?? null;
+    const dayKm = extractDayKm(dayEntry);
+    const kmSuffix = dayKm
+      ? ` (${kmLabel} ${dayKm}km)`
+      : (dayNumbers.length === 1 && tripData.totalDistanceKm ? ` (${kmLabel} ${tripData.totalDistanceKm}km)` : '');
+
+    const rows = daySpots.map((s) => {
       const nextTd = showNextCol ? `<td>${formatToNext(s, straightLine)}</td>` : '';
       return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s, tripData.ratingSource)}</td>${nextTd}</tr>`;
-    })
-    .join('\n');
+    }).join('\n');
+
+    return (
+      `<h5>${dayNumbers.length > 1 ? `${day}일차` : (tripData.days === 1 ? '당일' : `${day}일차`)}${kmSuffix}</h5>\n` +
+      `<table>\n<thead><tr><th>순서</th><th>장소</th><th>평점</th>${nextTh}</tr></thead>\n` +
+      `<tbody>\n${rows}\n</tbody>\n</table>`
+    );
+  });
 
   return (
     `<div class="timeline-table">\n` +
-    `<h4>🗺️ 동선 타임라인${tripData.days ? ` (${tripData.days === 1 ? '당일' : `${tripData.days}일`})` : ''}</h4>\n` +
-    `<table>\n<thead><tr><th>순서</th><th>장소</th><th>평점</th>${nextTh}</tr></thead>\n` +
-    `<tbody>\n${rows}\n</tbody>\n</table>\n` +
-    `</div>`
+    `<h4>🗺️ 동선 타임라인</h4>\n` +
+    blocks.join('\n\n') +
+    `\n</div>`
   );
 }
 
@@ -700,7 +758,7 @@ async function monetizeBlogDraft(content) {
     buildTravelpayoutsBlock(content);
 
   // ① TL;DR 박스
-  const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data);
+  const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data, content.fact_check);
   const distanceDisclosureHtml = buildStraightLineDisclosure(content.trip_data); // 임시 조치(2026-09-08), 1회만
   const courseMapHtml = buildCourseMapImage(content.trip_data);
   const timelineHtml = buildTimelineTable(content.trip_data);

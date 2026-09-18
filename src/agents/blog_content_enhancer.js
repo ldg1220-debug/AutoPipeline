@@ -359,8 +359,13 @@ async function pass3Body(keyword, section, targetReader, outlineContext, isFirst
     context:       outlineContext,
     today,
     trip_data:     JSON.stringify(tripData ?? []),
+    // 2026-09-18 실측(maeilg.com/260, /262): 첫 섹션이 "키워드, 대중교통으로 즐기는
+    // 최적 동선"처럼 제목과 거의 같은 문장을 다시 쓰는 습관이 있었다 — Tistory가 이
+    // 첫 문장을 목록 미리보기로 쓰는데, 정작 티스토리 "제목"은 로테이션으로 다른 문구를
+    // 쓰고 있어 둘이 따로 놀았다. 키워드를 억지로 초반에 욱여넣지 말고, 제목을 그대로
+    // 반복하지도 말라고 명시한다.
     first_section_note: isFirstSection
-      ? `【검색엔진 노출 — 이 섹션은 글의 첫 번째 섹션입니다】\n첫 1~2문장 안에 키워드("${keyword}")를 그대로, 자연스럽게 포함하세요. Tistory/검색결과 미리보기는 본문 앞부분을 그대로 발췌해 보여주므로, 키워드 없이 도입부를 시작하면 검색 노출에서 손해를 봅니다.`
+      ? `【검색엔진 노출 — 이 섹션은 글의 첫 번째 섹션입니다】\n첫 1~2문장 안에 키워드("${keyword}")의 핵심 단어를 자연스럽게 포함하세요. 다만 제목을 그대로 반복하거나 "OOO, 대중교통으로 즐기는 OOO"처럼 뻔한 수식어 패턴으로 시작하지 마세요 — 바로 실질적인 내용(핵심 사실 하나)으로 시작하세요. 이동수단 단어(대중교통/차량/도보 등)는 위 trip_data에 실제 근거가 있을 때만 쓰세요.`
       : '',
   });
   await throttle(2000);
