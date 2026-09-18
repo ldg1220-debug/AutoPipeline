@@ -126,6 +126,20 @@ async function askChoiceHelp(rl, question, validator, errorHint, expandedHelp) {
 }
 
 // ── 지역 파싱 (자유 텍스트 → 지역/일수 추정, §2) ─────────────────────────────
+/**
+ * 실측 버그(2026-09-17): "하노이"처럼 하드코딩 REGION_TREE(extractRegion)에는
+ * 없지만 트레쥴 실시간 목록(regions)에는 있는 지역을 "방식" 단계가 못 찾아
+ * "지역을 알아보지 못했습니다"로 잘못 안내하던 문제 — 정작 그 다음 구조화 선택
+ * 화면은 같은 실시간 목록에서 찾아내니 사용자 입장에선 모순으로 보였다.
+ * 실시간 목록을 먼저 보고, 없으면 로컬 REGION_TREE로 보조 폴백한다.
+ */
+function matchRegionFromText(text, regions, extractRegion) {
+  const all = [...(regions?.domestic ?? []), ...(regions?.overseas ?? [])];
+  const liveMatch = all.filter((r) => text.includes(r)).sort((a, b) => b.length - a.length)[0];
+  if (liveMatch) return liveMatch;
+  return extractRegion(text);
+}
+
 function parseDayFromText(text) {
   if (/당일|하루/.test(text)) return DAY_OPTIONS[0];
   const m = text.match(/(\d+)\s*박\s*(\d+)?\s*일/);
@@ -267,7 +281,7 @@ async function flowBlog(rl, regions, extractRegion) {
       if (raw === '2') { state.mode = 'auto'; step = 3; continue; }
 
       // §2: 그 외 텍스트는 키워드 직접 지정으로 본다.
-      const region = extractRegion(raw);
+      const region = matchRegionFromText(raw, regions, extractRegion);
       const dayGuess = parseDayFromText(raw) ?? DAY_OPTIONS[1];
       if (!region) {
         console.log(`  ⚠ "${raw}"에서 지역을 알아보지 못했습니다 — 목록에서 골라주세요.`);
