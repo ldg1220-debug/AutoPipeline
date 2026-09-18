@@ -42,6 +42,12 @@ const autoMode = args.includes('--auto') || !process.stdin.isTTY;
 // monetized_{date}.json까지만 만든다 — cli.js 대화형 런처의 "초안만 만들기" 기본값용
 // (지시서 2026-09-16 §4: "기본값을 초안만으로 두세요 — 실수로 발행되는 것보다 낫다").
 const draftOnly = args.includes('--draft-only');
+// --single: --force-keyword와 함께 쓰면 Part 1의 자동 시드 채굴(generateTravelSeeds→
+// mineKeywords, 실제 자동완성 API + DB 보충)을 완전히 건너뛰고 그 키워드 하나만 처리한다.
+// 실측(cli.js 사용자 피드백, 2026-09-17): "하노이"만 지정했는데 targetCount(=postsPerDay×2)
+// 를 채우려고 무관한 키워드(오사카/나고야 등)를 추가로 채굴·선택해 API를 낭비하고 있었음.
+// cli.js의 "키워드 직접 지정" 경로가 이 플래그를 붙인다.
+const singleMode = args.includes('--single');
 
 /**
  * 각 키워드를 서로 내용이 겹치지 않는 독립적인 글 주제 2~3개로 확장한다.
@@ -578,59 +584,69 @@ async function main() {
   if (forceKeyword) logger.info(`[blog:pipeline] --force-keyword: "${forceKeyword}" (카테고리: ${forceCategory})`);
 
   // Part 1: Keyword Miner
-  // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
-  const seeds = process.env.KEYWORD_SEEDS
-    ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
-    : generateTravelSeeds(30);
-  const keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
-  await writeJSON(`${outDir}/keywords/keywords_${date}.json`, keywordData);
-
-  // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
-  let rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
-
-  // 신규 키워드가 목표치에 못 미치면 DB pending으로 채움
+  // --single(§ 위 주석 참고): --force-keyword 하나만 처리 — 자동 시드 채굴/DB 보충/예고
+  // 키워드 배치를 전부 건너뛴다. 그 외에는 기존 그대로(여행 지역×코스 패턴 시드 채굴 후
+  // targetCount만큼 채움).
   const postsPerDay = config.runtime.blogPostsPerDay ?? 5;
   const fetchMultiplier = 2;
-  const targetCount = postsPerDay * fetchMultiplier;
+  const targetCount = singleMode ? 1 : postsPerDay * fetchMultiplier;
 
-  if (rawKeywords.length < targetCount) {
-    const need = targetCount - rawKeywords.length;
-    const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
-    // 여행 채널 전환 이전(경제·부동산·뷰티 등)에 쌓인 DB pending 잔여물이 계속 섞여 나오는
-    // 문제 방지 — category = 'travel'인 것만 보충 대상으로 삼는다.
-    const dbKeywords = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' ORDER BY score DESC LIMIT ?`)
-      .all(need * 2);  // 중복 제거 여분 확보
-    const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
-    if (fillKws.length > 0) {
-      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending(travel) ${fillKws.length}개 보충`);
-      rawKeywords = [...rawKeywords, ...fillKws];
-    } else {
-      logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족하지만 DB pending에 travel 카테고리 후보가 없음 (${rawKeywords.length}개로 진행)`);
-    }
-  }
+  let keywordData = { contents: [] };
+  let rawKeywords = [];
 
-  // ── 예고(promised) 키워드 최우선 배치 ──────────────────────────────────
-  // 이전 영상 대본에서 "다음 영상 예고"로 추출된 키워드를 가장 앞에 배치한다.
-  // VIDEO_PIPELINE_ENABLED=false(영상 중단) 이후로는 새로 생성될 일이 없고,
-  // 여행 채널 전환 이전 경제 채널 시절 잔여물만 남아있을 수 있으므로 travel만 채택한다.
-  try {
-    const promisedRows = db
-      .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' AND category = 'travel' ORDER BY score DESC`)
-      .all();
-    if (promisedRows.length > 0) {
-      const promisedSet = new Set(promisedRows.map((r) => r.keyword.toLowerCase()));
-      // 기존 목록에서 promised와 중복되는 항목 제거 후 promised를 앞에 삽입
-      rawKeywords = [
-        ...promisedRows,
-        ...rawKeywords.filter((k) => !promisedSet.has((k.keyword ?? k).toLowerCase())),
-      ];
-      logger.info(`[blog:pipeline] 예고 키워드 ${promisedRows.length}개 최우선 배치: ${promisedRows.map((r) => `"${r.keyword}"`).join(', ')}`);
-      // promised → pending 상태로 복원 (발행 후 used로 전환됨)
-      db.prepare(`UPDATE keywords SET status = 'pending' WHERE status = 'promised'`).run();
+  if (singleMode) {
+    logger.info('[blog:pipeline] --single: 자동 시드 채굴 건너뜀 (--force-keyword만 처리)');
+  } else {
+    // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
+    const seeds = process.env.KEYWORD_SEEDS
+      ? process.env.KEYWORD_SEEDS.split(',').map((s) => s.trim()).filter(Boolean)
+      : generateTravelSeeds(30);
+    keywordData = await mineKeywords(seeds, config.keywordMiner.topN);
+    await writeJSON(`${outDir}/keywords/keywords_${date}.json`, keywordData);
+
+    // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
+    rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
+
+    // 신규 키워드가 목표치에 못 미치면 DB pending으로 채움
+    if (rawKeywords.length < targetCount) {
+      const need = targetCount - rawKeywords.length;
+      const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
+      // 여행 채널 전환 이전(경제·부동산·뷰티 등)에 쌓인 DB pending 잔여물이 계속 섞여 나오는
+      // 문제 방지 — category = 'travel'인 것만 보충 대상으로 삼는다.
+      const dbKeywords = db
+        .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' ORDER BY score DESC LIMIT ?`)
+        .all(need * 2);  // 중복 제거 여분 확보
+      const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
+      if (fillKws.length > 0) {
+        logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending(travel) ${fillKws.length}개 보충`);
+        rawKeywords = [...rawKeywords, ...fillKws];
+      } else {
+        logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족하지만 DB pending에 travel 카테고리 후보가 없음 (${rawKeywords.length}개로 진행)`);
+      }
     }
-  } catch (err) {
-    logger.warn(`[blog:pipeline] 예고 키워드 로드 실패 (계속 진행): ${err.message}`);
+
+    // ── 예고(promised) 키워드 최우선 배치 ──────────────────────────────────
+    // 이전 영상 대본에서 "다음 영상 예고"로 추출된 키워드를 가장 앞에 배치한다.
+    // VIDEO_PIPELINE_ENABLED=false(영상 중단) 이후로는 새로 생성될 일이 없고,
+    // 여행 채널 전환 이전 경제 채널 시절 잔여물만 남아있을 수 있으므로 travel만 채택한다.
+    try {
+      const promisedRows = db
+        .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'promised' AND category = 'travel' ORDER BY score DESC`)
+        .all();
+      if (promisedRows.length > 0) {
+        const promisedSet = new Set(promisedRows.map((r) => r.keyword.toLowerCase()));
+        // 기존 목록에서 promised와 중복되는 항목 제거 후 promised를 앞에 삽입
+        rawKeywords = [
+          ...promisedRows,
+          ...rawKeywords.filter((k) => !promisedSet.has((k.keyword ?? k).toLowerCase())),
+        ];
+        logger.info(`[blog:pipeline] 예고 키워드 ${promisedRows.length}개 최우선 배치: ${promisedRows.map((r) => `"${r.keyword}"`).join(', ')}`);
+        // promised → pending 상태로 복원 (발행 후 used로 전환됨)
+        db.prepare(`UPDATE keywords SET status = 'pending' WHERE status = 'promised'`).run();
+      }
+    } catch (err) {
+      logger.warn(`[blog:pipeline] 예고 키워드 로드 실패 (계속 진행): ${err.message}`);
+    }
   }
 
   // ── --force-keyword 처리: 지정된 키워드를 맨 앞에 삽입 ─────────────────

@@ -342,7 +342,9 @@ async function flowBlog(rl, regions, extractRegion) {
 
       const args = [];
       if (state.mode !== 'auto') {
-        args.push('--force-keyword', `${state.region} ${state.days.pattern}`, '--force-category', 'travel');
+        // --single: 실측(2026-09-17) — 이 키워드 하나만 요청했는데 목표 편수(2)를
+        // 채우려고 무관한 키워드까지 자동 채굴·선택해 API를 낭비하던 문제 수정.
+        args.push('--force-keyword', `${state.region} ${state.days.pattern}`, '--force-category', 'travel', '--single');
       }
       if (!state.publishNow) args.push('--draft-only');
 
