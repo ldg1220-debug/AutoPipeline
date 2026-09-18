@@ -296,6 +296,12 @@ async function flowBlog(rl, regions, extractRegion) {
       state.mode = 'direct';
       state.region = region;
       state.days = dayGuess;
+      // 실측 버그(2026-09-18): 여기서 "${region} ${days.pattern}"으로 재구성하면
+      // "규슈 부흥할인" 같은 원문 표현이 사라져서, factSearch.js의 지원금/이벤트
+      // 키워드 감지(isClaimKeyword)가 작동할 기회조차 없었다. 원문을 그대로 키워드로
+      // 쓴다 — extractDays()/resolveDays()가 어차피 임의 텍스트에서 일정을 파싱하므로
+      // 정형 패턴으로 다시 쓸 필요가 없다.
+      state.rawText = raw;
       step = 3;
       continue;
     }
@@ -331,7 +337,7 @@ async function flowBlog(rl, regions, extractRegion) {
     }
 
     if (step === 4) {
-      const keyword = state.mode === 'auto' ? '자동 선정' : `${state.region} ${state.days.pattern}`;
+      const keyword = state.mode === 'auto' ? '자동 선정' : (state.rawText ?? `${state.region} ${state.days.pattern}`);
       console.log('\n────────────────────────────');
       console.log(`  ${keyword} · ${state.publishNow ? '티스토리 발행까지' : '초안만'}`);
       console.log('────────────────────────────');
@@ -344,7 +350,7 @@ async function flowBlog(rl, regions, extractRegion) {
       if (state.mode !== 'auto') {
         // --single: 실측(2026-09-17) — 이 키워드 하나만 요청했는데 목표 편수(2)를
         // 채우려고 무관한 키워드까지 자동 채굴·선택해 API를 낭비하던 문제 수정.
-        args.push('--force-keyword', `${state.region} ${state.days.pattern}`, '--force-category', 'travel', '--single');
+        args.push('--force-keyword', keyword, '--force-category', 'travel', '--single');
       }
       if (!state.publishNow) args.push('--draft-only');
 
