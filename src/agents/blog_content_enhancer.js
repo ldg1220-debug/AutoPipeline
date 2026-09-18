@@ -302,6 +302,36 @@ function sanitizeTitleForTransport(title, tripData) {
   return sanitized || title; // 과도하게 지워져 빈 문자열이 되면 원본 유지 (안전장치)
 }
 
+/**
+ * trip_data가 없는(종합형) 글에서 "이동 방법"·"교통편"·"동선"·"코스 안내" 류 섹션을
+ * 프롬프트 지시만으로 막았더니 실측(2026-09-18, "가을 드라이브 코스")에서 재발했다 —
+ * "이동 방법 및 교통 정보" 섹션이 그대로 생성됨. 코드로 한 번 더 강제한다.
+ */
+const UNSAFE_SECTION_HEADING_PATTERN = /이동\s*방법|교통(편)?|동선|코스\s*(안내|개요)/;
+const SAFE_HEADING_FALLBACKS = ['알아두면 좋은 점', '함께 참고할 정보', '자주 놓치는 부분'];
+
+function sanitizeOutlineForNoTripData(outline, tripData) {
+  if (tripData?.spots?.length) return outline; // 실제 코스 데이터가 있으면 그대로(B안)
+  const sections = (outline.sections ?? []);
+  let fallbackIdx = 0;
+  const sanitizedSections = sections.map((s) => {
+    if (!UNSAFE_SECTION_HEADING_PATTERN.test(s.heading ?? '')) return s;
+    const newHeading = SAFE_HEADING_FALLBACKS[fallbackIdx % SAFE_HEADING_FALLBACKS.length];
+    fallbackIdx++;
+    logger.warn(`[blog_content_enhancer] trip_data 없는 글에서 동선/교통 섹션 감지 → 대체: "${s.heading}" → "${newHeading}"`);
+    // 이동수단 단어가 든 key_point는 근거가 없으므로 제거 — 최소 1개는 남기되, 전부
+    // 지워지면 일반 안내 문구로 대체(빈 섹션 방지).
+    const filteredKeyPoints = (s.key_points ?? []).filter((kp) => !UNSAFE_SECTION_HEADING_PATTERN.test(kp) && !/대중교통|차량|버스|지하철|도보/.test(kp));
+    return {
+      ...s,
+      heading: newHeading,
+      key_points: filteredKeyPoints.length ? filteredKeyPoints : ['이 주제와 관련해 독자가 헷갈리기 쉬운 부분을 검증된 사실 범위 안에서 정리'],
+      spot_indices: [],
+    };
+  });
+  return { ...outline, sections: sanitizedSections };
+}
+
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
@@ -471,7 +501,8 @@ async function pass5GeminiReview(keyword, sections, today) {
     `2. 연도·시제 오류: 2023~2024년 수치를 "현재" "올해"로 표현\n` +
     `3. 법·제도 오류: 암호화폐 과세는 2025년 시행 (2023년 시행이라 쓰면 오류)\n` +
     `4. 검증 불가 수치: "○○%가 ~~한다"처럼 출처 없는 구체적 통계\n` +
-    `5. 허구 제품명/브랜드명: 실존 여부 불명확한 구체적 제품\n` +
+    `5. 허구 제품명/브랜드명: 실존 여부 불명확한 구체적 제품 (단, "트레쥴"/"트레쥴 앱"은 이\n` +
+    `   블로그가 실제로 제휴하는 여행 코스 앱입니다 — 허구로 판단하지 말고 그대로 두세요)\n` +
     `6. 논리 모순: 앞뒤 내용이 충돌하는 주장\n` +
     `7. 정부 지원 제도 운영 상태 단정: 특정 정부 지원 제도·금융 상품(예: 청년도약계좌 등)이\n` +
     `   "현재 신청 가능"이라고 단정하는 경우 — 이런 제도는 판매 종료·개편·후속 상품 출시로\n` +
@@ -658,7 +689,7 @@ async function enhanceBlogDraft(content) {
   const intent = await pass1Intent(keyword, category, combinedCtx);
 
   logger.info(`[blog_content_enhancer] Pass 2 (outline): ${keyword}`);
-  const outline = await pass2Outline(
+  let outline = await pass2Outline(
     keyword,
     category,
     intent,
@@ -666,6 +697,10 @@ async function enhanceBlogDraft(content) {
     combinedCtx,
     tripData
   );
+  // 실측(2026-09-18, "가을 드라이브 코스"): 프롬프트로 "trip_data 없으면 동선/교통
+  // 섹션 금지"를 지시해도 LLM이 여전히 "이동 방법 및 교통 정보" 섹션을 만드는 사고가
+  // 재발함 — 코드로 한 번 더 강제한다(sanitizeTitleForTransport와 같은 패턴).
+  outline = sanitizeOutlineForNoTripData(outline, tripData);
 
   // H2/H3 섹션만 추출 (FAQ 제외)
   const bodySections = (outline.sections ?? []).filter(
