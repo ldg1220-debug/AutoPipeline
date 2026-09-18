@@ -298,7 +298,18 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       }
 
       if (!region) {
-        console.log(`  ⚠ "${raw}"에서 지역을 알아보지 못했습니다 — 목록에서 골라주세요.`);
+        // 실측(2026-09-18): AI 추정도 실패하면 바로 목록으로 떨어져서 "종합형" 질문
+        // 자체가 안 뜨던 틈새 — 지역을 아예 못 찾은 경우에도 같은 질문을 넣는다.
+        console.log(`  ⚠ "${raw}"에서 지역을 알아보지 못했습니다.`);
+        const isThemeNoRegion = await askYesNoNav(rl, '특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', false);
+        if (isThemeNoRegion === HOME) return rl;
+        if (isThemeNoRegion === true) {
+          state.mode = 'theme';
+          state.rawText = raw;
+          step = 3;
+          continue;
+        }
+        console.log('  목록에서 골라주세요.');
         state.mode = 'structured';
         step = 1;
         continue;
