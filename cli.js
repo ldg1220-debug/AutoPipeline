@@ -306,7 +306,23 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       console.log(`\n  지역: ${region}    일수: ${dayGuess.label}${regionGuessReason ? `\n  (AI 추정 근거: ${regionGuessReason})` : ''}`);
       const confirmed = await askYesNoNav(rl, '맞습니까?', true);
       if (confirmed === HOME) return rl;
-      if (confirmed === BACK || confirmed === false) { step = 0; continue; }
+      if (confirmed === BACK) { step = 0; continue; }
+      if (confirmed === false) {
+        // 2026-09-18: "규슈 부흥할인 대상 지역 총정리"처럼 애초에 지역 하나로
+        // 묶이면 안 되는 종합형 주제일 수 있다 — 코스 가이드(스팟·동선)가 아니라
+        // 사실 검증(factSearch)만으로 충분히 근거를 갖출 수 있는 글이라, 지역
+        // 매칭을 강제하지 않는 경로를 제공한다.
+        const isTheme = await askYesNoNav(rl, '이 키워드가 특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', false);
+        if (isTheme === HOME) return rl;
+        if (isTheme === true) {
+          state.mode = 'theme';
+          state.rawText = raw;
+          step = 3;
+          continue;
+        }
+        step = 0;
+        continue;
+      }
       state.mode = 'direct';
       state.region = region;
       state.days = dayGuess;
