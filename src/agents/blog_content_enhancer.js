@@ -7,6 +7,7 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
+import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -626,7 +627,23 @@ async function enhanceBlogDraft(content) {
     logger.info(`[blog_content_enhancer] QA 피드백 주입: 탈락사유 ${qaIssues.length}개 / 개선제안 ${qaFeedback.length}개`);
   }
 
-  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx + qaCtx;
+  // 2026-09-18: 지원금·이벤트·뉴스성 키워드는 LLM이 지어내지 않도록 웹 검색으로
+  // 사실 확인 후 그 범위 안에서만 서술하게 한다 (docs/DECISION_LOG.md D-029와 같은 종류의
+  // 위험 — 금전이 걸린 제도를 사실처럼 지어내면 독자가 실제 손해를 볼 수 있음).
+  let factCheckCtx = '';
+  let factCheck = null;
+  if (isClaimKeyword(keyword)) {
+    try {
+      factCheck = await searchAndVerify(keyword);
+      factCheckCtx = formatFactCheckContext(factCheck);
+    } catch (err) {
+      logger.warn(`[blog_content_enhancer] 사실 검증 실패(계속 진행, 안전장치 문구만 적용): ${err.message}`);
+      factCheck = { attempted: false, confidence: 'unverified' };
+      factCheckCtx = formatFactCheckContext(factCheck);
+    }
+  }
+
+  const combinedCtx = benchmarkCtx + competitorCtx + lifeImpactCtx + qaCtx + factCheckCtx;
 
   // 트레쥴 코스 데이터 — tradule_source.js(Part 1.7)가 keywordData.contents[].trip_data에
   // { region, days, totalDistanceKm, spots, appUrl } 형태로 주입한다. 없으면 null.
@@ -653,7 +670,8 @@ async function enhanceBlogDraft(content) {
 
   logger.info(`[blog_content_enhancer] Pass 3 (body × ${bodySections.length}): ${keyword}`);
   const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
-    (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '');
+    (qaCtx ? `\n[QA 피드백 요약] ${[...qaIssues, ...qaFeedback].slice(0, 4).join(' / ')}` : '') +
+    factCheckCtx; // Pass 3(실제 문장 작성)에서 지어내지 않도록 사실 검증 컨텍스트 전달
 
   const completedSections = [];
   for (let i = 0; i < bodySections.length; i++) {
@@ -689,6 +707,9 @@ async function enhanceBlogDraft(content) {
 
   return {
     ...content,
+    // 2026-09-18: 지원금/이벤트성 키워드였으면 검증 결과를 함께 남긴다 — monetizer.js가
+    // sources가 있으면 출처를 본문에 표기한다(투명성, 지어낸 주장이 아님을 증빙).
+    ...(factCheck ? { fact_check: factCheck } : {}),
     blog_draft: {
       ...blog_draft,
       title:            outline.title || blog_draft?.title || `${keyword} 완벽 정리`,

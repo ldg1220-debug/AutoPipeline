@@ -466,3 +466,21 @@
   소재 풀(198곳)을 얻음 — 별도 지시서로 진행 예정.
 - **관련 파일**: `src/agents/tradule_source.js`, `src/data/regionProfiles.js`,
   `src/agents/blog_asset_builder.js`
+
+### D-037: 지원금·이벤트성 키워드 웹 검색 사실 검증 — Tavily 채택
+- **결정**: "일본 정부 지원금 받는 여행지" 같은 키워드를 LLM이 실제 확인 없이 사실처럼
+  써서(D-029와 같은 종류·더 심각한 위험 — 금전이 걸림) 독자가 존재하지 않는 혜택을
+  기대하는 사고를 막기 위해, 지원금/이벤트/뉴스성 키워드(`isClaimKeyword()`)에 한해
+  웹 검색 API(Tavily)로 사실을 확인한 뒤 그 범위 안에서만 본문을 쓰게 함
+  (`src/utils/factSearch.js`, `blog_content_enhancer.js`의 Pass1/Pass3 컨텍스트에 주입).
+  모든 글이 아니라 지원금·이벤트·뉴스성 키워드에만 적용(사용자 선택) — 이미 실측
+  데이터(trip_data)로 쓰는 일반 코스 글에는 불필요한 비용.
+- **버린 대안**: Serper.dev(Google 결과 API, 저렴·빠름) / Google Custom Search API
+  (무료지만 검색엔진 ID 발급 등 설정 복잡) — 둘 다 후보였으나 사용자가 Tavily(설정
+  간단, 월 1,000건 무료 티어, 에이전트 용도로 설계됨) 선택.
+- **한계**: 검증 컨텍스트를 프롬프트에 주입할 뿐, 최종 문장이 그 범위를 벗어나지
+  않는다는 보장은 LLM의 프롬프트 준수에 달려있음(코드로 100% 강제 불가 — 이 프로젝트의
+  다른 "지어내지 말 것" 규칙들과 동일한 한계, 예: sanitizeTitleForTransport 같은 2차
+  방어가 필요할 수 있음).
+- **관련 파일**: `src/utils/factSearch.js`(신규), `src/agents/blog_content_enhancer.js`,
+  `src/agents/monetizer.js`(출처 표기), `src/config/index.js`, `.env.example`

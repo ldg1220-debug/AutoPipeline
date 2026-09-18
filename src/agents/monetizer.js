@@ -234,6 +234,10 @@ function buildBlogStyles(category) {
 .timeline-table th{background:#f9fafb;font-weight:600}
 .distance-disclosure{font-size:12px;color:#9ca3af;margin:-8px 0 16px}
 .partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
+.fact-sources{font-size:13px;color:#6b7280;margin:20px 0;padding:12px 16px;background:#f9fafb;border-radius:8px}
+.fact-sources p{margin:0 0 6px}
+.fact-sources ul{margin:0;padding-left:18px}
+.fact-sources a{color:#4b5563}
 ${RELATED_POSTS_CSS}
 ${getThemeStyles(category)}
 </style>`;
@@ -724,6 +728,17 @@ async function monetizeBlogDraft(content) {
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor);
   const faqHtml      = renderFaq(blog_draft.faq);
 
+  // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
+  // 출처를 밝힌다 — 지어낸 주장이 아니라 실제 검색 결과에 근거했음을 투명하게 보여준다.
+  const sourcesHtml = (content.fact_check?.sources?.length)
+    ? `<div class="fact-sources"><p>※ 이 글의 지원금·제도 관련 내용은 아래 출처를 참고해 작성했으며, ` +
+      `정확한 조건은 공식 채널에서 다시 확인하세요.</p><ul>` +
+      content.fact_check.sources.slice(0, 3).map((s) =>
+        `<li><a href="${s.url}" target="_blank" rel="noopener nofollow">${s.title || s.url}</a></li>`
+      ).join('') +
+      `</ul></div>`
+    : '';
+
   // JSON-LD: Article + FAQPage 스키마 합산
   const faqSchema = blog_draft.faq?.length
     ? {
@@ -826,6 +841,7 @@ async function monetizeBlogDraft(content) {
     adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,
+    sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,

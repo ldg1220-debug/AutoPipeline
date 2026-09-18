@@ -110,6 +110,12 @@ export const config = {
     customerId:  process.env.NAVER_SEARCHAD_CUSTOMER_ID,
     minMonthlyVolume: Number(process.env.NAVER_MIN_MONTHLY_VOLUME ?? 1000),
   },
+  // 2026-09-18: 지원금·이벤트·뉴스성 키워드의 사실 검증용 웹 검색(src/utils/factSearch.js).
+  // "일본 정부 지원금 받는 여행지" 같은 키워드를 LLM이 지어내지 않고 실제로 확인한 뒤
+  // 쓰게 하려는 목적 — 없으면 해당 키워드는 검증 없이 스킵(본문에 안전장치 문구만 추가).
+  tavily: {
+    apiKey: process.env.TAVILY_API_KEY,
+  },
   // 네이버 블로그 글쓰기 API는 2020-05-06 종료됨(광고성 글 대량 게재 방지) — 자동 발행 불가.
   // B-2-1: 반자동 운용 — blog_publisher.js가 원고를 output/blog/naver_*.md 로 별도 저장,
   // 사람이 수동으로 네이버 블로그에 복사·붙여넣기 한다.
