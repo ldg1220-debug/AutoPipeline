@@ -131,6 +131,45 @@ JSON 형식:
   };
 }
 
+/**
+ * 지역명이 아닌 표현("규슈", "온천 많은 동네" 등)을 실제 지원 지역 목록 중 하나로
+ * 추정한다(2026-09-18, cli.js 사용자 요청 — "검색 API 있는데 규슈도 찾게 해주면 안 됨?").
+ * TAVILY_API_KEY 없으면 시도하지 않고 null 반환 — 호출부가 기존처럼 목록 선택으로
+ * 폴백한다. 목록에 없는 지역을 지어내지 않도록 LLM에게 "반드시 주어진 목록 중 하나만"
+ * 고르게 하고, 목록 밖 응답은 버린다.
+ */
+export async function resolveRegionByTheme(text, regionList) {
+  if (!config.tavily?.apiKey || !regionList?.length) return null;
+
+  let results;
+  try {
+    await throttle(1000, 'tavily');
+    results = await searchTavily(`${text} 여행 지역 도시`);
+  } catch (err) {
+    logger.warn(`[factSearch] 지역 추정 검색 실패("${text}"): ${err.message}`);
+    return null;
+  }
+  if (results.length === 0) return null;
+
+  const snippetBlock = results.map((r, i) => `[${i + 1}] ${r.title}\n${r.content}`).join('\n\n');
+  const prompt = `아래 검색 결과를 참고해 "${text}"가 실제로 어느 도시를 가리키는지 판단하세요.
+반드시 아래 목록에 있는 이름 중 하나만 고르세요. 목록에 맞는 게 없거나 확신이 없으면 region을 null로 하세요.
+목록에 없는 이름을 지어내면 안 됩니다.
+
+목록: ${regionList.join(', ')}
+
+검색 결과:
+${snippetBlock}
+
+JSON 형식: {"region": "목록 중 하나 또는 null", "reason": "왜 그렇게 판단했는지 한 문장"}`;
+
+  const parsed = await callLLM(prompt);
+  if (!parsed?.region || !regionList.includes(parsed.region)) return null;
+
+  logger.info(`[factSearch] 지역 추정: "${text}" → ${parsed.region} (${parsed.reason ?? ''})`);
+  return { region: parsed.region, reason: parsed.reason ?? '' };
+}
+
 /** Pass1/Pass3 프롬프트에 주입할 컨텍스트 문자열로 변환. */
 export function formatFactCheckContext(factCheck) {
   if (!factCheck) return '';

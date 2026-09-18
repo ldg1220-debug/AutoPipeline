@@ -261,7 +261,7 @@ function runScript(rl, scriptPath, args) {
 }
 
 // ── 흐름 1: 블로그 글 발행 ────────────────────────────────────────────────
-async function flowBlog(rl, regions, extractRegion) {
+async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
   const state = { mode: null, region: null, days: null, publishNow: false };
   let step = 0;
   // 0=방식 1=지역(구조화) 2=일수(구조화) 3=발행방식 4=확인
@@ -281,15 +281,29 @@ async function flowBlog(rl, regions, extractRegion) {
       if (raw === '2') { state.mode = 'auto'; step = 3; continue; }
 
       // §2: 그 외 텍스트는 키워드 직접 지정으로 본다.
-      const region = matchRegionFromText(raw, regions, extractRegion);
+      let region = matchRegionFromText(raw, regions, extractRegion);
+      let regionGuessReason = '';
       const dayGuess = parseDayFromText(raw) ?? DAY_OPTIONS[1];
+
+      // 2026-09-18: 문자 그대로 지역명이 없어도("규슈") 검색 API로 실제 도시를
+      // 추정해본다 — Tavily 키가 없으면 resolveRegionByTheme가 그냥 null을 반환하고
+      // 기존처럼 목록 선택으로 폴백한다.
+      if (!region) {
+        console.log(`  "${raw}"에서 지역명을 바로 못 찾았습니다 — AI로 추정해봅니다…`);
+        const guess = await resolveRegionByTheme(raw, [...regions.domestic, ...regions.overseas]);
+        if (guess) {
+          region = guess.region;
+          regionGuessReason = guess.reason;
+        }
+      }
+
       if (!region) {
         console.log(`  ⚠ "${raw}"에서 지역을 알아보지 못했습니다 — 목록에서 골라주세요.`);
         state.mode = 'structured';
         step = 1;
         continue;
       }
-      console.log(`\n  지역: ${region}    일수: ${dayGuess.label}`);
+      console.log(`\n  지역: ${region}    일수: ${dayGuess.label}${regionGuessReason ? `\n  (AI 추정 근거: ${regionGuessReason})` : ''}`);
       const confirmed = await askYesNoNav(rl, '맞습니까?', true);
       if (confirmed === HOME) return rl;
       if (confirmed === BACK || confirmed === false) { step = 0; continue; }
@@ -489,6 +503,13 @@ async function flowSettings(config) {
 
   console.log('[여행 채널에 필요한 것]');
 
+  // 2026-09-18: 지원금/이벤트 키워드 사실 검증 + "규슈" 같은 표현의 지역 추정에
+  // 둘 다 Tavily를 쓴다 — 없으면 두 기능 다 조용히 스킵(기존 동작으로 폴백)됨을
+  // 명시적으로 보여준다.
+  line('Tavily(검색 API)', Boolean(config.tavily?.apiKey), Boolean(config.tavily?.apiKey)
+    ? '사실 검증 + 지역 추정 가능'
+    : '없음 — 지원금 키워드 검증·"규슈" 같은 지역 추정 둘 다 스킵됨');
+
   // §4: 어떤 LLM 제공자가 실제로 쓰이는지 — OpenAI만 보고 판단하면 안 된다.
   // blog_content_enhancer.js/write-kin-answer.js 폴백 순서(OpenAI→Gemini→Claude)와
   // 동일하게 첫 번째로 사용 가능한 제공자를 "실제 사용 제공자"로 보여준다.
@@ -545,6 +566,7 @@ async function flowSettings(config) {
 async function main() {
   const { config } = await import('./src/config/index.js');
   const { DOMESTIC_REGIONS, OVERSEAS_REGIONS, extractRegion } = await import('./src/agents/tradule_source.js');
+  const { resolveRegionByTheme } = await import('./src/utils/factSearch.js');
 
   let rl = createRl();
   let regions = null;
@@ -572,7 +594,7 @@ async function main() {
       if (['1', '2', '3'].includes(choice)) {
         if (!regions) regions = await fetchRegions(config, DOMESTIC_REGIONS, OVERSEAS_REGIONS);
       }
-      if (choice === '1') rl = await flowBlog(rl, regions, extractRegion);
+      if (choice === '1') rl = await flowBlog(rl, regions, extractRegion, resolveRegionByTheme);
       else if (choice === '2') rl = await flowKin(rl, regions);
       else if (choice === '3') rl = await flowRecent(rl);
       else console.log('  ⚠ 0~4 중에서 선택해주세요.');
