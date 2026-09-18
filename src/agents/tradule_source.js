@@ -14,6 +14,7 @@
  */
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import axios from 'axios';
 import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
@@ -23,6 +24,26 @@ import { REGION_PROFILES } from '../data/regionProfiles.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
+// 2026-09-18: 트레쥴 공식 /api/content/regions(198곳, PR #227)를 직접 호출해 확인한 뒤
+// 그 응답을 스냅샷으로 저장한 파일 — src/data/tradule_regions.json (scripts/
+// refresh-tradule-regions.js로 재조회 가능). 이전엔 30여 곳을 손으로 하드코딩했는데,
+// "서울"/"부산"/"제주"/"인천"처럼 이 공식 목록에 아예 없는 이름(트레쥴은 구 단위로
+// 세분화되어 있음 — 예: 서울 대신 종로/강남/홍대 등)과 "나트랑"(공식 표기 "냐짱")·
+// "치앙마이"(공식 목록에 없음)처럼 표기가 다르거나 실제로 지원 안 되는 지역이 섞여
+// 있었던 것으로 확인됨. 발리·괌·싱가포르·세부처럼 이 공식 목록에도 없는 지역은
+// 여전히 제외 상태 그대로 유지된다(D-036의 우려가 실제로 맞았음이 이번에 확인됨).
+const REGIONS_DATA_PATH = path.resolve(__dirname, '../data/tradule_regions.json');
+function loadRegionsSnapshot() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(REGIONS_DATA_PATH, 'utf8'));
+    return { domestic: raw.domestic ?? [], overseas: raw.overseas ?? [] };
+  } catch (err) {
+    logger.warn(`[tradule_source] tradule_regions.json 로드 실패, 빈 목록으로 진행: ${err.message}`);
+    return { domestic: [], overseas: [] };
+  }
+}
+const REGIONS_SNAPSHOT = loadRegionsSnapshot();
+
 const COURSE_BRIEF_PATH = '/api/content/course-brief';
 
 const MIN_SPOTS = 3;
@@ -30,20 +51,15 @@ const MIN_SPOTS = 3;
 // (실측: 경주 "황남시장 ★2.5 (리뷰 2)" — 트레쥴 원본 수정과 무관하게 여기서도 방어)
 const MIN_REVIEW_COUNT_FOR_RATING = 30;
 
-// ── 트레쥴 지역 트리 — 임의 파싱 대신 이 목록으로만 매칭한다 ──────────────────
-// 매칭 실패 시 스킵. 트레쥴 쪽 지역 목록이 늘어나면 여기 추가한다.
-// keyword_miner.js의 generateTravelSeeds()가 시드 키워드 생성에도 그대로 재사용한다.
-export const DOMESTIC_REGIONS = [
-  '경주', '강릉', '서울', '부산', '제주', '전주', '여수', '통영', '속초', '춘천', '양양',
-  '대구', '인천', '수원', '군산', '목포', '거제', '남해', '담양',
-];
-// 싱가포르·홍콩·세부·괌은 실제 course-brief 응답으로 검증되지 않아 제외함(2026-09-14
-// 리뷰 지적) — 발리와 같은 위험(트레쥴이 실제로 지원하는지 확인 없이 하드코딩)이라
-// /api/content/regions(PR #227, 198곳)로 목록을 넓히기 전까지는 실측 확인된 지역만 유지.
-export const OVERSEAS_REGIONS = [
-  '후쿠오카', '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '나트랑',
-  '치앙마이', '타이베이', '상하이',
-];
+// ── 트레쥴 지역 트리 — 임의 파싱 대신 트레쥴 공식 목록으로만 매칭한다 ──────────
+// 2026-09-18: /api/content/regions(198곳, 위 REGIONS_SNAPSHOT)로 교체. 이전 하드코딩
+// 목록은 폐기 — keyword_miner.js의 generateTravelSeeds()가 시드 키워드 생성에도 그대로
+// 재사용한다. 목록이 비어있으면(파일 로드 실패) 지역 매칭이 전부 실패하므로 최소한의
+// 폴백을 남겨둔다.
+const FALLBACK_DOMESTIC = ['경주', '강릉', '전주', '여수', '통영', '속초', '춘천', '양양', '군산', '목포', '거제', '남해', '담양'];
+const FALLBACK_OVERSEAS = ['후쿠오카', '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '타이베이', '상하이', '홍콩'];
+export const DOMESTIC_REGIONS = REGIONS_SNAPSHOT.domestic.length ? REGIONS_SNAPSHOT.domestic : FALLBACK_DOMESTIC;
+export const OVERSEAS_REGIONS = REGIONS_SNAPSHOT.overseas.length ? REGIONS_SNAPSHOT.overseas : FALLBACK_OVERSEAS;
 export const REGION_TREE = [...DOMESTIC_REGIONS, ...OVERSEAS_REGIONS];
 
 /** trip_data.region(또는 키워드에서 추출한 지역명)이 해외인지 판정한다. */

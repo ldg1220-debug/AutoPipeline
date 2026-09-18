@@ -32,6 +32,7 @@
     "legacy:purge": "node scripts/purge-legacy-posts.js --dry",
     "legacy:purge:apply": "node scripts/purge-legacy-posts.js --apply",
     "kin:write": "node scripts/write-kin-answer.js",
+    "regions:refresh": "node scripts/refresh-tradule-regions.js",
     "blog:keywords": "node src/agents/keyword_miner.js",
     "blog:content": "node src/agents/blog_content_enhancer.js",
     "blog:assets": "node src/agents/blog_asset_builder.js",

@@ -484,3 +484,22 @@
   방어가 필요할 수 있음).
 - **관련 파일**: `src/utils/factSearch.js`(신규), `src/agents/blog_content_enhancer.js`,
   `src/agents/monetizer.js`(출처 표기), `src/config/index.js`, `.env.example`
+
+### D-038: REGION_TREE를 트레쥴 공식 /api/content/regions(198곳)로 교체
+- **결정**: 하드코딩 30여 곳(D-036에서 이미 일부 축소)을 트레쥴 공식
+  `/api/content/regions`(PR #227) 응답 전체(국내 61 · 해외 137 = 198곳)로 교체.
+  직접 curl로 호출해 실제 응답을 확인한 뒤(2026-09-18) `src/data/tradule_regions.json`에
+  스냅샷으로 저장, `tradule_source.js`가 동기적으로 로드. `scripts/refresh-tradule-regions.js`
+  로 재동기화 가능.
+- **직접 확인한 사실**: 기존 하드코딩 중 "서울"·"부산"·"제주"·"인천"은 이 공식 목록에
+  아예 없었다(트레쥴은 구 단위로 세분화 — 서울 대신 강남/홍대/종로 등). "나트랑"도
+  공식 표기가 "냐짱"이라 실제로는 안 맞았고, "치앙마이"는 공식 목록에 없었다. 반대로
+  D-036에서 제외했던 "홍콩"은 실제로 공식 목록에 있어(괌·싱가포르·세부는 여전히 없음)
+  D-036의 우려("발리 사태 반복 위험")가 **부분적으로 맞았음**이 이번에 실측으로
+  확인됐다 — 임의 확장이 아니라 공식 목록 자체를 신뢰 소스로 통째로 교체하는 방식으로
+  이 위험을 근본적으로 없앴다.
+- **버린 대안**: 198곳을 하나씩 course-brief로 호출해 스팟 존재를 사전 검증 — 채택
+  안 함(200회 가까운 API 호출은 트레쥴 서버에 부담이 크고, 이미 `attachTripData`의
+  C-2 계약(스팟 3개 미만 스킵)이 실제 발행 시점에 동일한 안전판 역할을 하므로 중복).
+- **관련 파일**: `src/data/tradule_regions.json`(신규), `src/agents/tradule_source.js`,
+  `scripts/refresh-tradule-regions.js`(신규), `src/data/regionProfiles.js`(주석만)
