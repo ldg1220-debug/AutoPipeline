@@ -64,7 +64,9 @@ const wantsLink  = hasFlag('link');
 
 const OUT_DIR      = path.resolve(__dirname, '../output/kin');
 const HISTORY_PATH = path.join(OUT_DIR, 'history.json');
-const LINK_HISTORY_WINDOW = 5;   // 최근 N건 중 1건 초과 링크 금지 (§5)
+// 2026-09-18 지시서 §4: "3~4건에 1건만" — 기존 5도 더 보수적이라 나쁘지 않지만
+// 요청 수치에 맞춰 4로 조정.
+const LINK_HISTORY_WINDOW = 4;   // 최근 N건 중 1건 초과 링크 금지 (§5)
 const MAX_SPOTS_PER_DAY   = 6;   // §3-B: 하루 장소 수 3~6곳, 넘으면 앞에서 자르기
 const D_BLOCK_TEXT = '(여기에 직접 한 줄 — 안 쓰면 그냥 지우고 올리세요)';
 

@@ -850,21 +850,29 @@ async function monetizeBlogDraft(content) {
   const TRADULE_LINK_PAUSED = true;
   const effectiveAppUrl = TRADULE_LINK_PAUSED ? null : tripAppUrl;
 
+  // §6(지시서 2026-09-18): 배너 복구 시 같이 고칠 것 — utm 없이는 CTA 효과를 영원히
+  // 알 수 없다는 지적. appUrl(트레쥴 응답값)에 그대로 utm만 덧붙인다 — URL 자체를
+  // 지어내지 않음(C-2 원칙 유지).
+  const utmAppUrl = effectiveAppUrl
+    ? `${effectiveAppUrl}${effectiveAppUrl.includes('?') ? '&' : '?'}utm_source=blog&utm_medium=cta&utm_campaign=${encodeURIComponent(tripRegion)}`
+    : null;
+
   // §3(지시서 2026-09-16): 진한 파란 그라데이션 박스가 광고 배너처럼 보인다는 피드백 —
   // 제목·설명 줄 삭제, 패딩 32px→14px, 버튼→텍스트 링크로 슬림화. 본문 중간 CTA와
   // 같은 모양(.tradule-cta)으로 통일해 일관성을 맞춘다. appUrl이 없으면(정지 상태 포함)
   // 아무것도 넣을 말이 없으므로 블록 자체를 비운다 — 예전처럼 링크 없는 빈 박스를 남기지 않는다.
-  const ctaBox = effectiveAppUrl
-    ? `<div class="tradule-cta"><a href="${effectiveAppUrl}" target="_blank" rel="noopener">` +
-      `트레쥴에서 ${tripRegion} 코스 보기 →</a></div>`
+  // §6(2026-09-18): 문구 교체 — "확인하기"는 무엇을 확인하는지 불명확하다는 지적.
+  const ctaBox = utmAppUrl
+    ? `<div class="tradule-cta"><a href="${utmAppUrl}" target="_blank" rel="noopener">` +
+      `내 일정으로 담아가기 →</a></div>`
     : '';
 
-  // 본문 중간 CTA (C-1) — 코스를 나열한 직후, appUrl 있을 때만 삽입.
+  // 본문 중간 CTA (C-1) — 코스 표(timelineHtml) 바로 아래 배치(§6: 위치 지적 반영).
   // "글마다 배너 3개씩 도배 금지"(C-4) — 본문 1 + 푸터 1로 제한.
-  const midBodyCta = effectiveAppUrl
+  const midBodyCta = utmAppUrl
     ? `<div class="tradule-cta">` +
-      `이 코스를 지도에서 보고 순서를 바꾸거나 장소를 추가하려면<br>` +
-      `<a href="${effectiveAppUrl}" target="_blank" rel="noopener"><strong>트레쥴에서 ${tripRegion} 코스 열기</strong></a>` +
+      `이 코스를 지도로 한눈에 보고 순서를 바꾸거나 장소를 추가하려면<br>` +
+      `<a href="${utmAppUrl}" target="_blank" rel="noopener"><strong>이 코스 지도로 보기 →</strong></a>` +
       `</div>`
     : '';
 
@@ -891,9 +899,9 @@ async function monetizeBlogDraft(content) {
     distanceDisclosureHtml,                       // 임시 조치(2026-09-08): 직선거리 기준 고지 (거리 언급 직후 1회)
     courseMapHtml,                                // §2(2026-09-08): 코스 지도 (트레쥴 워터마크) — 본문 첫 이미지
     timelineHtml,                                 // B-3: 동선 타임라인 표
+    midBodyCta,                                   // §6(2026-09-18): 코스 표 바로 아래로 위치 이동
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문
-    midBodyCta,                                   // 트레쥴 CTA — 코스 나열 직후 (C-1)
     travelpayoutsHtml,                            // 순위 5: 해외 코스 eSIM 제휴 (국내는 빈 문자열)
     travelpayoutsDisclosure,                      // 위 블록이 실제로 있을 때만 고지
     adsenseSlot('mid_content'),
