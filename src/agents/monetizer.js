@@ -292,7 +292,8 @@ function buildTldrBulletsFromTripData(tripData) {
     bullets.push(`<li>${distancePart}${spots.length}곳</li>`);
   } else {
     const totalHours = spots.reduce((sum, s) => sum + (s.toNextMinutes ?? 0), 0) / 60;
-    const distancePart = tripData.totalDistanceKm ? `총 이동 ${tripData.totalDistanceKm}km · ` : '';
+    const distancePhrase = formatDistancePhrase(tripData);
+    const distancePart = distancePhrase ? `${distancePhrase} · ` : '';
     const timePart = totalHours > 0 ? ` · 약 ${totalHours < 1 ? Math.round(totalHours * 60) + '분' : totalHours.toFixed(1) + '시간'}` : '';
     bullets.push(`<li>${distancePart}${spots.length}곳${timePart}</li>`);
   }
@@ -390,6 +391,35 @@ function extractDayKm(entry) {
   if (typeof entry === 'number') return entry;
   if (typeof entry === 'object') return entry.distanceKm ?? entry.km ?? entry.total ?? null;
   return null;
+}
+
+/**
+ * 2026-09-22(작업지시서 "일본 여행 → 일본은 통과시키면 안 됩니다" §6): totalDistanceKm은
+ * 트레쥴 API가 "일자 내 이동만" 합산한 값이다 — 이걸 "총 이동 72.6km"라고 쓰면 다일차
+ * 코스에서 일자 간 이동(도시 간 이동 등)이 빠진 채 총량처럼 읽혀 오해를 부른다(같은
+ * 도시 코스에서도 향후 사고 방지를 위해 표기를 통일한다). dayTotals가 있으면 일자별
+ * 값을 그대로 보여주고, 없으면 "하루 평균"으로만 표현해 "총합"이라는 인상을 피한다.
+ */
+function formatDistancePhrase(tripData) {
+  const totalKm = tripData?.totalDistanceKm;
+  if (!totalKm) return '';
+  const days = tripData?.days ?? 1;
+
+  const dayNumbers = Array.from({ length: days }, (_, i) => i + 1);
+  const dayKms = dayNumbers
+    .map((day) => extractDayKm(tripData?.dayTotals?.[String(day)] ?? tripData?.dayTotals?.[day] ?? null))
+    .filter((km) => typeof km === 'number');
+
+  if (days <= 1 || dayKms.length < 2) {
+    return `이동 ${totalKm}km`;
+  }
+
+  const avgKm = (dayKms.reduce((sum, km) => sum + km, 0) / dayKms.length).toFixed(1);
+  const breakdown = dayNumbers
+    .map((day, i) => (typeof dayKms[i] === 'number' ? `${day}일차 ${dayKms[i]}km` : null))
+    .filter(Boolean)
+    .join(' · ');
+  return `하루 평균 이동 ${avgKm}km (${breakdown})`;
 }
 
 /**

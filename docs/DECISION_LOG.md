@@ -521,3 +521,36 @@
   `src/data/tradule_regions.json`(name만 저장하던 것 → 원본 {name,parent} 구조로 복원),
   `scripts/refresh-tradule-regions.js`(평탄화 제거), `scripts/write-kin-answer.js`
   (--region 검증에 parent 포함)
+
+### D-040: D-039 재정정 — parent 매칭을 서울/부산/인천/제주 4곳으로만 축소
+- **결정**: D-039에서 모든 parent(광역 지역명 9개 + 해외 국가명 22개)를 매칭 대상에
+  넣었는데, 이게 "일본 여행"→region=일본, "전라 여행"→region=전라 같은 국가/광역권
+  단위 오매칭을 그대로 허용하는 문제였음이 실측으로 확인됨(작업지시서 "일본 여행 →
+  일본은 통과시키면 안 됩니다", 2026-09-22). `course-brief?region=일본&days=2`는
+  실제로 200을 주지만 `totalDistanceKm`이 **일자 내 이동만** 합산해서 도쿄→교토
+  약 370km(독일: 뮌헨→베를린 약 585km) 같은 도시 간 이동이 총합에서 통째로
+  빠진다 — "일본 2박3일 총 72.6km"라는 사실과 다른 문장이 그대로 나간다. 국내
+  광역권(경기/강원/충청/전라/경상)도 같은 문제에 더해 "전라"처럼 지역명 문자열
+  검색 결과 노이즈(예: "쿠팡 전라광주2,5센터 카페")까지 섞였다. 실측으로 확인된
+  안전한 부모는 서울(66.9km)·부산(68.5km)·인천(83.2km)·제주(176.5km) 4곳뿐 —
+  전부 단일 도시 안에서 동선이 성립했다. `MATCHABLE_PARENT_REGIONS`를 이 4곳으로
+  화이트리스트하고 `extractRegion()`의 부모 매칭 단계에서만 사용하도록 축소했다.
+  `isOverseasRegion()`은 해외 판정용이므로 기존 전체 `overseasParents`(22개 국가명)를
+  그대로 유지 — 매칭용과 판정용 목적이 다르므로 하나로 합치지 않는다.
+- **버린 대안**: `attachTripData`의 C-2 계약(스팟 3개 미만 스킵)이 발행 시점 안전판
+  역할을 한다고 봤던 D-038의 판단(→ 지역 목록은 넓게 유지해도 된다는 전제) — 실측
+  결과 일본 4곳·전라 5곳·태국 7곳 전부 3개보다 많아 그대로 통과함이 확인되어 폐기.
+  대신 C-2 자체를 강화(MIN_SPOTS 3→6, 지역명 문자열 포함 스팟 제외, 평점 있는 스팟
+  절반 미만 스킵, 좌표 기준 일자 간 100km 초과 이동 시 스킵)해 매칭 단계와 별개의
+  2차 방어선으로 세웠다 — 특히 좌표 거리 체크는 향후 비슷한 유형(부모 지역이 늘거나
+  화이트리스트 밖 경로로 넓은 region이 들어오는 경우)에서도 국가 단위 오류를
+  근본적으로 막는 안전망이다.
+- **교훈**: "API가 200을 준다" ≠ "그 응답이 코스로서 유효하다". 응답 필드
+  (`totalDistanceKm`)의 계산 범위(일자 내부만)를 실측 없이 넘겨짚지 말 것 — 이번이
+  지역 목록 판단이 실측 부족으로 세 번째 틀린 사례(D-038 name/parent 혼동 → D-039
+  parent 전체 허용 → D-040 부모 화이트리스트로 축소).
+- **관련 파일**: `src/agents/tradule_source.js`(MATCHABLE_PARENT_REGIONS 신규,
+  extractRegion 부모 매칭 축소, MIN_SPOTS/MAX_INTER_DAY_JUMP_KM 상수, haversineKm/
+  filterNoisySpots/hasInterDayCityJump/hasTooFewRatedSpots 신규 헬퍼),
+  `src/agents/monetizer.js`(formatDistancePhrase 신규 — "총 이동" 표기를 "하루 평균
+  이동" + 일자별 내역으로 교체), `docs/work-orders/2026-09-22_exclude-country-parents.md`

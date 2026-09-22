@@ -6,8 +6,11 @@
  * blog_content_enhancer.js의 pass3Body는 이미 content.trip_data를 프롬프트에 배선해뒀으므로
  * 이 필드만 채우면 코드 수정 없이 실데이터가 본문에 반영된다.
  *
- * C-2 계약:
- *   - spots가 3개 미만이면 해당 키워드는 글을 쓰지 않고 스킵한다.
+ * C-2 계약 (2026-09-22 상향 — 작업지시서 "일본 여행 → 일본은 통과시키면 안 됩니다" §5):
+ *   - spots가 6개 미만이면 해당 키워드는 글을 쓰지 않고 스킵한다.
+ *   - 장소명에 region 문자열이 그대로 포함된 스팟은 제외한다(노이즈 제외 후 다시 6개 미만이면 스킵).
+ *   - 평점 있는 스팟이 절반 미만이면 스킵한다.
+ *   - 일자 간 마지막→첫 스팟 좌표 거리가 100km를 넘으면(도시 변경 의심) 스킵한다.
  *   - 평점·리뷰수·거리·이동시간은 응답값만 사용 — 창작 금지.
  *   - appUrl을 글당 1회 링크.
  *   - API 실패 시 throw하지 않고 스킵한다 (파이프라인 전체를 막지 않음).
@@ -51,10 +54,18 @@ const REGIONS_SNAPSHOT = loadRegionsSnapshot();
 
 const COURSE_BRIEF_PATH = '/api/content/course-brief';
 
-const MIN_SPOTS = 3;
+// 2026-09-22 C-2 상향(작업지시서 "일본 여행 → 일본은 통과시키면 안 됩니다" §5): 예전
+// 기준(3곳)이 국가/광역권 단위 오매칭까지 전부 통과시키고 있었음(일본 4곳, 전라 5곳
+// 다 3곳보다 많아 그대로 발행 대상이 됨). 지역 매칭 자체를 화이트리스트로 막은 뒤에도
+// 남는 사고(예: 지역명 그대로 포함된 스팟, 평점 없는 스팟 과반)를 한 번 더 거른다.
+const MIN_SPOTS = 6;
 // 리뷰 수가 이 미만이면 평점을 신뢰할 수 없다고 보고 본문 인용 대상에서 제외한다.
 // (실측: 경주 "황남시장 ★2.5 (리뷰 2)" — 트레쥴 원본 수정과 무관하게 여기서도 방어)
 const MIN_REVIEW_COUNT_FOR_RATING = 30;
+// 좌표 기준 같은 코스 안에서 날짜가 바뀔 때 이 거리(km)를 넘으면 도시가 바뀐 것으로
+// 보고 스킵한다 — totalDistanceKm이 "일자 내 이동만" 합산해서 이런 구간(예: 도쿄→교토
+// 약 370km)이 누락된 채 "총 이동 72.6km" 같은 명백한 오류 문장이 나가는 것을 막는다.
+const MAX_INTER_DAY_JUMP_KM = 100;
 
 // ── 트레쥴 지역 트리 — 임의 파싱 대신 트레쥴 공식 목록으로만 매칭한다 ──────────
 // DOMESTIC_REGIONS/OVERSEAS_REGIONS는 "자식(구체적)" 지역명 배열 — 기존 계약(문자열
@@ -69,12 +80,25 @@ export const OVERSEAS_REGIONS = overseasNames.length ? overseasNames : FALLBACK_
 export const REGION_TREE = [...DOMESTIC_REGIONS, ...OVERSEAS_REGIONS];
 
 // 부모(광역) 지역명 — "서울"·"부산"·"제주"·"인천" 등. course-brief가 실제로 200을 주는
-// 것을 실측 확인함(2026-09-22). 자식보다 낮은 우선순위로만 매칭한다(§3: 하위 지역명이
-// 있으면 그것을 우선 사용).
+// 것을 실측 확인함(2026-09-22, D-039). DOMESTIC_PARENT_REGIONS/OVERSEAS_PARENT_REGIONS는
+// "해외 여부 판정용" 전체 부모 목록 — 여기엔 국가명(일본/독일 등)·국내 광역권(경기/강원/
+// 충청/전라/경상)까지 전부 들어있다.
 const domesticParents = [...new Set(REGIONS_SNAPSHOT.domestic.map((r) => r?.parent).filter(Boolean))];
 const overseasParents = [...new Set(REGIONS_SNAPSHOT.overseas.map((r) => r?.parent).filter(Boolean))];
 export const DOMESTIC_PARENT_REGIONS = domesticParents;
 export const OVERSEAS_PARENT_REGIONS = overseasParents;
+
+// 2026-09-22 재정정(작업지시서 "일본 여행 → 일본은 통과시키면 안 됩니다"): 위 전체
+// 부모 목록을 키워드 매칭에 그대로 쓰면 "일본 여행"이 region=일본으로, "전라 여행"이
+// region=전라로 매칭돼버린다. 실측 확인: course-brief는 국가/광역권 단위로 호출하면
+// 응답을 주긴 하지만 totalDistanceKm이 "일자 내 이동만" 합산한 값이라 도시가 바뀌는
+// 날(예: 도쿄→교토 약370km)은 그 구간이 통째로 누락된다 — "일본 2박3일 총 72.6km"
+// 같은 명백한 오류 문장이 나간다. 국내는 시 단위(서울/부산/인천/제주)만 실제로 도시
+// 하나 안에서 동선이 성립함을 확인했고, 경기/강원/충청/전라/경상 같은 광역권은 여러
+// 도시가 뒤섞여(예: "전라" 응답에 "쿠팡 전라광주2,5센터 카페" 같은 지역명 문자열
+// 검색 결과가 섞임) 국가 단위와 같은 문제였다. 그래서 매칭용 부모 목록은 이 4곳으로만
+// 화이트리스트한다 — 해외 국가는 전부 제외.
+const MATCHABLE_PARENT_REGIONS = ['서울', '부산', '인천', '제주'].filter((r) => domesticParents.includes(r));
 
 /** trip_data.region(또는 키워드에서 추출한 지역명)이 해외인지 판정한다. 부모(국가명)도 포함. */
 export function isOverseasRegion(region) {
@@ -83,9 +107,11 @@ export function isOverseasRegion(region) {
 
 /**
  * 키워드 앞부분에서 트레쥴 지역과 일치하는 지역명을 추출한다.
- * 자식(구체적) 지역명을 먼저 찾고, 없으면 부모(광역) 지역명을 찾는다 — "홍대"가 있으면
- * "서울"보다 "홍대"를 우선한다(작업지시서 2026-09-22 §3). 각 단계 안에서는 가장 긴
- * 이름이 우선("서울" vs "서울숲" 같은 오매칭 방지).
+ * 자식(구체적) 지역명을 먼저 찾고, 없으면 매칭 가능한 부모(서울/부산/인천/제주)만
+ * 찾는다 — "홍대"가 있으면 "서울"보다 "홍대"를 우선한다(작업지시서 2026-09-22 §3).
+ * 국내 광역권(경기/강원/충청/전라/경상)·해외 국가명은 매칭 대상에서 제외한다(같은 날
+ * 안에서도 도시가 바뀌어 동선 데이터가 부정확해지는 문제 — 위 주석 참고). 각 단계
+ * 안에서는 가장 긴 이름이 우선("서울" vs "서울숲" 같은 오매칭 방지).
  */
 export function extractRegion(keyword) {
   const childMatch = REGION_TREE
@@ -93,7 +119,7 @@ export function extractRegion(keyword) {
     .sort((a, b) => b.length - a.length)[0];
   if (childMatch) return childMatch;
 
-  const parentMatch = [...domesticParents, ...overseasParents]
+  const parentMatch = MATCHABLE_PARENT_REGIONS
     .filter((region) => keyword.includes(region))
     .sort((a, b) => b.length - a.length)[0];
   return parentMatch ?? null;
@@ -176,6 +202,67 @@ export function sanitizeSpots(spots) {
   });
 }
 
+/** 위경도 두 점 사이 거리(km) — 일자 간 도시 이동 감지용(§5 마지막 항목). */
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** spot 응답의 위경도 필드명이 응답 버전마다 다를 수 있어 방어적으로 여러 이름을 시도한다. */
+function spotLatLng(spot) {
+  const lat = spot?.lat ?? spot?.latitude ?? spot?.coordinate?.lat ?? spot?.coord?.lat ?? null;
+  const lng = spot?.lng ?? spot?.longitude ?? spot?.coordinate?.lng ?? spot?.coord?.lng ?? null;
+  return typeof lat === 'number' && typeof lng === 'number' ? { lat, lng } : null;
+}
+
+/**
+ * 장소명에 region 문자열이 그대로 포함된 스팟을 제외한다(§5) — "전라맛집"·"쿠팡
+ * 전라광주2,5센터 카페" 같은 지역명 문자열 검색 결과 노이즈가 섞이는 사고 방지.
+ */
+function filterNoisySpots(spots, region) {
+  if (!region) return spots;
+  return spots.filter((spot) => !(spot?.name ?? '').includes(region));
+}
+
+/**
+ * 일자 간 마지막↔첫 스팟 좌표 거리가 MAX_INTER_DAY_JUMP_KM을 넘으면 도시가 바뀐
+ * 것으로 보고 true를 반환한다(§5 "마지막 항목이 국가 단위를 근본적으로 막습니다").
+ * 좌표 필드를 찾을 수 없으면(응답 스키마 미확인) 판단을 보류하고 false를 반환 —
+ * 응답값만 쓰는 C-2 원칙상 없는 데이터로 추측해 스킵시키지 않는다.
+ */
+function hasInterDayCityJump(spots) {
+  const byDay = new Map();
+  for (const spot of spots) {
+    const day = spot.day ?? 1;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(spot);
+  }
+  const dayNumbers = [...byDay.keys()].sort((a, b) => a - b);
+
+  for (let i = 0; i < dayNumbers.length - 1; i += 1) {
+    const currentDaySpots = byDay.get(dayNumbers[i]);
+    const nextDaySpots = byDay.get(dayNumbers[i + 1]);
+    const from = spotLatLng(currentDaySpots[currentDaySpots.length - 1]);
+    const to = spotLatLng(nextDaySpots[0]);
+    if (!from || !to) continue;
+
+    const distanceKm = haversineKm(from.lat, from.lng, to.lat, to.lng);
+    if (distanceKm > MAX_INTER_DAY_JUMP_KM) return true;
+  }
+  return false;
+}
+
+/** 평점(rating)이 있는 스팟이 절반 미만이면 true — 신뢰도 낮은 코스로 보고 스킵(§5). */
+function hasTooFewRatedSpots(spots) {
+  const ratedCount = spots.filter((spot) => typeof spot.rating === 'number').length;
+  return ratedCount < spots.length / 2;
+}
+
 /**
  * keywordData.contents 각 항목에 trip_data(스팟 배열)를 주입한다.
  * 지역 매칭 실패 / API 실패 / 응답 실패 / spots 3개 미만인 항목은 trip_data 없이
@@ -210,13 +297,39 @@ export async function attachTripData(keywordData) {
       continue;
     }
 
+    // §5 C-2 상향: 지역명 문자열 노이즈 스팟 제외 → 제외 후 다시 최소 스팟 수 확인
+    const cleanSpots = filterNoisySpots(sanitizeSpots(brief.spots), region);
+    if (cleanSpots.length < MIN_SPOTS) {
+      logger.warn(
+        `[tradule_source] "${item.keyword}"(지역: ${region}) → 지역명 노이즈 스팟 제외 후 ` +
+        `${cleanSpots.length}개(최소 ${MIN_SPOTS}개 미만) → 이 키워드는 글쓰기 스킵 대상으로 표시`
+      );
+      updated.push({ ...item, skip_reason: `노이즈 제외 후 트레쥴 데이터 부족 (스팟 ${cleanSpots.length}개)` });
+      continue;
+    }
+
+    if (hasTooFewRatedSpots(cleanSpots)) {
+      logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟이 절반 미만 → 스킵`);
+      updated.push({ ...item, skip_reason: '평점 있는 스팟 절반 미만' });
+      continue;
+    }
+
+    if (hasInterDayCityJump(cleanSpots)) {
+      logger.warn(
+        `[tradule_source] "${item.keyword}"(지역: ${region}) → 일자 간 좌표 이동거리가 ` +
+        `${MAX_INTER_DAY_JUMP_KM}km 초과 (도시 변경 의심) → 스킵`
+      );
+      updated.push({ ...item, skip_reason: '일자 간 도시 변경 의심 (좌표 이동거리 초과)' });
+      continue;
+    }
+
     updated.push({
       ...item,
       trip_data: {
         region:          brief.region ?? region,
         days:            brief.days ?? days,
         totalDistanceKm: brief.totalDistanceKm ?? null,
-        spots:           sanitizeSpots(brief.spots),
+        spots:           cleanSpots,
         appUrl:          brief.appUrl ?? null,
         // 코스 지도 이미지(번호 마커 + 동선 라인, 트레쥴 워터마크 포함) — 지시서 §2:
         // 그 글에만 있는 자산이라 Pexels 무관 스톡 사진보다 신뢰도가 높음. null이면 본문에서 생략.
@@ -232,7 +345,7 @@ export async function attachTripData(keywordData) {
         dayTotals:       brief.dayTotals ?? null,
       },
     });
-    logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${brief.spots.length}개 확보`);
+    logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${cleanSpots.length}개 확보`);
   }
 
   // 디버깅용 원본 응답 저장
