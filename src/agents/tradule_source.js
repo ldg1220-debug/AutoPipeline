@@ -344,12 +344,20 @@ export async function attachTripData(keywordData) {
     const region = extractRegion(item.keyword ?? '');
     if (!region) {
       if (item.category === 'travel') {
+        // 2026-09-23(작업지시서 "물어놓고 스킵하면 안 됩니다" §5): "지역 매칭 실패"
+        // 하나로 뭉뚱그리면 "코타키나발루"(트레쥴 미지원 도시)와 "일본"(국가 단위라
+        // 의도적으로 제외)이 같은 사유로 찍혀 진단이 안 된다. 키워드에 제외된
+        // 국가/광역권 이름이 그대로 포함돼 있는지로 원인을 나눈다.
         const suggestion = suggestChildRegions(item.keyword ?? '');
+        const isExcludedParent = Boolean(suggestion);
+        const reason = isExcludedParent
+          ? '국가/광역권 단위는 코스 불가'
+          : '트레쥴 지원 목록에 없는 지역';
         const suggestionMsg = suggestion
           ? ` (대체 후보: ${suggestion.children.map((c) => `${c} 2박3일 코스`).join(', ')})`
           : '';
-        logger.warn(`[tradule_source] "${item.keyword}" → 코스 데이터 없음(지역 매칭 실패), 스킵${suggestionMsg}`);
-        updated.push({ ...item, skip_reason: '지역 매칭 실패 (국가/광역권 단위는 코스 불가)' });
+        logger.warn(`[tradule_source] "${item.keyword}" → 코스 데이터 없음 (${reason}), 스킵${suggestionMsg}`);
+        updated.push({ ...item, skip_reason: reason });
       } else {
         logger.info(`[tradule_source] "${item.keyword}" → 지역 매칭 실패, trip_data 없이 통과 (travel 아님)`);
         updated.push(item);
@@ -392,7 +400,7 @@ export async function attachTripData(keywordData) {
         `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, 일수를 줄여도 ` +
         `${MIN_SPOTS}곳 미달 (시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
       );
-      updated.push({ ...item, skip_reason: `트레쥴 데이터 부족 (평점 있는 스팟 최대 ${cleanSpots.length}개)` });
+      updated.push({ ...item, skip_reason: `스팟 ${cleanSpots.length}개 (최소 ${MIN_SPOTS}개, 평점 있는 스팟 기준)` });
       continue;
     }
     if (days !== startDays) {

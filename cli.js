@@ -131,6 +131,15 @@ async function askChoiceHelp(rl, question, validator, errorHint, expandedHelp) {
 }
 
 // ── 지역 파싱 (자유 텍스트 → 지역/일수 추정, §2) ─────────────────────────────
+// 2026-09-23(작업지시서 "물어놓고 스킵하면 안 됩니다" §7): 트레쥴 공식 표기와
+// 사람들이 실제로 검색·입력하는 표기가 다른 경우 — 트레쥴에 aliases 필드를
+// 요청해뒀고(짝 지시서), 들어오기 전까지는 로컬 테이블로 보완한다.
+const REGION_ALIASES = {
+  '나트랑':   '냐짱',
+  '타이페이': '타이베이',
+  '호치민':   '호찌민',
+};
+
 /**
  * 실측 버그(2026-09-17): "하노이"처럼 하드코딩 REGION_TREE(extractRegion)에는
  * 없지만 트레쥴 실시간 목록(regions)에는 있는 지역을 "방식" 단계가 못 찾아
@@ -140,6 +149,9 @@ async function askChoiceHelp(rl, question, validator, errorHint, expandedHelp) {
  */
 function matchRegionFromText(text, regions, extractRegion) {
   const all = [...(regions?.domestic ?? []), ...(regions?.overseas ?? [])];
+  for (const [alias, official] of Object.entries(REGION_ALIASES)) {
+    if (text.includes(alias) && all.includes(official)) return official;
+  }
   const liveMatch = all.filter((r) => text.includes(r)).sort((a, b) => b.length - a.length)[0];
   if (liveMatch) return liveMatch;
   return extractRegion(text);
@@ -303,18 +315,15 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       }
 
       if (!region) {
-        // 실측(2026-09-18): AI 추정도 실패하면 바로 목록으로 떨어져서 "종합형" 질문
-        // 자체가 안 뜨던 틈새 — 지역을 아예 못 찾은 경우에도 같은 질문을 넣는다.
-        console.log(`  ⚠ "${raw}"에서 지역을 알아보지 못했습니다.`);
-        const isThemeNoRegion = await askYesNoNav(rl, '특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', true);
-        if (isThemeNoRegion === HOME) return rl;
-        if (isThemeNoRegion === true) {
-          state.mode = 'theme';
-          state.rawText = raw;
-          step = 3;
-          continue;
-        }
-        console.log('  목록에서 골라주세요.');
+        // 2026-09-23 정정(작업지시서 "물어놓고 스킵하면 안 됩니다" §2·§3): 예전엔
+        // 여기서 "종합형 글인가요?"라고 물어 "네"를 받으면 trip_data 없이 그대로
+        // 진행시켰는데, D-041 이후 attachTripData()가 category='travel'(cli.js는
+        // 항상 travel로 강제 지정)이면서 지역 매칭이 안 된 키워드는 무조건 스킵하게
+        // 바뀌어서 — 이 "종합형" 경로는 발행 옵션·최종 확인까지 다 거치고도 결국
+        // Part 1.7에서 스킵되는, 사실상 죽은 경로였다. 질문 자체를 없애고 여기서
+        // 바로 중단한다 — 목록 탐색(구조화 선택)으로 바로 보낸다.
+        console.log(`  ⚠ "${raw}"는 트레쥴이 지원하지 않는 지역입니다.`);
+        console.log('  목록에서 지원 지역을 직접 골라주세요.');
         state.mode = 'structured';
         step = 1;
         continue;
@@ -324,18 +333,6 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       if (confirmed === HOME) return rl;
       if (confirmed === BACK) { step = 0; continue; }
       if (confirmed === false) {
-        // 2026-09-18: "규슈 부흥할인 대상 지역 총정리"처럼 애초에 지역 하나로
-        // 묶이면 안 되는 종합형 주제일 수 있다 — 코스 가이드(스팟·동선)가 아니라
-        // 사실 검증(factSearch)만으로 충분히 근거를 갖출 수 있는 글이라, 지역
-        // 매칭을 강제하지 않는 경로를 제공한다.
-        const isTheme = await askYesNoNav(rl, '이 키워드가 특정 지역 하나가 아니라 여러 지역을 다루는 종합형 글인가요? (지역 매칭 없이 진행)', true);
-        if (isTheme === HOME) return rl;
-        if (isTheme === true) {
-          state.mode = 'theme';
-          state.rawText = raw;
-          step = 3;
-          continue;
-        }
         step = 0;
         continue;
       }
