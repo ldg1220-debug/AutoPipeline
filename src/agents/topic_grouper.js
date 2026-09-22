@@ -406,7 +406,12 @@ function enforceSameRegion(groups, keywords) {
       if (!byRegion.has(region)) byRegion.set(region, []);
       byRegion.get(region).push(idx);
     }
-    if (byRegion.size <= 1) return [g];
+    // 유효 인덱스만 남긴다 — byRegion에 쌓인 인덱스가 범위 밖 값을 걸러낸 결과이므로,
+    // 위에서 건너뛴 인덱스가 원본 g.indices에 그대로 남아 있으면(예: g.indices가
+    // [0,1,2]인데 1,2가 범위 밖이라 byRegion엔 0만 들어감) 아래에서 다시 꺼내 써야
+    // 크래시를 막은 보람이 있다 — 그냥 [g]를 반환하면 잘못된 인덱스가 그대로 남는다.
+    const validIndices = [...byRegion.values()].flat();
+    if (byRegion.size <= 1) return [{ ...g, indices: validIndices }];
 
     const regionNames = [...byRegion.keys()];
     logger.warn(
