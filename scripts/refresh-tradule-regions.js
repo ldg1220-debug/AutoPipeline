@@ -23,8 +23,12 @@ async function main() {
 
   const res = await axios.get(`${apiBase}/api/content/regions`, { timeout: 15000 });
   const data = res.data ?? {};
-  const domestic = (data.domestic ?? []).map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
-  const overseas = (data.overseas ?? []).map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+  // 2026-09-22 정정: name만 뽑아 평탄화하면 parent(서울/부산/제주/인천 같은 광역
+  // 지역)가 사라진다 — course-brief가 실제로 parent도 받는 것을 실측 확인했으므로
+  // 원본 구조({name, parent})를 그대로 보존한다. 파생 목록(자식/부모 분리)은
+  // tradule_source.js가 로드 시점에 만든다.
+  const domestic = Array.isArray(data.domestic) ? data.domestic : [];
+  const overseas = Array.isArray(data.overseas) ? data.overseas : [];
 
   if (domestic.length === 0 && overseas.length === 0) {
     console.error('❌ 응답에서 지역을 찾지 못했습니다 — 스키마가 바뀌었을 수 있습니다. 파일을 덮어쓰지 않습니다.');

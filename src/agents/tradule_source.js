@@ -26,12 +26,17 @@ const __dirname  = path.dirname(__filename);
 
 // 2026-09-18: 트레쥴 공식 /api/content/regions(198곳, PR #227)를 직접 호출해 확인한 뒤
 // 그 응답을 스냅샷으로 저장한 파일 — src/data/tradule_regions.json (scripts/
-// refresh-tradule-regions.js로 재조회 가능). 이전엔 30여 곳을 손으로 하드코딩했는데,
-// "서울"/"부산"/"제주"/"인천"처럼 이 공식 목록에 아예 없는 이름(트레쥴은 구 단위로
-// 세분화되어 있음 — 예: 서울 대신 종로/강남/홍대 등)과 "나트랑"(공식 표기 "냐짱")·
-// "치앙마이"(공식 목록에 없음)처럼 표기가 다르거나 실제로 지원 안 되는 지역이 섞여
+// refresh-tradule-regions.js로 재조회 가능). "나트랑"(공식 표기 "냐짱")·"치앙마이"
+// (공식 목록에 없음)처럼 표기가 다르거나 실제로 지원 안 되는 지역이 하드코딩에 섞여
 // 있었던 것으로 확인됨. 발리·괌·싱가포르·세부처럼 이 공식 목록에도 없는 지역은
-// 여전히 제외 상태 그대로 유지된다(D-036의 우려가 실제로 맞았음이 이번에 확인됨).
+// 여전히 제외 상태 그대로 유지된다.
+//
+// 2026-09-22 정정(작업지시서): 응답의 domestic/overseas 각 항목은 { name, parent }
+// 구조다(예: { name:"종로", parent:"서울" }). 처음엔 name만 뽑아 평탄화했는데, 그러면
+// "서울"·"부산"·"제주"·"인천"처럼 트레쥴이 구 단위(parent)로만 갖고 있는 대형 지역이
+// 통째로 빠진다 — course-brief?region=서울로 실제 호출하면 200이 오는데도(실측 확인)
+// name 목록에 없다는 이유로 "지역 매칭 실패"가 났었다. 스냅샷은 원본 구조({name,parent})
+// 그대로 저장하고, 여기서 자식(name)·부모(parent) 두 집합을 모두 만든다.
 const REGIONS_DATA_PATH = path.resolve(__dirname, '../data/tradule_regions.json');
 function loadRegionsSnapshot() {
   try {
@@ -52,31 +57,46 @@ const MIN_SPOTS = 3;
 const MIN_REVIEW_COUNT_FOR_RATING = 30;
 
 // ── 트레쥴 지역 트리 — 임의 파싱 대신 트레쥴 공식 목록으로만 매칭한다 ──────────
-// 2026-09-18: /api/content/regions(198곳, 위 REGIONS_SNAPSHOT)로 교체. 이전 하드코딩
-// 목록은 폐기 — keyword_miner.js의 generateTravelSeeds()가 시드 키워드 생성에도 그대로
-// 재사용한다. 목록이 비어있으면(파일 로드 실패) 지역 매칭이 전부 실패하므로 최소한의
-// 폴백을 남겨둔다.
-const FALLBACK_DOMESTIC = ['경주', '강릉', '전주', '여수', '통영', '속초', '춘천', '양양', '군산', '목포', '거제', '남해', '담양'];
+// DOMESTIC_REGIONS/OVERSEAS_REGIONS는 "자식(구체적)" 지역명 배열 — 기존 계약(문자열
+// 배열) 그대로 유지해 keyword_miner.js의 시드 생성 등 기존 호출부를 안 건드린다.
+// 목록이 비어있으면(파일 로드 실패) 지역 매칭이 전부 실패하므로 최소한의 폴백을 둔다.
+const FALLBACK_DOMESTIC = ['서울', '부산', '제주', '인천', '경주', '강릉', '전주', '여수', '통영', '속초', '춘천', '양양', '군산', '목포', '거제', '남해', '담양'];
 const FALLBACK_OVERSEAS = ['후쿠오카', '오사카', '도쿄', '삿포로', '나고야', '오키나와', '방콕', '다낭', '타이베이', '상하이', '홍콩'];
-export const DOMESTIC_REGIONS = REGIONS_SNAPSHOT.domestic.length ? REGIONS_SNAPSHOT.domestic : FALLBACK_DOMESTIC;
-export const OVERSEAS_REGIONS = REGIONS_SNAPSHOT.overseas.length ? REGIONS_SNAPSHOT.overseas : FALLBACK_OVERSEAS;
+const domesticNames = REGIONS_SNAPSHOT.domestic.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+const overseasNames = REGIONS_SNAPSHOT.overseas.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+export const DOMESTIC_REGIONS = domesticNames.length ? domesticNames : FALLBACK_DOMESTIC;
+export const OVERSEAS_REGIONS = overseasNames.length ? overseasNames : FALLBACK_OVERSEAS;
 export const REGION_TREE = [...DOMESTIC_REGIONS, ...OVERSEAS_REGIONS];
 
-/** trip_data.region(또는 키워드에서 추출한 지역명)이 해외인지 판정한다. */
+// 부모(광역) 지역명 — "서울"·"부산"·"제주"·"인천" 등. course-brief가 실제로 200을 주는
+// 것을 실측 확인함(2026-09-22). 자식보다 낮은 우선순위로만 매칭한다(§3: 하위 지역명이
+// 있으면 그것을 우선 사용).
+const domesticParents = [...new Set(REGIONS_SNAPSHOT.domestic.map((r) => r?.parent).filter(Boolean))];
+const overseasParents = [...new Set(REGIONS_SNAPSHOT.overseas.map((r) => r?.parent).filter(Boolean))];
+export const DOMESTIC_PARENT_REGIONS = domesticParents;
+export const OVERSEAS_PARENT_REGIONS = overseasParents;
+
+/** trip_data.region(또는 키워드에서 추출한 지역명)이 해외인지 판정한다. 부모(국가명)도 포함. */
 export function isOverseasRegion(region) {
-  return OVERSEAS_REGIONS.includes(region);
+  return OVERSEAS_REGIONS.includes(region) || overseasParents.includes(region);
 }
 
 /**
- * 키워드 앞부분에서 트레쥴 지역 트리와 일치하는 지역명을 추출한다.
- * 임의의 부분 문자열 파싱이 아니라, REGION_TREE에 있는 지역명이 키워드 안에
- * 등장하는지만 확인한다 (가장 긴 지역명 우선 매칭 — "서울" vs "서울숲" 같은 오매칭 방지 목적).
+ * 키워드 앞부분에서 트레쥴 지역과 일치하는 지역명을 추출한다.
+ * 자식(구체적) 지역명을 먼저 찾고, 없으면 부모(광역) 지역명을 찾는다 — "홍대"가 있으면
+ * "서울"보다 "홍대"를 우선한다(작업지시서 2026-09-22 §3). 각 단계 안에서는 가장 긴
+ * 이름이 우선("서울" vs "서울숲" 같은 오매칭 방지).
  */
 export function extractRegion(keyword) {
-  const candidates = REGION_TREE
+  const childMatch = REGION_TREE
     .filter((region) => keyword.includes(region))
-    .sort((a, b) => b.length - a.length);
-  return candidates[0] ?? null;
+    .sort((a, b) => b.length - a.length)[0];
+  if (childMatch) return childMatch;
+
+  const parentMatch = [...domesticParents, ...overseasParents]
+    .filter((region) => keyword.includes(region))
+    .sort((a, b) => b.length - a.length)[0];
+  return parentMatch ?? null;
 }
 
 /** 키워드에서 "1박2일"/"2박3일"/"당일치기" 등을 days(1|2)로 환산한다. 기본 1일. */

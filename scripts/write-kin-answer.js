@@ -37,6 +37,8 @@ import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import {
   REGION_TREE,
+  DOMESTIC_PARENT_REGIONS,
+  OVERSEAS_PARENT_REGIONS,
   fetchCourseBriefWithRetry,
   sanitizeSpots,
 } from '../src/agents/tradule_source.js';
@@ -241,8 +243,12 @@ async function resolveSpots() {
     return { spots: sanitizeSpots(spots), totalDistanceKm: null, days, region: region ?? '', dayTotals: null, ratingSource: null, distanceSource: null };
   }
 
-  if (!region || !REGION_TREE.includes(region)) {
-    throw new Error(`--region이 없거나 지원 목록에 없습니다 (region="${region}"). REGION_TREE 참고.`);
+  // 2026-09-22 정정: "서울"/"부산"/"제주"/"인천"처럼 트레쥴이 구 단위(parent)로만
+  // 갖고 있는 광역 지역도 course-brief가 실제로 200을 준다(실측 확인) — REGION_TREE
+  // (자식만)만 검사하면 이런 지역이 전부 거부된다.
+  const knownRegions = [...REGION_TREE, ...DOMESTIC_PARENT_REGIONS, ...OVERSEAS_PARENT_REGIONS];
+  if (!region || !knownRegions.includes(region)) {
+    throw new Error(`--region이 없거나 지원 목록에 없습니다 (region="${region}").`);
   }
   const brief = await fetchCourseBriefWithRetry(region, days);
   if (!brief || !Array.isArray(brief.spots) || brief.spots.length === 0) {

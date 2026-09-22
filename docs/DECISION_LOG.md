@@ -503,3 +503,21 @@
   C-2 계약(스팟 3개 미만 스킵)이 실제 발행 시점에 동일한 안전판 역할을 하므로 중복).
 - **관련 파일**: `src/data/tradule_regions.json`(신규), `src/agents/tradule_source.js`,
   `scripts/refresh-tradule-regions.js`(신규), `src/data/regionProfiles.js`(주석만)
+
+### D-039: D-038 정정 — parent(광역) 지역도 유효한 course-brief 대상
+- **결정**: D-038에서 "서울"·"부산"·"제주"·"인천"이 트레쥴 공식 목록에 없다고 판단해
+  REGION_TREE에서 빠뜨렸는데, 이는 응답의 `{ name, parent }` 구조에서 `name`만 보고
+  `parent`(광역 지역명)를 놓친 실수였음이 리뷰로 지적됨. `course-brief?region=서울`
+  등을 직접 호출해 전부 200 응답(실제 그 지역 장소)임을 재확인. 자식(구체) 지역명과
+  부모(광역) 지역명을 모두 매칭 대상에 포함하되, 키워드에 자식 지역명이 있으면
+  그걸 우선한다(예: "홍대"가 있으면 "서울"보다 "홍대").
+- **버린 대안**: parent를 자식과 동일한 우선순위로 매칭 — 채택 안 함. "서울 홍대
+  카페거리"처럼 둘 다 있는 키워드는 더 구체적인 자식 쪽이 실제 course-brief 데이터
+  품질이 낫다고 판단(작업지시서 §3 요청과 일치).
+- **교훈**: 지역 API 응답을 다룰 때 `name`만 보지 말고 `parent`도 항상 함께 확인할 것
+  (9월 초 "홍콩" 오판 때도 같은 실수 패턴이었음 — 이번이 두 번째).
+- **관련 파일**: `src/agents/tradule_source.js`(extractRegion/isOverseasRegion에
+  parent 매칭 추가, DOMESTIC_PARENT_REGIONS/OVERSEAS_PARENT_REGIONS export 신규),
+  `src/data/tradule_regions.json`(name만 저장하던 것 → 원본 {name,parent} 구조로 복원),
+  `scripts/refresh-tradule-regions.js`(평탄화 제거), `scripts/write-kin-answer.js`
+  (--region 검증에 parent 포함)
