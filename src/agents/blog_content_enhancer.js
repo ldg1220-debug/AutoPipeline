@@ -95,7 +95,7 @@ function formatBenchmarkContext(rules) {
 export function splitKeywordPhrases(keyword) {
   return (keyword ?? '')
     .split(/[,&]/)
-    .map((k) => k.trim())
+    .map((k) => k.trim().replace(/^['"‘’“”]+|['"‘’“”]+$/g, '').trim())
     .filter(Boolean);
 }
 

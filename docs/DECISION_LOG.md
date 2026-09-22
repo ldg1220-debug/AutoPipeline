@@ -676,3 +676,21 @@
   export, seo_keywords 기본값 교체), `src/agents/qa_editor.js`(primaryKw 분리
   로직 교체), `src/agents/monetizer.js`(seoKeywords 폴백 교체),
   `prompts/blog_pass2_outline.md`(콤마 키워드 제목 처리 지침 추가)
+
+### D-045: D-044 재정정 — 따옴표로 감싼 구 입력도 같은 문제였음
+- **결정**: D-044 직후 재실행에서 사용자가 이번엔 `'도쿄', '테마파크 투어',
+  '2박 3일'`처럼 각 구를 따옴표로 감싸 입력 — `splitKeywordPhrases()`가 콤마
+  기준으로는 잘 나눴지만 따옴표까지는 안 걷어내서 `SEO 키워드 확인 필요:
+  ['도쿄', '테마파크 투어', '2박 3일']`가 그대로 재발했다.
+  `splitKeywordPhrases()`에 앞뒤 따옴표(`'`·`"`·`'`·`'`·`"`·`"`) 제거를
+  추가했고, 더 근본적으로는 `cli.js`의 "방식" 자유 입력 단계(state.rawText)와
+  `run-blog-pipeline.js`의 `--force-keyword` 파싱 양쪽에서 원본 키워드 문자열
+  자체의 따옴표를 미리 걷어내도록 했다 — 이러면 제목·SEO 키워드·DB 저장 등
+  keyword를 쓰는 모든 다운스트림이 한 번에 깨끗해진다(하위 함수 하나만 고치면
+  또 다른 다운스트림에서 같은 증상이 재발할 수 있으므로).
+- **버린 대안**: `splitKeywordPhrases()`만 고치는 것 — 채택 안 함. 실측으로 두
+  번 연속 같은 계열 문제가 다른 다운스트림에서 재발했으므로, 소스(사용자 입력을
+  받는 지점) 자체를 정리하는 쪽이 다음 번 새로운 다운스트림에서도 안전하다.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`(splitKeywordPhrases 따옴표
+  제거), `cli.js`(state.rawText 기반 keyword 계산 시 따옴표 제거),
+  `scripts/run-blog-pipeline.js`(--force-keyword 파싱 시 따옴표 제거)

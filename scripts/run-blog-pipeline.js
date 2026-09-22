@@ -35,7 +35,9 @@ const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 // --auto                    : 키워드 선택 프롬프트 건너뜀 (자동 선택)
 const args = process.argv.slice(2);
 const forceKwIdx = args.indexOf('--force-keyword');
-const forceKeyword = forceKwIdx !== -1 ? args[forceKwIdx + 1] : null;
+// 2026-09-22 실측: cli.js가 아니라 이 스크립트를 직접 호출할 때도 따옴표로 감싼
+// 구를 그대로 붙여 넣을 수 있어("'도쿄', '테마파크 투어'") 여기서도 한 번 걷어낸다.
+const forceKeyword = forceKwIdx !== -1 ? args[forceKwIdx + 1]?.replace(/['"‘’“”]/g, '').trim() || null : null;
 const forceCatIdx = args.indexOf('--force-category');
 // 2026-09-22(작업지시서 "매칭 실패는 '통과'가 아니라 '스킵'입니다" §5): --force-category를
 // 명시하지 않으면 기본값 'economy'가 그대로 Pass1 프롬프트에 들어가 "경제 채널" 페르소나

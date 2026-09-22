@@ -383,7 +383,11 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
     }
 
     if (step === 4) {
-      const keyword = state.mode === 'auto' ? '자동 선정' : (state.rawText ?? `${state.region} ${state.days.pattern}`);
+      // 2026-09-22 실측: 사용자가 "'도쿄', '테마파크 투어', '2박 3일'"처럼 각 구를
+      // 따옴표로 감싸 입력하면 그 따옴표가 keyword에 그대로 남아 제목·SEO 키워드·
+      // DB에까지 새어나갔다 — 여기서 한 번에 걷어낸다.
+      const rawKeyword = state.mode === 'auto' ? '자동 선정' : (state.rawText ?? `${state.region} ${state.days.pattern}`);
+      const keyword = rawKeyword.replace(/['"‘’“”]/g, '').trim();
       console.log('\n────────────────────────────');
       console.log(`  ${keyword} · ${state.publishNow ? '티스토리 발행까지' : '초안만'}`);
       console.log('────────────────────────────');
