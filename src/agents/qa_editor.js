@@ -499,17 +499,22 @@ const BLOG_MIN_NUMBERS_PER_SECTION = 2;
 async function runBlogLLMQA(content) {
   const draft = content.blog_draft ?? {};
   const sections = draft.sections ?? [];
-  const bodyPreview = sections.slice(0, 3)
-    .map((s) => `[${s.heading}] ${(s.body ?? '').slice(0, 200)}`)
-    .join('\n');
+  // 2026-09-22 정정(작업지시서 "매칭 실패는 '통과'가 아니라 '스킵'입니다" §7): 예전엔
+  // 섹션 3개×200자만 잘라 넣었는데, QA가 그 잘림 자체를 "본문 미리보기가 중간에 끊겨
+  // 있어 완전한 정보를 제공하지 못함"이라는 탈락 사유로 돌려주는 사례가 실측됐다 —
+  // 멀쩡한 글도 QA 입력이 부족해서 떨어진 것. 전체 섹션을 넣고, 잘린 게 아니라 이게
+  // 전문이라는 걸 프롬프트에 명시한다.
+  const bodyFull = sections
+    .map((s) => `[${s.heading}] ${(s.body ?? '').trim()}`)
+    .join('\n\n');
 
   const prompt =
-    `당신은 한국 경제 블로그 SEO 전문가입니다. 아래 블로그 포스트 초안을 검수하고 JSON으로만 응답하세요.\n\n` +
+    `당신은 한국 여행 블로그 SEO 전문가입니다. 아래 블로그 포스트 초안(섹션 전문)을 검수하고 JSON으로만 응답하세요.\n\n` +
     `키워드: ${content.keyword}\n` +
     `제목: ${draft.title ?? ''}\n` +
     `메타 설명: ${draft.meta_description ?? ''}\n` +
     `SEO 키워드: ${(draft.seo_keywords ?? []).join(', ')}\n` +
-    `본문 미리보기:\n${bodyPreview}\n\n` +
+    `본문 (아래가 전체 섹션의 전문입니다 — 잘린 게 아니므로 "미완결"을 이유로 탈락시키지 마세요):\n${bodyFull}\n\n` +
     `평가 항목:\n` +
     `1. seo_score (0~100): SEO 키워드가 제목·본문에 자연스럽게 포함됐는가.\n` +
     `2. readability_score (0~100): 독자가 처음 3초 안에 읽고 싶어지는 도입부인가.\n` +

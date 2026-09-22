@@ -554,3 +554,40 @@
   filterNoisySpots/hasInterDayCityJump/hasTooFewRatedSpots 신규 헬퍼),
   `src/agents/monetizer.js`(formatDistancePhrase 신규 — "총 이동" 표기를 "하루 평균
   이동" + 일자별 내역으로 교체), `docs/work-orders/2026-09-22_exclude-country-parents.md`
+
+### D-041: trip_data 없는 travel 키워드는 "통과"가 아니라 "스킵" — QA 무한루프 차단
+- **결정**: D-040 직후 실제 실행 로그(`828e6db`)에서 "일본 여행"/"독일 5박 7일"이
+  지역 매칭 실패로 trip_data 없이 그대로 통과 → QA가 "평점·리뷰수·거리 등 실제
+  수치 인용 필요"로 REJECTED(수치는 trip_data에만 있음) → 재작성해도 여전히 수치가
+  없어 다시 REJECTED → 4분 걸려 발행 0편으로 끝나는 구조적 무한루프가 확인됨.
+  QA 기준을 낮추는 대신(그러면 숫자 없는 얕은 글이 발행됨 — 215편/클릭1건 문제의
+  원인이었던 패턴), `attachTripData()`에서 `category==='travel'`인 키워드가 지역
+  매칭에 실패하면 `skip_reason`을 남겨 애초에 발행 대상에서 제외한다.
+  `run-blog-pipeline.js`가 이미 `skip_reason` 있는 항목을 필터링하는 구조를 그대로
+  탄다. travel이 아닌 일반 키워드는 원래도 trip_data가 필요 없으므로 그대로 통과
+  — "매칭 실패=전부 스킵"으로 확대하지 않는다.
+- **부수 원인 발견 및 수정**: 로그를 보다가 진짜 근본 원인 하나를 더 찾음 —
+  `--force-keyword`가 `--force-category`를 안 주면 기본값 `'economy'`로 들어가는데,
+  이 문자열이 Pass1 프롬프트에 `카테고리: economy`로 그대로 박혀서 "일본 여행"
+  같은 여행 키워드조차 LLM이 "30대 직장인, 재테크 관심자" 식 경제 채널 페르소나로
+  드리프트하는 원인이었다(매 실행 경고 로그로만 계속 덮어써지고 있었음). 지역명
+  포함 여부로 category를 자동 판정하는 `looksLikeTravelKeyword()`를 추가해 근본
+  원인을 없앴다 — "경고로 계속 감지해서 대체" 패턴은 증상 관리일 뿐이었다.
+  같은 계열로 `qa_editor.js`의 `runBlogLLMQA()` 프롬프트도 "한국 경제 블로그 SEO
+  전문가" 페르소나가 남아있어 함께 정정.
+- **버린 대안**: trip_data 없는 글 전용으로 QA 통과 기준(구체 수치 요구)을 낮추는
+  방안 — 채택 안 함. 기준을 낮추면 "많은 사람들이 찾는 곳" 같은 막연한 서술만
+  있는 글이 그대로 발행되는 걸 다시 허용하게 되고, 이게 바로 이 QA 규칙이
+  생긴 이유(`BLOG_MIN_NUMBERS_PER_SECTION`)였다. 진입 자체를 막는 쪽이 QA 규칙의
+  의도를 지키면서 무한루프도 없앤다.
+- **부수 수정**: `runBlogLLMQA()`가 섹션 3개×200자만 잘라 QA에 넣던 것을 전체
+  섹션 전문으로 교체 — QA가 "본문 미리보기가 중간에 끊겨 있어 불완전"이라고
+  판정한 게 실은 QA 입력 자체가 잘려 있어서 생긴 오탈락이었음(실측). 재작성
+  프롬프트에도 QA 탈락 사유의 `"단어" N회` 패턴을 뽑아 명시적 반복 상한 지시를
+  추가 — "대중교통 8회→재작성 후 10회로 악화"가 실측됐기 때문.
+- **관련 파일**: `src/agents/tradule_source.js`(attachTripData 스킵 로직,
+  looksLikeTravelKeyword/suggestChildRegions 신규, spotLatLng 단순화),
+  `scripts/run-blog-pipeline.js`(forceCategory 자동 판정, --force-keyword가
+  --single/--auto 내포), `src/agents/blog_content_enhancer.js`(반복 단어 상한 주입),
+  `src/agents/qa_editor.js`(runBlogLLMQA 전문 입력 + 페르소나 정정),
+  `docs/work-orders/2026-09-22_skip-on-no-tripdata.md`

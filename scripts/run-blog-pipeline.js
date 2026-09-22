@@ -16,7 +16,7 @@ import { runBlogQA } from '../src/agents/qa_editor.js';
 import { runProjectManagerReview } from '../src/agents/project_manager.js';
 import { groupSimilarTopics } from '../src/agents/topic_grouper.js';
 import { analyzeCompetitors } from '../src/agents/competitor_analyzer.js';
-import { attachTripData } from '../src/agents/tradule_source.js';
+import { attachTripData, looksLikeTravelKeyword } from '../src/agents/tradule_source.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -30,14 +30,20 @@ const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 // ── CLI 인자 파싱 ──────────────────────────────────────────────────────────
 // --force-keyword "키워드"  : 특정 키워드를 무조건 최우선 처리
-// --force-category "카테고리": force-keyword의 카테고리 지정 (기본 economy)
+// --force-category "카테고리": force-keyword의 카테고리 지정 (생략 시 지역명 포함
+//                              여부로 travel/economy 자동 판정, §5 아래 참고)
 // --auto                    : 키워드 선택 프롬프트 건너뜀 (자동 선택)
 const args = process.argv.slice(2);
 const forceKwIdx = args.indexOf('--force-keyword');
 const forceKeyword = forceKwIdx !== -1 ? args[forceKwIdx + 1] : null;
 const forceCatIdx = args.indexOf('--force-category');
-const forceCategory = forceCatIdx !== -1 ? args[forceCatIdx + 1] : 'economy';
-const autoMode = args.includes('--auto') || !process.stdin.isTTY;
+// 2026-09-22(작업지시서 "매칭 실패는 '통과'가 아니라 '스킵'입니다" §5): --force-category를
+// 명시하지 않으면 기본값 'economy'가 그대로 Pass1 프롬프트에 들어가 "경제 채널" 페르소나
+// 드리프트("30대 직장인, 재테크 관심자")를 유도했다(실측: "일본 여행"이 category=economy로
+// 표시된 회차에서 매번 경고 발생). 지역명이 포함된 키워드는 travel로 자동 판정한다.
+const forceCategory = forceCatIdx !== -1
+  ? args[forceCatIdx + 1]
+  : (forceKeyword && looksLikeTravelKeyword(forceKeyword) ? 'travel' : 'economy');
 // --draft-only: 티스토리 발행(Part 5)과 그 이후 발행 의존 단계(6/6.5/7)를 건너뛰고
 // monetized_{date}.json까지만 만든다 — cli.js 대화형 런처의 "초안만 만들기" 기본값용
 // (지시서 2026-09-16 §4: "기본값을 초안만으로 두세요 — 실수로 발행되는 것보다 낫다").
@@ -47,7 +53,13 @@ const draftOnly = args.includes('--draft-only');
 // 실측(cli.js 사용자 피드백, 2026-09-17): "하노이"만 지정했는데 targetCount(=postsPerDay×2)
 // 를 채우려고 무관한 키워드(오사카/나고야 등)를 추가로 채굴·선택해 API를 낭비하고 있었음.
 // cli.js의 "키워드 직접 지정" 경로가 이 플래그를 붙인다.
-const singleMode = args.includes('--single');
+// 2026-09-22(같은 지시서 §4): --force-keyword만 주고 --single을 깜빡하면 30초짜리 채굴을
+// 그대로 다 돌고, 채굴에서 나온 무관한 키워드가 선택 화면에 같이 뜬다("지정했는데 왜
+// 고르라고 물어보는지 이해가 안 됨") — --force-keyword 자체가 --single을 내포하게 한다.
+const singleMode = args.includes('--single') || Boolean(forceKeyword);
+// --force-keyword로 이미 처리할 키워드가 정해졌으면 후보가 사실상 1개뿐이라 대화형
+// 선택 화면(120초 대기)이 의미가 없다 — autoMode로 취급해 즉시 진행한다.
+const autoMode = args.includes('--auto') || !process.stdin.isTTY || Boolean(forceKeyword);
 
 /**
  * 각 키워드를 서로 내용이 겹치지 않는 독립적인 글 주제 2~3개로 확장한다.

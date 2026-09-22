@@ -213,10 +213,13 @@ function haversineKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** spot 응답의 위경도 필드명이 응답 버전마다 다를 수 있어 방어적으로 여러 이름을 시도한다. */
+/**
+ * spot 응답의 위경도 필드 — 실측 확인(2026-09-22, 작업지시서 "매칭 실패는 '통과'가
+ * 아니라 '스킵'입니다" §1): 평탄한 `lat`/`lng` 구조이고 중첩(`latitude`,
+ * `coordinate.lat` 등)은 없다. 예: { day, lat, lng, name, order, rating, ... }
+ */
 function spotLatLng(spot) {
-  const lat = spot?.lat ?? spot?.latitude ?? spot?.coordinate?.lat ?? spot?.coord?.lat ?? null;
-  const lng = spot?.lng ?? spot?.longitude ?? spot?.coordinate?.lng ?? spot?.coord?.lng ?? null;
+  const { lat, lng } = spot ?? {};
   return typeof lat === 'number' && typeof lng === 'number' ? { lat, lng } : null;
 }
 
@@ -263,11 +266,58 @@ function hasTooFewRatedSpots(spots) {
   return ratedCount < spots.length / 2;
 }
 
+// 부모(국가/광역권) → 자식(구체 지역) 매핑 — 매칭 실패 시 대체 후보 제안용(§3).
+const parentToChildren = new Map();
+for (const r of [...REGIONS_SNAPSHOT.domestic, ...REGIONS_SNAPSHOT.overseas]) {
+  if (!r?.parent || !r?.name) continue;
+  if (!parentToChildren.has(r.parent)) parentToChildren.set(r.parent, []);
+  parentToChildren.get(r.parent).push(r.name);
+}
+const ALL_PARENTS = [...domesticParents, ...overseasParents];
+
+/**
+ * 키워드에 트레쥴 지역(자식이든, 매칭에서 제외된 국가/광역권 부모든)이 포함돼 있으면
+ * 여행 키워드로 판정한다. 작업지시서 2026-09-22 "매칭 실패는 '통과'가 아니라
+ * '스킵'입니다" §5: --force-keyword가 카테고리를 명시하지 않으면 기본값 'economy'로
+ * 들어가는데, 이 category 문자열이 그대로 Pass1 프롬프트에 들어가 "경제 채널"
+ * 페르소나를 유도하는 원인이었다(예: "일본 여행"이 category=economy로 표시되면
+ * LLM이 "30대 직장인, 재테크 관심자" 식으로 드리프트). 지역명이 있으면 travel로
+ * 자동 판정해 이 경로 자체를 막는다.
+ */
+export function looksLikeTravelKeyword(keyword) {
+  if (!keyword) return false;
+  if (extractRegion(keyword)) return true;
+  return ALL_PARENTS.some((p) => keyword.includes(p));
+}
+
+/**
+ * 키워드가 매칭 제외 대상 부모(국가/광역권) 이름을 그대로 포함하면, 그 아래 구체
+ * 지역(코스가 실제로 성립하는 자식) 후보를 몇 개 제안한다. "일본 여행" → 오사카·
+ * 후쿠오카·도쿄… 식으로 대체 키워드를 골라 쓸 수 있게 로그로만 남긴다(자동 치환은
+ * 하지 않음 — 어떤 도시로 좁힐지는 편집 판단이 필요하므로).
+ */
+function suggestChildRegions(keyword) {
+  const excludedParent = ALL_PARENTS
+    .filter((p) => keyword.includes(p))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!excludedParent) return null;
+  const children = parentToChildren.get(excludedParent) ?? [];
+  if (children.length === 0) return null;
+  return { parent: excludedParent, children: children.slice(0, 5) };
+}
+
 /**
  * keywordData.contents 각 항목에 trip_data(스팟 배열)를 주입한다.
- * 지역 매칭 실패 / API 실패 / 응답 실패 / spots 3개 미만인 항목은 trip_data 없이
- * skip_reason만 남기고 통과시킨다 — 이후 단계(enhanceAllBlogDrafts 등)에서
- * skip_reason이 있는 항목은 글을 쓰지 않도록 걸러야 한다 (C-2: 스팟 3개 미만 스킵).
+ * 2026-09-22 정정(작업지시서 "매칭 실패는 '통과'가 아니라 '스킵'입니다" §3): 지역
+ * 매칭 실패 시 trip_data 없이 그냥 통과시키면, category='travel'인 코스 키워드가
+ * QA 단계에서 "평점·리뷰수·거리 등 실제 수치 인용 필요"로 계속 REJECTED되는
+ * 무한루프에 빠진다(수치는 trip_data에만 있는데 trip_data가 없으니 영원히 통과
+ * 못함). travel 키워드는 trip_data를 못 붙이면 발행 대상에서 제외한다. category가
+ * travel이 아닌 일반 키워드(경제 등)는 애초에 trip_data가 필요 없으므로 그대로
+ * 통과시킨다 — 전체 키워드를 다 스킵하면 안 됨.
+ * API 실패 / 응답 실패 / spots 6개 미만인 항목도 동일하게 skip_reason만 남기고
+ * 통과시킨다 — 이후 단계(enhanceAllBlogDrafts 등)에서 skip_reason이 있는 항목은
+ * 글을 쓰지 않도록 걸러야 한다 (C-2 계약).
  */
 export async function attachTripData(keywordData) {
   const contents = keywordData.contents ?? [];
@@ -279,8 +329,17 @@ export async function attachTripData(keywordData) {
   for (const item of contents) {
     const region = extractRegion(item.keyword ?? '');
     if (!region) {
-      logger.info(`[tradule_source] "${item.keyword}" → 지역 매칭 실패, trip_data 없이 통과`);
-      updated.push(item);
+      if (item.category === 'travel') {
+        const suggestion = suggestChildRegions(item.keyword ?? '');
+        const suggestionMsg = suggestion
+          ? ` (대체 후보: ${suggestion.children.map((c) => `${c} 2박3일 코스`).join(', ')})`
+          : '';
+        logger.warn(`[tradule_source] "${item.keyword}" → 코스 데이터 없음(지역 매칭 실패), 스킵${suggestionMsg}`);
+        updated.push({ ...item, skip_reason: '지역 매칭 실패 (국가/광역권 단위는 코스 불가)' });
+      } else {
+        logger.info(`[tradule_source] "${item.keyword}" → 지역 매칭 실패, trip_data 없이 통과 (travel 아님)`);
+        updated.push(item);
+      }
       continue;
     }
 

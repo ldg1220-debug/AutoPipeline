@@ -660,6 +660,21 @@ async function enhanceBlogDraft(content) {
       `\n\n[⚠️ 이전 QA 탈락 — 아래 문제를 반드시 해결해서 재작성]\n` +
       lines.join('\n') +
       `\n위 문제를 해결하는 방향으로 아웃라인·본문을 새로 구성하세요.`;
+
+    // 2026-09-22(작업지시서 "매칭 실패는 '통과'가 아니라 '스킵'입니다" §6): "탈락 사유를
+    // 그대로 다시 읽고 알아서 줄여라"는 재작성 프롬프트로는 부족했다 — 실측(maeilg.com
+    // "독일 5박 7일")에서 "대중교통" 반복이 탈락 사유였는데 재작성이 8회→10회로 오히려
+    // 늘렸다. 탈락 사유에서 "단어" N회 패턴을 뽑아 명시적 상한을 별도 지시로 못박는다.
+    const repeatedWordIssues = qaIssues
+      .map((issue) => issue.match(/"([^"]+)"\s*(\d+)\s*회/))
+      .filter(Boolean);
+    if (repeatedWordIssues.length > 0) {
+      const caps = repeatedWordIssues.map(
+        ([, word]) => `  - "${word}"는 이번 재작성 글 전체에서 3회를 넘기지 마세요 (이전 시도에서 과다 반복으로 탈락함 — 동의어·문장 구조를 바꿔서 피할 것)`
+      );
+      qaCtx += `\n\n[⚠️ 반복 단어 상한 — 이전 시도보다 반드시 줄일 것]\n${caps.join('\n')}`;
+    }
+
     logger.info(`[blog_content_enhancer] QA 피드백 주입: 탈락사유 ${qaIssues.length}개 / 개선제안 ${qaFeedback.length}개`);
   }
 
