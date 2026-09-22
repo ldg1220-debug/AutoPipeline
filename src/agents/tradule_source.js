@@ -125,13 +125,23 @@ export function extractRegion(keyword) {
   return parentMatch ?? null;
 }
 
-/** 키워드에서 "1박2일"/"2박3일"/"당일치기" 등을 days(1|2)로 환산한다. 기본 1일. */
+/**
+ * 키워드에서 "1박2일"/"2박3일"/"3박4일"/"당일치기" 등을 days로 환산한다. 기본 1일.
+ * 2026-09-22 정정(실측): "오사카, USJ, 2박 3일" → 기존 로직은 밤 수(nights)만 보고
+ * "1박 이상이면 무조건 days=2"로 상한을 걸었는데, 이게 틀렸다. course-brief를 직접
+ * 호출해 확인: days=1→200(1일 5곳), days=2→422 insufficient_spots(2일치로는
+ * 스팟이 모자람), days=3→200(3일에 걸쳐 스팟 배정), days=4→400 "days must be 1, 2,
+ * or 3". 즉 API는 정확히 1~3만 받고, "2박3일"이면 말 그대로 3일치를 요청해야
+ * 한다 — 정규식이 이미 캡처한 일수(match[2])를 버리고 있었으므로 그걸 그대로 쓰고,
+ * API 상한(3)에 맞춰 클램프한다.
+ */
+const API_MAX_DAYS = 3;
 function extractDays(keyword) {
   if (/당일|하루/.test(keyword)) return 1;
   const match = keyword.match(/(\d+)\s*박\s*(\d+)\s*일/);
   if (match) {
-    const nights = Number(match[1]);
-    return nights >= 1 ? 2 : 1; // API가 1|2만 받으므로 2박 이상도 2로 상한
+    const days = Number(match[2]);
+    return Math.min(Math.max(days || 1, 1), API_MAX_DAYS);
   }
   return 1;
 }
@@ -147,12 +157,17 @@ function resolveDays(region, keyword) {
   const profile = REGION_PROFILES[region];
   if (!profile) return raw;
 
+  let resolved = raw;
   if (raw < profile.minDays) {
     logger.warn(`[sanity] "${region} ${keyword}"(days=${raw})은 비현실적 → days=${profile.minDays}로 조정`);
-    return profile.minDays;
+    resolved = profile.minDays;
+  } else if (raw > profile.maxDays) {
+    resolved = profile.maxDays;
   }
-  if (raw > profile.maxDays) return profile.maxDays;
-  return raw;
+  // REGION_PROFILES.maxDays(최대 5)가 course-brief의 실제 API 상한(1~3, 실측 확인)보다
+  // 클 수 있어 여기서 한 번 더 클램프한다 — 안 그러면 "도쿄 4박5일" 같은 키워드가
+  // days=5로 나가 400(days must be 1, 2, or 3)을 그대로 맞는다.
+  return Math.min(resolved, API_MAX_DAYS);
 }
 
 // 첫 호출은 콜드 스타트 + 캐시 미스 + Google 라이브 조회가 겹치면 8초를 넘길 수 있음(실측:

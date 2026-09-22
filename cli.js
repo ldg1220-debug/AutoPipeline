@@ -36,11 +36,16 @@ const KIN_HISTORY_PATH = path.resolve(__dirname, 'output/kin/history.json');
 const TISTORY_SESSION_PATH = path.resolve(__dirname, 'data/tistory_session.json');
 const PAGE_SIZE = 10;
 
+// 2026-09-22 정정(실측, tradule_source.js와 동일 근거): course-brief는 days=1~3만
+// 받는다(days=4 → 400 "days must be 1, 2, or 3"). "N박(N+1)일"은 문자 그대로
+// (N+1)일치를 요청해야 하며(2박3일→3), API 상한을 넘는 "3박4일"은 실제 스팟이
+// 배정되는 최대치인 3으로 맞춘다 — 예전엔 2박3일·3박4일 둘 다 apiDays:2로 잘못
+// 상한을 걸고 있었다.
 const DAY_OPTIONS = [
   { label: '당일', pattern: '당일치기', apiDays: 1 },
-  { label: '1박2일', pattern: '1박2일 코스', apiDays: 1 },
-  { label: '2박3일', pattern: '2박3일 코스', apiDays: 2 },
-  { label: '3박4일', pattern: '3박4일 코스', apiDays: 2 },
+  { label: '1박2일', pattern: '1박2일 코스', apiDays: 2 },
+  { label: '2박3일', pattern: '2박3일 코스', apiDays: 3 },
+  { label: '3박4일', pattern: '3박4일 코스', apiDays: 3 },
 ];
 
 // ── 내비게이션 신호 (§6: 뒤로 가기) ──────────────────────────────────────────

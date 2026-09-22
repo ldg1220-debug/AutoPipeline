@@ -394,6 +394,14 @@ function enforceSameRegion(groups, keywords) {
   return groups.flatMap((g) => {
     const byRegion = new Map();
     for (const idx of g.indices) {
+      // 2026-09-22 실측 크래시 방어: LLM 그룹핑 결과의 indices가 가끔 keywords 배열
+      // 범위를 벗어난 값을 줘서(예: 키워드 1개인데 indices:[0,1]) keywords[idx]가
+      // undefined가 되고 extractRegion() 내부에서 "Cannot read properties of
+      // undefined (reading 'includes')"로 죽는 사례가 있었다. 그 인덱스만 건너뛴다.
+      if (keywords[idx] == null) {
+        logger.warn(`[topic_grouper] 그룹 indices에 범위 밖 인덱스 ${idx} — 건너뜀 (keywords.length=${keywords.length})`);
+        continue;
+      }
       const region = extractRegion(keywords[idx]) ?? '__no_region__';
       if (!byRegion.has(region)) byRegion.set(region, []);
       byRegion.get(region).push(idx);

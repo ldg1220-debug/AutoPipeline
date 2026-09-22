@@ -591,3 +591,31 @@
   --single/--auto 내포), `src/agents/blog_content_enhancer.js`(반복 단어 상한 주입),
   `src/agents/qa_editor.js`(runBlogLLMQA 전문 입력 + 페르소나 정정),
   `docs/work-orders/2026-09-22_skip-on-no-tripdata.md`
+
+### D-042: "N박(N+1)일" → days 환산이 실제로 틀렸음 (course-brief는 1~3만 받음)
+- **결정**: 실행 로그(`--force-keyword "오사카, USJ, 2박 3일"`)에서
+  `region=오사카&days=2` 호출이 매번 422(`insufficient_spots`)로 실패하는 걸 보고
+  직접 curl로 확인: `days=1`→200, `days=2`→422, `days=3`→200(스팟이 1~3일에 걸쳐
+  배정됨), `days=4`→400 `"days must be 1, 2, or 3"`. 즉 API는 정확히 1~3만 받고,
+  "N박(N+1)일"은 말 그대로 (N+1)을 보내야 한다. 그런데 기존 `extractDays()`는
+  정규식이 이미 캡처해둔 일수(match[2])를 버리고 "1박 이상이면 무조건 2"로
+  상한을 걸고 있었다 — "2박3일"도 "3박4일"도 전부 days=2로 나가던 버그였다.
+  정규식이 캡처한 일수를 그대로 쓰고 API 상한(3)에 클램프하도록 정정
+  (`API_MAX_DAYS=3`). `resolveDays()`도 `REGION_PROFILES.maxDays`(최대 5)를 그대로
+  반환할 수 있어 최종 반환값에 같은 클램프를 한 번 더 걸었다. `cli.js`의
+  `DAY_OPTIONS`(`apiDays: 1/1/2/2` → `1/2/3/3`)도 같은 오류라 함께 고쳤다.
+- **버린 대안**: 없음 — API 계약(1~3)을 실측으로 확정했으므로 재량의 여지가 없는
+  단순 버그 수정.
+- **부수 발견**: 같은 실행에서 `topic_grouper.js`의 `enforceSameRegion()`이
+  "Cannot read properties of undefined (reading 'includes')"로 죽는 걸 확인 —
+  LLM 그룹핑 결과의 `indices`가 `keywords` 배열 범위를 벗어난 값을 줄 수 있어서였다
+  (키워드 1개인데 `indices:[0,1]` 등). 범위 밖 인덱스는 건너뛰고 경고 로그만
+  남기도록 방어 코드 추가. 이 크래시 자체는 `run-blog-pipeline.js`의 try/catch로
+  파이프라인을 막지는 않았지만(원본 미그룹 상태로 계속 진행), 매 실행 API 호출을
+  낭비하고 로그를 오염시키고 있었다.
+- **교훈**: "API가 1|2만 받는다"처럼 코드 주석에 적힌 계약을 실측 없이 믿지 말 것 —
+  이번 것도 실제로 curl 한 번이면 3분 안에 틀렸음이 확인됐다. D-038/D-039/D-040과
+  같은 패턴(추측 대신 실측).
+- **관련 파일**: `src/agents/tradule_source.js`(extractDays/resolveDays 정정,
+  API_MAX_DAYS 상수), `cli.js`(DAY_OPTIONS.apiDays 정정),
+  `src/agents/topic_grouper.js`(enforceSameRegion 범위 밖 인덱스 방어)
