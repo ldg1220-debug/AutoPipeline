@@ -650,3 +650,29 @@
 - **관련 파일**: `src/agents/tradule_source.js`(filterNoisySpots/
   hasTooFewRatedSpots 제거 → filterUnratedSpots 통합, attachTripData의 days
   재시도 루프), `docs/work-orders/2026-09-22_noise-filter-fix.md`
+
+### D-044: 콤마 구분 force-keyword가 SEO 키워드 한 덩어리로 새어 나감
+- **결정**: "도쿄, 테마파크 투어, 2박 3일" 실행 로그에서 QA가 `SEO 키워드 확인
+  필요: [도쿄, 테마파크 투어, 2박 3일]`를 계속 내는 걸 보고 원인을 추적함.
+  `blog_content_enhancer.js`가 `seo_keywords` 기본값을 `[keyword]`(원본 문자열
+  통째로 배열 1개)로 두고 있었고, `qa_editor.js`의 `validateBlogStructure()`는
+  이 원본 키워드를 `'&'`로만 나눴다(콤마는 무시) — 그 결과 공백 기준 토큰화에서
+  "도쿄,"·"투어," 처럼 콤마가 그대로 붙은 토큰이 생겨, 본문에 실제로 있는
+  "도쿄"·"테마파크 투어"조차 매칭 실패로 잘못 판정됐다. 같은 값이
+  `monetizer.js`의 메타 키워드 태그·`runBlogLLMQA()` 프롬프트에도 그대로
+  흘러가고 있었다. `splitKeywordPhrases(keyword)`(콤마·앰퍼샌드 기준 분리 후
+  trim)를 `blog_content_enhancer.js`에 추가해 export하고, `seo_keywords` 기본값·
+  `qa_editor.js`의 `primaryKw`·`monetizer.js`의 `seoKeywords` 폴백 세 군데 모두
+  이걸로 교체했다. `blog_pass2_outline.md`의 "키워드를 제목에 그대로 배치" 지시도
+  콤마가 있으면 이어붙여 자연스러운 문장으로 쓰라고 명시적으로 정정했다(안
+  그러면 제목 자체에 콤마가 그대로 들어갈 위험이 있었음).
+- **주의**: 이 정정이 이번 실행에서 REJECTED의 유일한 원인은 아니었다 — "섹션
+  글자 수 미달"(최소 600자) 같은 진짜 하드 실패 사유가 함께 있었다. SEO 키워드
+  파싱 버그는 노이즈였지 이번 REJECT의 결정적 원인은 아니었을 수 있지만, 메타
+  키워드 태그 품질(발행 시 실제 SEO에 영향)과 QA 로그 신뢰성 양쪽에 실질적인
+  버그였으므로 고쳤다.
+- **버린 대안**: 없음 — 단순 파싱 버그 수정.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`(splitKeywordPhrases 신규
+  export, seo_keywords 기본값 교체), `src/agents/qa_editor.js`(primaryKw 분리
+  로직 교체), `src/agents/monetizer.js`(seoKeywords 폴백 교체),
+  `prompts/blog_pass2_outline.md`(콤마 키워드 제목 처리 지침 추가)

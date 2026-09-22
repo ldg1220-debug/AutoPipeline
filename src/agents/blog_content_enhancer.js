@@ -83,6 +83,22 @@ function formatBenchmarkContext(rules) {
   return lines.join('\n');
 }
 
+/**
+ * "도쿄, 테마파크 투어, 2박 3일" 같은 --force-keyword 자유 입력을 콤마/앰퍼샌드
+ * 기준으로 나눠 깨끗한 구(phrase) 배열로 만든다. 2026-09-22 실측: seo_keywords
+ * 기본값이 이 원본 키워드 문자열을 그대로 `[keyword]`(단일 항목)로 쓰고 있어서,
+ * qa_editor.js가 공백 기준으로 토큰을 쪼갤 때 "도쿄,"·"투어," 처럼 콤마가 붙은
+ * 토큰이 생겨 본문에 실제로 있는 "도쿄"·"테마파크 투어"조차 "SEO 키워드 확인
+ * 필요"로 잘못 걸렸다. 발행 메타 키워드 태그에도 콤마 붙은 한 덩어리로 나가고
+ * 있었으므로 애초에 여기서 깨끗하게 나눠둔다.
+ */
+export function splitKeywordPhrases(keyword) {
+  return (keyword ?? '')
+    .split(/[,&]/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
 function fillTemplate(template, vars) {
   return Object.entries(vars).reduce(
     (t, [k, v]) => t.replaceAll(`{${k}}`, String(v ?? '')),
@@ -770,7 +786,7 @@ async function enhanceBlogDraft(content) {
       title:            outline.title || blog_draft?.title || `${keyword} 완벽 정리`,
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
-      seo_keywords:     blog_draft?.seo_keywords ?? [keyword],
+      seo_keywords:     blog_draft?.seo_keywords ?? splitKeywordPhrases(keyword),
       sections:         finalSections,
       review_verdict:   reviewResult.verdict,
       review_issues:    reviewResult.issues,

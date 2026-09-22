@@ -6,6 +6,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
+import { splitKeywordPhrases } from './blog_content_enhancer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -620,7 +621,10 @@ function validateBlogStructure(content) {
   // 하드 실패 대상이 아닌 소프트 경고만 기록 (LLM seoScore가 실질 판단)
   const bodyText = sections.map((s) => s.body ?? '').join(' ');
   const bodyNorm = bodyText.replace(/\s+/g, '');
-  const primaryKw = (content.keyword ?? '').split('&').map((k) => k.trim());
+  // 2026-09-22 정정: '&'만 나눴더니 "도쿄, 테마파크 투어, 2박 3일" 같은 콤마 구분
+  // force-keyword가 한 덩어리로 남아, 아래 토큰 검사에서 "도쿄,"·"투어," 처럼
+  // 콤마가 붙은 토큰이 생겨 실제 본문에 있는 키워드도 "확인 필요"로 잘못 걸렸다.
+  const primaryKw = splitKeywordPhrases(content.keyword ?? '');
   const seoKeywords = draft.seo_keywords ?? primaryKw;
   const allKws = [...new Set([...seoKeywords, ...primaryKw])];
   const missingSeo = allKws.filter((kw) => {

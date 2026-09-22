@@ -10,6 +10,7 @@ import { throttle } from '../utils/rateLimiter.js';
 import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../utils/internalLinks.js';
 import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 import { isOverseasRegion, extractRegion } from './tradule_source.js';
+import { splitKeywordPhrases } from './blog_content_enhancer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -728,7 +729,7 @@ async function monetizeBlogDraft(content) {
     return content;
   }
 
-  const seoKeywords = blog_draft.seo_keywords ?? [keyword];
+  const seoKeywords = blog_draft.seo_keywords ?? splitKeywordPhrases(keyword);
   const catColor    = CATEGORY_COLOR[content.category] ?? '#2563eb';
 
   const affiliateHooks = blog_draft.affiliate_hooks ?? [];
