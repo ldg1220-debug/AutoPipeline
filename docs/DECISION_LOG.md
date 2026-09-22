@@ -619,3 +619,34 @@
 - **관련 파일**: `src/agents/tradule_source.js`(extractDays/resolveDays 정정,
   API_MAX_DAYS 상수), `cli.js`(DAY_OPTIONS.apiDays 정정),
   `src/agents/topic_grouper.js`(enforceSameRegion 범위 밖 인덱스 방어)
+
+### D-043: 지역명 노이즈 필터가 판별 기준을 잘못 잡았음 — 지역명이 아니라 평점
+- **결정**: D-040(§5)에서 추가한 `filterNoisySpots()`("장소명에 region 문자열이
+  그대로 포함되면 제외")가 "경주 황리단길"(리뷰 7,771)·"경주보문관광단지"(리뷰
+  2,672) 같은 경주의 대표 명소까지 지명이 이름에 들어있다는 이유만으로 잘라내
+  9곳→3곳으로 만들어 MIN_SPOTS(6) 미달로 스킵시키는 걸 실측으로 확인. 경주·전주·
+  여수처럼 지명이 장소명에 자연스럽게 들어가는 모든 지역이 같은 피해를 입는
+  구조였다. 실측 비교 결과 노이즈("전라맛집"·"경주원조콩국" 등)와 진짜 명소를
+  가르는 실제 기준은 지역명 포함 여부가 아니라 **평점 유무**였다(노이즈는 전부
+  rating=null, 명소는 지명이 들어있어도 rating이 있음). `filterNoisySpots()`와
+  `hasTooFewRatedSpots()`(절반 미만 스킵) 두 규칙을 `filterUnratedSpots()`
+  (rating이 null인 스팟 제외) 하나로 통합 — 지역명 조건을 완전히 제거했다.
+- **부수 정정**: MIN_SPOTS(6)이 "경주=정확히 6곳"처럼 경계값에 걸리면 API 응답이
+  호출마다 미세하게 달라져(course-brief 데이터가 정적이지 않음) 같은 키워드가
+  어떤 실행에선 통과하고 어떤 실행에선 스킵되는 비결정성이 있었음. MIN_SPOTS를
+  낮추는 대신(품질 기준이 물러짐) `attachTripData()`가 `resolveDays()` 결과부터
+  1일까지 하루씩 줄여가며 재시도하고 MIN_SPOTS를 넘긴 첫 결과를 채택하도록 변경
+  — 날짜를 줄이면 같은 스팟 풀이 더 적은 날짜에 재배정돼 하루당 밀도가 오히려
+  올라간다는 점에 착안.
+- **버린 대안**: MIN_SPOTS를 5로 낮추는 방안 — 채택 안 함. 임계값을 낮추면 이번
+  경계값 문제만 한 칸 아래로 옮길 뿐 근본적으로 같은 비결정성이 남고, 데이터
+  품질 하한도 함께 낮아진다. 재시도가 "임계값 자체를 낮추지 않고 같은 풀 안에서
+  더 나은 배치를 찾는다"는 점에서 우선한다.
+- **교훈**: 노이즈 필터처럼 "겉보기에 그럴듯한" 휴리스틱(지역명 문자열 매칭)은
+  실측 없이 배포하면 정반대 방향의 피해(진짜 명소 삭제)를 낼 수 있다 — 실측
+  데이터로 상관관계를 직접 비교(노이즈 vs 명소, 평점 유무)해서 진짜 판별자를
+  찾은 뒤 규칙을 다시 세워야 했다. D-038/D-039/D-040/D-042와 같은 "실측 없이
+  넘겨짚지 말 것" 패턴의 반복.
+- **관련 파일**: `src/agents/tradule_source.js`(filterNoisySpots/
+  hasTooFewRatedSpots 제거 → filterUnratedSpots 통합, attachTripData의 days
+  재시도 루프), `docs/work-orders/2026-09-22_noise-filter-fix.md`

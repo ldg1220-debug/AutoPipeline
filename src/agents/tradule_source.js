@@ -6,10 +6,11 @@
  * blog_content_enhancer.js의 pass3Body는 이미 content.trip_data를 프롬프트에 배선해뒀으므로
  * 이 필드만 채우면 코드 수정 없이 실데이터가 본문에 반영된다.
  *
- * C-2 계약 (2026-09-22 상향 — 작업지시서 "일본 여행 → 일본은 통과시키면 안 됩니다" §5):
- *   - spots가 6개 미만이면 해당 키워드는 글을 쓰지 않고 스킵한다.
- *   - 장소명에 region 문자열이 그대로 포함된 스팟은 제외한다(노이즈 제외 후 다시 6개 미만이면 스킵).
- *   - 평점 있는 스팟이 절반 미만이면 스킵한다.
+ * C-2 계약 (2026-09-22 재정정 — 작업지시서 "제 노이즈 필터가 경주를 죽였습니다"):
+ *   - 평점 없는 스팟은 제외한다 (노이즈·진짜 명소를 가르는 기준은 지역명이 아니라
+ *     평점이었음 — "경주 황리단길"처럼 지명이 이름에 들어있어도 평점이 있으면 유지).
+ *   - 평점 있는 스팟이 6개 미만이면 days를 하나씩 줄여 재시도하고, 그래도 미달이면
+ *     해당 키워드는 글을 쓰지 않고 스킵한다.
  *   - 일자 간 마지막→첫 스팟 좌표 거리가 100km를 넘으면(도시 변경 의심) 스킵한다.
  *   - 평점·리뷰수·거리·이동시간은 응답값만 사용 — 창작 금지.
  *   - appUrl을 글당 1회 링크.
@@ -239,15 +240,6 @@ function spotLatLng(spot) {
 }
 
 /**
- * 장소명에 region 문자열이 그대로 포함된 스팟을 제외한다(§5) — "전라맛집"·"쿠팡
- * 전라광주2,5센터 카페" 같은 지역명 문자열 검색 결과 노이즈가 섞이는 사고 방지.
- */
-function filterNoisySpots(spots, region) {
-  if (!region) return spots;
-  return spots.filter((spot) => !(spot?.name ?? '').includes(region));
-}
-
-/**
  * 일자 간 마지막↔첫 스팟 좌표 거리가 MAX_INTER_DAY_JUMP_KM을 넘으면 도시가 바뀐
  * 것으로 보고 true를 반환한다(§5 "마지막 항목이 국가 단위를 근본적으로 막습니다").
  * 좌표 필드를 찾을 수 없으면(응답 스키마 미확인) 판단을 보류하고 false를 반환 —
@@ -275,10 +267,17 @@ function hasInterDayCityJump(spots) {
   return false;
 }
 
-/** 평점(rating)이 있는 스팟이 절반 미만이면 true — 신뢰도 낮은 코스로 보고 스킵(§5). */
-function hasTooFewRatedSpots(spots) {
-  const ratedCount = spots.filter((spot) => typeof spot.rating === 'number').length;
-  return ratedCount < spots.length / 2;
+/**
+ * 평점 없는 스팟을 제외한다. 2026-09-22 재정정(작업지시서 "제 노이즈 필터가
+ * 경주를 죽였습니다"): 원래 있던 filterNoisySpots(장소명에 region 문자열 포함 시
+ * 제외)는 "경주 황리단길"(리뷰 7,771) 같은 진짜 명소까지 지명이 이름에 들어있다는
+ * 이유로 잘라냈다 — 실측: 노이즈("전라맛집"·"경주원조콩국" 등)는 전부 평점이
+ * 없고, 진짜 명소는 지명이 이름에 들어있어도 평점이 있다. 판별자는 지역명이 아니라
+ * 평점이었다. 규칙을 이 하나로 통일 — sanitizeSpots() 이후(리뷰 수 부족으로 null
+ * 처리된 것 포함) rating이 null인 스팟을 그냥 목록에서 제외한다.
+ */
+function filterUnratedSpots(spots) {
+  return spots.filter((spot) => typeof spot.rating === 'number');
 }
 
 // 부모(국가/광역권) → 자식(구체 지역) 매핑 — 매칭 실패 시 대체 후보 제안용(§3).
@@ -358,34 +357,46 @@ export async function attachTripData(keywordData) {
       continue;
     }
 
-    const days = resolveDays(region, item.keyword ?? '');
-    const brief = await fetchCourseBriefWithRetry(region, days);
+    const startDays = resolveDays(region, item.keyword ?? '');
+
+    // 2026-09-22 재정정(작업지시서 "제 노이즈 필터가 경주를 죽였습니다" §4): MIN_SPOTS(6)가
+    // 딱 그 경계에 걸리면(예: 경주 = 정확히 6곳) course-brief 응답이 호출마다 곳수가
+    // 달라져서 같은 키워드가 어떤 호출에선 통과하고 어떤 호출에선 스킵되는 문제가
+    // 있었다. days를 하나씩 줄여 재시도한다 — 하루 줄이면 스팟이 그만큼의 날짜에
+    // 재배정돼 하루당 밀도가 올라간다(§4 "재시도 쪽이 낫습니다").
+    let brief = null;
+    let days = startDays;
+    let cleanSpots = [];
+    const attemptLog = [];
+    for (let d = startDays; d >= 1; d -= 1) {
+      const attempt = await fetchCourseBriefWithRetry(region, d);
+      const attemptSpots = Array.isArray(attempt?.spots) ? filterUnratedSpots(sanitizeSpots(attempt.spots)) : [];
+      attemptLog.push(`${d}일=${attemptSpots.length}곳`);
+      if (attemptSpots.length >= MIN_SPOTS) {
+        brief = attempt;
+        days = d;
+        cleanSpots = attemptSpots;
+        break;
+      }
+      // 이번 시도가 최선이면 (스킵하게 되더라도) 로그·디버그 저장용으로 남겨둔다.
+      if (!brief || attemptSpots.length > cleanSpots.length) {
+        brief = attempt;
+        days = d;
+        cleanSpots = attemptSpots;
+      }
+    }
     rawResponses[item.keyword] = brief;
 
-    if (!brief || !Array.isArray(brief.spots) || brief.spots.length < MIN_SPOTS) {
-      logger.warn(
-        `[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${brief?.spots?.length ?? 0}개 ` +
-        `(최소 ${MIN_SPOTS}개 미만) → 이 키워드는 글쓰기 스킵 대상으로 표시`
-      );
-      updated.push({ ...item, skip_reason: `트레쥴 데이터 부족 (스팟 ${brief?.spots?.length ?? 0}개)` });
-      continue;
-    }
-
-    // §5 C-2 상향: 지역명 문자열 노이즈 스팟 제외 → 제외 후 다시 최소 스팟 수 확인
-    const cleanSpots = filterNoisySpots(sanitizeSpots(brief.spots), region);
     if (cleanSpots.length < MIN_SPOTS) {
       logger.warn(
-        `[tradule_source] "${item.keyword}"(지역: ${region}) → 지역명 노이즈 스팟 제외 후 ` +
-        `${cleanSpots.length}개(최소 ${MIN_SPOTS}개 미만) → 이 키워드는 글쓰기 스킵 대상으로 표시`
+        `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, 일수를 줄여도 ` +
+        `${MIN_SPOTS}곳 미달 (시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
       );
-      updated.push({ ...item, skip_reason: `노이즈 제외 후 트레쥴 데이터 부족 (스팟 ${cleanSpots.length}개)` });
+      updated.push({ ...item, skip_reason: `트레쥴 데이터 부족 (평점 있는 스팟 최대 ${cleanSpots.length}개)` });
       continue;
     }
-
-    if (hasTooFewRatedSpots(cleanSpots)) {
-      logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟이 절반 미만 → 스킵`);
-      updated.push({ ...item, skip_reason: '평점 있는 스팟 절반 미만' });
-      continue;
+    if (days !== startDays) {
+      logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${startDays}일로는 부족해 ${days}일로 재시도 성공`);
     }
 
     if (hasInterDayCityJump(cleanSpots)) {
