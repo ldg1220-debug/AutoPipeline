@@ -29,14 +29,14 @@ export function isClaimKeyword(keyword) {
   return CLAIM_PATTERNS.test(keyword ?? '');
 }
 
-async function searchTavily(query) {
+async function searchTavily(query, maxResults = 5) {
   const res = await axios.post(
     'https://api.tavily.com/search',
     {
       api_key: config.tavily.apiKey,
       query,
       search_depth: 'basic',
-      max_results: 5,
+      max_results: maxResults,
     },
     { timeout: 15000 }
   );
@@ -185,14 +185,27 @@ export async function searchRegionSpots(region, days) {
     return null;
   }
 
-  let results;
-  try {
-    await throttle(1000, 'tavily');
-    results = await searchTavily(`${region} 여행 가볼만한곳 맛집 평점 리뷰 추천`);
-  } catch (err) {
-    logger.warn(`[factSearch] "${region}" 웹 스팟 검색 실패: ${err.message}`);
-    return null;
+  // 2026-09-23 실측(모리셔스): 검색어 하나(5건)로는 스니펫에 숫자 평점이 딸린 장소가
+  // 6곳(MIN_SPOTS)을 못 채우는 경우가 흔했다(10곳 추출 중 평점 있는 건 3곳뿐). 기준을
+  // 낮추는 대신 검색 자체를 넓힌다 — 관광지/맛집 각도를 나눠 두 번 검색해 원재료를
+  // 늘리고, 같은 URL은 한 번만 센다.
+  const queries = [
+    `${region} 여행 가볼만한곳 관광지 평점 리뷰`,
+    `${region} 맛집 카페 평점 리뷰 추천`,
+  ];
+  const resultsByUrl = new Map();
+  for (const q of queries) {
+    try {
+      await throttle(1000, 'tavily');
+      const batch = await searchTavily(q, 6);
+      for (const r of batch) {
+        if (r.url && !resultsByUrl.has(r.url)) resultsByUrl.set(r.url, r);
+      }
+    } catch (err) {
+      logger.warn(`[factSearch] "${region}" 웹 스팟 검색 실패("${q}"): ${err.message}`);
+    }
   }
+  const results = [...resultsByUrl.values()];
   if (results.length === 0) {
     logger.warn(`[factSearch] "${region}" 웹 스팟 검색 결과 0건`);
     return null;
