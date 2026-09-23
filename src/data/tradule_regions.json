@@ -248,175 +248,294 @@
   "overseas": [
     {
       "name": "오사카",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "오이타",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "후쿠오카",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "도쿄",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "교토",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "삿포로",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "나라",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "나고야",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "요코하마",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "고베",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "오키나와",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "유후인",
-      "parent": "일본"
+      "parent": "일본",
+      "popularity": 1
     },
     {
       "name": "다낭",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "하롱",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "하노이",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "호이안",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "냐짱",
-      "parent": "베트남"
+      "parent": "베트남",
+      "aliases": [
+        "나트랑"
+      ],
+      "popularity": 2
     },
     {
       "name": "푸꾸옥",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "달랏",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "사파",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
     },
     {
       "name": "하이퐁",
-      "parent": "베트남"
+      "parent": "베트남",
+      "popularity": 2
+    },
+    {
+      "name": "호치민",
+      "parent": "베트남",
+      "aliases": [
+        "호찌민"
+      ],
+      "popularity": 2
     },
     {
       "name": "방콕",
-      "parent": "태국"
+      "parent": "태국",
+      "popularity": 3
     },
     {
       "name": "파타야",
-      "parent": "태국"
+      "parent": "태국",
+      "popularity": 3
     },
     {
       "name": "아유타야",
-      "parent": "태국"
+      "parent": "태국",
+      "popularity": 3
     },
     {
       "name": "코사무이",
-      "parent": "태국"
+      "parent": "태국",
+      "popularity": 3
     },
     {
       "name": "끄라비",
-      "parent": "태국"
+      "parent": "태국",
+      "popularity": 3
     },
     {
       "name": "후아힌",
-      "parent": "태국"
+      "parent": "태국",
+      "popularity": 3
+    },
+    {
+      "name": "치앙마이",
+      "parent": "태국",
+      "popularity": 3
     },
     {
       "name": "타이베이",
-      "parent": "대만"
+      "parent": "대만",
+      "aliases": [
+        "타이페이"
+      ],
+      "popularity": 5
     },
     {
       "name": "타이난",
-      "parent": "대만"
+      "parent": "대만",
+      "popularity": 5
     },
     {
       "name": "화롄",
-      "parent": "대만"
+      "parent": "대만",
+      "popularity": 5
     },
     {
       "name": "신베이",
-      "parent": "대만"
+      "parent": "대만",
+      "popularity": 5
     },
     {
       "name": "지룽",
-      "parent": "대만"
+      "parent": "대만",
+      "popularity": 5
     },
     {
       "name": "베이징",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "상하이",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "광저우",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "선전",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "홍콩",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "마카오",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "청두",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "충칭",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "시안",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "항저우",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
     },
     {
       "name": "칭다오",
-      "parent": "중국"
+      "parent": "중국",
+      "popularity": 4
+    },
+    {
+      "name": "세부",
+      "parent": "필리핀",
+      "popularity": 6
+    },
+    {
+      "name": "보라카이",
+      "parent": "필리핀",
+      "popularity": 6
+    },
+    {
+      "name": "마닐라",
+      "parent": "필리핀",
+      "popularity": 6
+    },
+    {
+      "name": "팔라완",
+      "parent": "필리핀",
+      "popularity": 6
+    },
+    {
+      "name": "우붓",
+      "parent": "인도네시아",
+      "popularity": 10
+    },
+    {
+      "name": "쿠타",
+      "parent": "인도네시아",
+      "popularity": 10
+    },
+    {
+      "name": "스미냑",
+      "parent": "인도네시아",
+      "popularity": 10
+    },
+    {
+      "name": "자카르타",
+      "parent": "인도네시아",
+      "popularity": 10
+    },
+    {
+      "name": "싱가포르",
+      "parent": "싱가포르",
+      "popularity": 9
+    },
+    {
+      "name": "코타키나발루",
+      "parent": "말레이시아"
+    },
+    {
+      "name": "쿠알라룸푸르",
+      "parent": "말레이시아"
+    },
+    {
+      "name": "페낭",
+      "parent": "말레이시아"
     },
     {
       "name": "런던",
@@ -600,43 +719,63 @@
     },
     {
       "name": "뉴욕",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "샌프란시스코",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "시카고",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "마이애미",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "워싱턴 D.C.",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "보스턴",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "시애틀",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "휴스턴",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "댈러스",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "호놀룰루",
-      "parent": "미국"
+      "parent": "미국",
+      "popularity": 7
+    },
+    {
+      "name": "괌",
+      "parent": "미국",
+      "popularity": 7
+    },
+    {
+      "name": "사이판",
+      "parent": "미국",
+      "popularity": 7
     },
     {
       "name": "밴쿠버",
@@ -795,6 +934,6 @@
       "parent": "뉴질랜드"
     }
   ],
-  "fetchedAt": "2026-09-22T01:22:23.037000Z",
+  "fetchedAt": "2026-09-23T00:34:38.691Z",
   "source": "https://www.tradule.co.kr/api/content/regions"
 }
