@@ -107,6 +107,21 @@ export function isOverseasRegion(region) {
   return OVERSEAS_REGIONS.includes(region) || overseasParents.includes(region);
 }
 
+// 2026-09-23(작업지시서 "코타키나발루는 이미 됩니다" §4): cli.js에만 있던
+// REGION_ALIASES가 여기(extractRegion)엔 없어서, cli.js가 "발리"를 화면에
+// "우붓"으로 보여주고 확인까지 받아놓고도 실제로 파이프라인에 넘기는 키워드
+// 원문은 "발리 5박 6일"이라 extractRegion()이 다시 매칭 실패 → course-brief에
+// region=발리로 그대로 나가 404 → 웹 검색 폴백까지 갔다가 스킵되는 사고가
+// 실측 확인됐다. cli.js와 동일한 별칭을 여기서도 적용해 키워드 매칭 단계부터
+// "우붓"으로 정규화되게 한다 — 트레쥴에 공식 aliases가 오면 그쪽으로 교체.
+const REGION_ALIASES = {
+  '나트랑':   '냐짱',
+  '타이페이': '타이베이',
+  '호치민':   '호찌민',
+  '발리':     '우붓',
+  '코타':     '코타키나발루',
+};
+
 /**
  * 키워드 앞부분에서 트레쥴 지역과 일치하는 지역명을 추출한다.
  * 자식(구체적) 지역명을 먼저 찾고, 없으면 매칭 가능한 부모(서울/부산/인천/제주)만
@@ -116,6 +131,10 @@ export function isOverseasRegion(region) {
  * 안에서는 가장 긴 이름이 우선("서울" vs "서울숲" 같은 오매칭 방지).
  */
 export function extractRegion(keyword) {
+  for (const [alias, official] of Object.entries(REGION_ALIASES)) {
+    if (keyword.includes(alias) && REGION_TREE.includes(official)) return official;
+  }
+
   const childMatch = REGION_TREE
     .filter((region) => keyword.includes(region))
     .sort((a, b) => b.length - a.length)[0];
