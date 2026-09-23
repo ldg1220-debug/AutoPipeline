@@ -378,6 +378,36 @@ export async function attachTripData(keywordData) {
         if (!isExcludedParent) {
           const webRegion = guessRegionLabel(item.keyword ?? '') || item.keyword;
           const webDays = Math.min(Math.max(extractDays(item.keyword ?? ''), 1), API_MAX_DAYS);
+
+          // 2026-09-23(작업지시서 "코타키나발루는 이미 됩니다. 스냅샷이 옛것입니다"
+          // §5): 스냅샷 대조만으로 "미지원"이라 단정하면, 스냅샷이 뒤처진 사이
+          // 트레쥴이 이미 지원을 시작한 지역(실측: 코타키나발루)까지 웹 검색으로
+          // 잘못 빠진다. 웹 검색 폴백 전에 course-brief를 직접 한 번 불러 실제로도
+          // 미지원인지 라이브로 확인한다 — 성공하면 진짜 트레쥴 데이터를 쓴다
+          // (더 정확하고, 좌표·거리·appUrl·지도까지 붙는다).
+          const liveProbe = await fetchCourseBriefWithRetry(webRegion, webDays);
+          if (liveProbe && Array.isArray(liveProbe.spots)) {
+            const liveCleanSpots = filterUnratedSpots(sanitizeSpots(liveProbe.spots));
+            if (liveCleanSpots.length >= MIN_SPOTS && !hasInterDayCityJump(liveCleanSpots)) {
+              logger.info(`[tradule_source] "${item.keyword}" → 스냅샷엔 없었지만 라이브로는 지원됨(지역: ${webRegion}) → 트레쥴 데이터로 진행`);
+              updated.push({
+                ...item,
+                trip_data: {
+                  region:          liveProbe.region ?? webRegion,
+                  days:            liveProbe.days ?? webDays,
+                  totalDistanceKm: liveProbe.totalDistanceKm ?? null,
+                  spots:           liveCleanSpots,
+                  appUrl:          liveProbe.appUrl ?? null,
+                  imageUrl:        liveProbe.imageUrl ?? null,
+                  ratingSource:    liveProbe.ratingSource ?? null,
+                  distanceSource:  liveProbe.distanceSource ?? null,
+                  dayTotals:       liveProbe.dayTotals ?? null,
+                },
+              });
+              continue;
+            }
+          }
+
           const webBrief = await searchRegionSpots(webRegion, webDays);
           if (webBrief) {
             rawResponses[item.keyword] = webBrief;

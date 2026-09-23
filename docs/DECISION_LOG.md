@@ -872,3 +872,36 @@
   "지어내지 않는다"는 원칙이 정직하게 작동한 결과다.
 - **관련 파일**: `src/utils/factSearch.js`(searchTavily에 maxResults 파라미터
   추가, searchRegionSpots가 2개 검색어로 병합 검색)
+
+### D-051: 지역 스냅샷 CDN 캐시 + 스냅샷 대조만으로 "미지원" 단정한 문제
+- **결정**: "코타키나발루"가 실제로는 트레쥴이 지원하는데(#267 배포, 9/23
+  00:14 UTC) AutoPipeline이 계속 "미지원"이라 판정한 원인 두 가지를 확인:
+  (1) `/api/content/regions`를 쿼리 없이 부르면 트레쥴 CDN이 최대 24시간
+  옛 응답을 캐시로 줄 수 있음(실측: 같은 시각 무쿼리=137곳, 캐시버스터=153곳)
+  — `npm run regions:refresh`를 돌려도 이 캐시 때문에 옛 데이터를 다시 받을
+  위험이 있었다. (2) D-050의 웹 검색 폴백이 "로컬 스냅샷에 없음"만으로
+  "미지원"을 단정하고 있어서, 스냅샷이 뒤처진 동안은 실제로 지원되는 지역도
+  웹 검색(부정확)으로 잘못 빠질 뻔했다.
+  `scripts/refresh-tradule-regions.js`·`cli.js`의 `fetchRegions()` 둘 다
+  캐시 버스터(`v=Date.now()`) + `Cache-Control: no-cache`로 CDN을 우회하도록
+  정정. `attachTripData()`는 웹 검색 폴백 전에 `fetchCourseBriefWithRetry()`로
+  실제 course-brief를 라이브로 한 번 확인해, 성공하면(스냅샷 상태와 무관하게)
+  진짜 트레쥴 데이터를 쓰도록 정정 — "스냅샷 대조"가 아니라 "라이브 API가
+  실제로 거부하는지"가 미지원 판정의 최종 근거가 되게 했다.
+- **버린 대안**: 파이프라인 시작 시 매번 `/api/content/regions`를 라이브로
+  불러 `REGION_TREE` 등 모듈 전역 상태를 통째로 재구성하는 전체 리팩터링 —
+  이번엔 채택 안 함. `tradule_source.js`가 지금 모듈 로드 시점에 동기적으로
+  파일을 읽어 여러 export(`DOMESTIC_REGIONS`, `MATCHABLE_PARENT_REGIONS` 등)를
+  구성하는 구조라, 이걸 비동기 재구성 가능하게 바꾸려면 이 모듈을 쓰는 다른
+  코드(cli.js 등)까지 함께 손대야 하는 더 큰 리팩터링이 필요했다. 대신 (a)
+  cli.js가 이미 매번 라이브 조회하던 걸 스냅샷 파일에도 덮어쓰게 해서 cli.js를
+  거치는 실행은 다음 프로세스가 최신 스냅샷을 읽게 하고, (b) 웹 검색 폴백
+  직전에 라이브 course-brief로 최종 확인하는 안전망을 둬서, "스냅샷이 뒤처져
+  있어도 실제로 지원되는 지역이 웹 검색으로 새는" 핵심 증상은 스냅샷 리팩터링
+  없이도 막았다. cli.js를 거치지 않는 자동화 실행(cron 등)의 스냅샷 최신성은
+  여전히 수동 `npm run regions:refresh`에 의존한다 — 필요하면 후속 작업으로.
+- **관련 파일**: `scripts/refresh-tradule-regions.js`(CDN 우회),
+  `cli.js`(fetchRegions CDN 우회 + 스냅샷 덮어쓰기, REGION_ALIASES에
+  발리→우붓·코타→코타키나발루 추가), `src/agents/tradule_source.js`
+  (웹 검색 폴백 전 라이브 course-brief 확인),
+  `docs/work-orders/2026-09-23_region-snapshot-refresh.md`

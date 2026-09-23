@@ -21,7 +21,15 @@ async function main() {
   const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
   console.log(`조회 중: ${apiBase}/api/content/regions`);
 
-  const res = await axios.get(`${apiBase}/api/content/regions`, { timeout: 15000 });
+  // 2026-09-23(작업지시서 "코타키나발루는 이미 됩니다. 스냅샷이 옛것입니다" §2):
+  // 쿼리 없이 부르면 트레쥴 CDN이 최대 24시간 옛 응답을 캐시로 줄 수 있음이 실측
+  // 확인됨(같은 시각 무쿼리=137곳, ?v=캐시버스터=153곳). 캐시 버스터 파라미터와
+  // no-cache 헤더로 우회한다.
+  const res = await axios.get(`${apiBase}/api/content/regions`, {
+    params: { v: Date.now() },
+    headers: { 'Cache-Control': 'no-cache' },
+    timeout: 15000,
+  });
   const data = res.data ?? {};
   // 2026-09-22 정정: name만 뽑아 평탄화하면 parent(서울/부산/제주/인천 같은 광역
   // 지역)가 사라진다 — course-brief가 실제로 parent도 받는 것을 실측 확인했으므로

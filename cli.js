@@ -135,9 +135,14 @@ async function askChoiceHelp(rl, question, validator, errorHint, expandedHelp) {
 // 사람들이 실제로 검색·입력하는 표기가 다른 경우 — 트레쥴에 aliases 필드를
 // 요청해뒀고(짝 지시서), 들어오기 전까지는 로컬 테이블로 보완한다.
 const REGION_ALIASES = {
-  '나트랑':   '냐짱',
-  '타이페이': '타이베이',
-  '호치민':   '호찌민',
+  '나트랑':     '냐짱',
+  '타이페이':   '타이베이',
+  '호치민':     '호찌민',
+  // 2026-09-23(작업지시서 "코타키나발루는 이미 됩니다" §4): 트레쥴 목록엔 "발리"라는
+  // 광역 이름이 없고 우붓·쿠타·스미냑 같은 개별 지역만 있음(region=발리 → 404 실측).
+  // 별칭 요청은 트레쥴에 넣어뒀고, 들어오기 전까지는 가장 널리 알려진 지역으로 연결.
+  '발리':       '우붓',
+  '코타':       '코타키나발루',
 };
 
 /**
@@ -201,22 +206,43 @@ function parseDayFromText(text) {
 }
 
 // ── 지역 목록 (§3: 하드코딩 대신 트레쥴 /api/content/regions 실시간 조회) ───────
+const REGIONS_SNAPSHOT_PATH = path.resolve(__dirname, 'src/data/tradule_regions.json');
+
 async function fetchRegions(config, fallbackDomestic, fallbackOverseas) {
   try {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
-    const res = await axios.get(`${apiBase}/api/content/regions`, { timeout: 8000 });
+    // 2026-09-23(작업지시서 "코타키나발루는 이미 됩니다. 스냅샷이 옛것입니다" §2):
+    // 쿼리 없이 부르면 트레쥴 CDN이 최대 24시간 옛 응답을 줄 수 있음이 실측 확인됨
+    // (같은 시각 무쿼리=137곳, 캐시버스터=153곳). 캐시 버스터로 우회한다.
+    const res = await axios.get(`${apiBase}/api/content/regions`, {
+      params: { v: Date.now() },
+      headers: { 'Cache-Control': 'no-cache' },
+      timeout: 8000,
+    });
     const data = res.data ?? {};
     // 응답 형태를 확정적으로 검증한 적이 없어(2026-09-16 지시서 기준 신규 엔드포인트)
     // 여러 있을 법한 모양을 방어적으로 처리한다.
-    let domestic = data.domestic ?? data.국내 ?? [];
-    let overseas = data.overseas ?? data.해외 ?? [];
-    if (!domestic.length && !overseas.length && Array.isArray(data)) {
-      domestic = data.filter((r) => (r.category ?? r.type) === 'domestic').map((r) => r.name ?? r);
-      overseas = data.filter((r) => (r.category ?? r.type) === 'overseas').map((r) => r.name ?? r);
+    let domesticRaw = data.domestic ?? data.국내 ?? [];
+    let overseasRaw = data.overseas ?? data.해외 ?? [];
+    if (!domesticRaw.length && !overseasRaw.length && Array.isArray(data)) {
+      domesticRaw = data.filter((r) => (r.category ?? r.type) === 'domestic');
+      overseasRaw = data.filter((r) => (r.category ?? r.type) === 'overseas');
     }
-    domestic = domestic.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
-    overseas = overseas.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+    const domestic = domesticRaw.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+    const overseas = overseasRaw.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
     if (domestic.length || overseas.length) {
+      // §3: cli.js가 이미 매 실행마다 라이브로 조회하고 있으니, 성공하면 그 결과를
+      // 스냅샷에도 덮어써서 tradule_source.js(파이프라인 쪽, 별도 프로세스)가 다음에
+      // 읽을 때도 최신 상태이게 한다 — "스냅샷은 오프라인일 때 쓰는 백업"이라는 원칙.
+      try {
+        await fs.writeFile(
+          REGIONS_SNAPSHOT_PATH,
+          JSON.stringify({ domestic: domesticRaw, overseas: overseasRaw, fetchedAt: new Date().toISOString(), source: `${apiBase}/api/content/regions` }, null, 2) + '\n',
+          'utf8'
+        );
+      } catch (writeErr) {
+        console.log(`  ⚠ 지역 스냅샷 갱신 실패(계속 진행): ${writeErr.message}`);
+      }
       return { domestic, overseas, live: true };
     }
     throw new Error('응답에서 지역 목록을 찾지 못함 (스키마 불일치)');
