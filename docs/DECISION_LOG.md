@@ -926,3 +926,27 @@
   알아채기 어렵다.
 - **관련 파일**: `src/agents/tradule_source.js`(extractRegion에
   REGION_ALIASES 추가)
+
+### D-052: 제목 금지어("완벽" 등) 프롬프트 지시가 실측에서 또 뚫림
+- **결정**: 발행된 글(`maeilg.com/267`) 제목이 "발리 5박 6일, 대중교통과
+  도보로 즐기는 완벽 코스"였는데, `blog_pass2_outline.md`에 "'완벽'이라는
+  단어 자체 금지"가 명시돼 있는데도 그대로 나갔다. 사용자 요청("다음부턴
+  안그러도록 방지")에 따라, 이 세션에서 반복해서 써온 패턴
+  (`sanitizeTitleForTransport`, `sanitizeOutlineForNoTripData` 등 — 프롬프트
+  지시만으로는 LLM이 반복해서 어기므로 코드로 한 번 더 강제)을 제목 금지어에도
+  적용했다. `sanitizeTitleForBannedWords()`를 신규 추가해 outline 생성 직후
+  `sanitizeTitleForTransport()`와 같은 자리에서 적용 — 채널 가이드라인
+  `avoid` 목록·프롬프트의 금지 목록과 맞춰 `['완벽','꿀팁','성지','역대급',
+  '총정리']`를 걸렀다.
+- **부수 발견**: 최후 폴백 제목(`${keyword} 완벽 정리`, `blog_draft`가
+  아예 비었을 때 쓰는 기본값)도 금지어 자체를 담고 있었다 — 방금 만든
+  필터로 방지하려던 바로 그 단어를 fallback이 스스로 어기고 있었던 것.
+  `${keyword} 정리`로 교체(`총정리`도 금지어라 단독 "정리"만 사용).
+- **한계**: 이 필터는 프롬프트가 먼저 걸러야 할 걸 코드가 한 번 더 잡는
+  안전망일 뿐 — 이 프로젝트의 다른 "지어내지 말 것"류 규칙들처럼, 프롬프트가
+  아예 못 만들게 막는 게 아니라 생성된 결과를 사후에 정정하는 방식이다.
+  금지어 목록에 없는 새로운 과장 표현이 나오면 또 못 잡는다 — 재발하면
+  BANNED_TITLE_WORDS에 추가.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
+  (sanitizeTitleForBannedWords 신규, pass2Outline에서 호출, 최후 폴백 제목
+  수정)

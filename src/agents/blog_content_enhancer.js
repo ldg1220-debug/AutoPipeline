@@ -318,6 +318,30 @@ function sanitizeTitleForTransport(title, tripData) {
   return sanitized || title; // 과도하게 지워져 빈 문자열이 되면 원본 유지 (안전장치)
 }
 
+// 2026-09-23(사용자 요청 "다음부턴 안그러도록 방지"): 프롬프트가 이미
+// "'완벽'이라는 단어 자체 금지"라고 명시했는데도(blog_pass2_outline.md) 실측
+// 발행(maeilg.com/267 "발리 5박 6일, 대중교통과 도보로 즐기는 완벽 코스")에서
+// 재발함 — sanitizeTitleForTransport와 같은 패턴으로 코드에서 한 번 더 막는다.
+const BANNED_TITLE_WORDS = ['완벽', '꿀팁', '성지', '역대급', '총정리'];
+
+function sanitizeTitleForBannedWords(title) {
+  if (!title) return title;
+  let sanitized = title;
+  for (const word of BANNED_TITLE_WORDS) {
+    if (!sanitized.includes(word)) continue;
+    sanitized = sanitized
+      // "완벽 코스", "완벽한 가이드"처럼 뒤에 붙는 조사·수식을 함께 지운다
+      .replace(new RegExp(`${word}(한|적인)?\\s*`, 'g'), '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^[,:\s]+|[,:\s]+$/g, '')
+      .trim();
+  }
+  if (sanitized !== title) {
+    logger.warn(`[blog_content_enhancer] 제목 금지어 감지 → 보정: "${title}" → "${sanitized}"`);
+  }
+  return sanitized || title; // 과도하게 지워져 빈 문자열이 되면 원본 유지 (안전장치)
+}
+
 /**
  * trip_data가 없는(종합형) 글에서 "이동 방법"·"교통편"·"동선"·"코스 안내" 류 섹션을
  * 프롬프트 지시만으로 막았더니 실측(2026-09-18, "가을 드라이브 코스")에서 재발했다 —
@@ -370,6 +394,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
   const outline = await callGPT4oMini(prompt);
   if (outline?.title) {
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
+    outline.title = sanitizeTitleForBannedWords(outline.title);
   }
   return outline;
 }
@@ -783,7 +808,9 @@ async function enhanceBlogDraft(content) {
     ...(factCheck ? { fact_check: factCheck } : {}),
     blog_draft: {
       ...blog_draft,
-      title:            outline.title || blog_draft?.title || `${keyword} 완벽 정리`,
+      // "완벽"·"총정리"는 제목 금지어(blog_pass2_outline.md, BANNED_TITLE_WORDS) —
+      // 최후 폴백 값 자체가 그 규칙을 어기면 안 되므로 여기도 맞춘다.
+      title:            outline.title || blog_draft?.title || `${keyword} 정리`,
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
       seo_keywords:     blog_draft?.seo_keywords ?? splitKeywordPhrases(keyword),
