@@ -157,6 +157,39 @@ function matchRegionFromText(text, regions, extractRegion) {
   return extractRegion(text);
 }
 
+/** 두 문자열 간 편집 거리(Levenshtein) — 오타·표기 차이로 지원 지역을 못 찾은 경우 후보 추천용. */
+function levenshtein(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/**
+ * 2026-09-23(실측 피드백 "없는 지역명 알아서 처리하게 좀 해"): 지역명이 목록에
+ * 없을 때 22페이지짜리 전체 목록을 그대로 던지는 대신, 편집 거리가 가까운 후보를
+ * 몇 개 추려 바로 고를 수 있게 한다. 오타·비슷한 표기("모리셔스"→없음처럼 진짜
+ * 미지원 지역이면 후보가 비어 목록으로 자연스럽게 폴백한다)를 잡아낸다.
+ */
+function suggestSimilarRegions(text, allRegions, maxCandidates = 3) {
+  const clean = text.replace(/\s+/g, '').replace(/\d+박\d*일?|\d+일|당일치기|여행|코스|투어/g, '');
+  if (!clean) return [];
+  const scored = allRegions
+    .map((r) => ({ r, dist: levenshtein(clean, r) }))
+    // 이름 길이 대비 편집 거리 허용치를 빡빡하게 잡는다 — 느슨하면(예: 절반) 4글자
+    // 안팎의 짧은 지역명끼리 실측상 서로 무관한데도 후보로 잘못 걸린다(실측:
+    // "모리셔스"↔"핼리팩스"가 편집거리 2로 걸림). floor(길이/4), 최소 1로 좁힌다.
+    .filter(({ r, dist }) => dist >= 1 && dist <= Math.max(1, Math.floor(r.length / 4)))
+    .sort((a, b) => a.dist - b.dist);
+  return [...new Set(scored.map((s) => s.r))].slice(0, maxCandidates);
+}
+
 function parseDayFromText(text) {
   if (/당일|하루/.test(text)) return DAY_OPTIONS[0];
   const m = text.match(/(\d+)\s*박\s*(\d+)?\s*일/);
@@ -322,7 +355,36 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
         // 바뀌어서 — 이 "종합형" 경로는 발행 옵션·최종 확인까지 다 거치고도 결국
         // Part 1.7에서 스킵되는, 사실상 죽은 경로였다. 질문 자체를 없애고 여기서
         // 바로 중단한다 — 목록 탐색(구조화 선택)으로 바로 보낸다.
+        // 2026-09-23 추가 정정(실측 피드백 "없는 지역명 알아서 처리하게 좀 해"):
+        // 22페이지짜리 전체 목록을 그냥 던지면 사용자가 직접 뒤져야 한다 — 라이브
+        // 목록에서 문자열 유사도가 비슷한 후보를 몇 개 추려 바로 고를 수 있게 한다.
+        // 추린 게 없으면(진짜 생소한 지역이면) 그때만 구조화 목록으로 보낸다.
         console.log(`  ⚠ "${raw}"는 트레쥴이 지원하지 않는 지역입니다.`);
+        const all = [...regions.domestic, ...regions.overseas];
+        const candidates = suggestSimilarRegions(raw, all);
+        if (candidates.length > 0) {
+          console.log('  혹시 이 중 하나였나요?');
+          candidates.forEach((c, i) => console.log(`    ${i + 1}  ${c}`));
+          console.log(`    0  아니오 — 목록에서 직접 고르기`);
+          const pick = await ask(rl, `선택 (b=뒤로, 0=목록) > `);
+          const nav = interpretNav(pick);
+          if (nav === HOME) return rl;
+          const idx = Number(pick);
+          if (Number.isInteger(idx) && idx >= 1 && idx <= candidates.length) {
+            region = candidates[idx - 1];
+            console.log(`\n  지역: ${region}    일수: ${dayGuess.label}`);
+            const confirmed2 = await askYesNoNav(rl, '맞습니까?', true);
+            if (confirmed2 === HOME) return rl;
+            if (confirmed2 === true) {
+              state.mode = 'direct';
+              state.region = region;
+              state.days = dayGuess;
+              state.rawText = raw;
+              step = 3;
+              continue;
+            }
+          }
+        }
         console.log('  목록에서 지원 지역을 직접 골라주세요.');
         state.mode = 'structured';
         step = 1;
