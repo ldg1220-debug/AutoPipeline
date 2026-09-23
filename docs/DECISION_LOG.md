@@ -748,3 +748,24 @@
   갱신)는 별도 작업지시서가 오면 진행.
 - **관련 파일**: `src/data/tradule_regions.json`(재조회로 갱신,
   해외 137→153곳)
+
+### D-048: "코타키나발루" 정상 발행 확인 + project_manager 상시 오탐 발견
+- **결정**: D-047(스냅샷 갱신) 후 "코타키나발루 5박 7일"이 스팟 13개 확보 →
+  QA APPROVED → 발행(`maeilg.com/265`)까지 정상 완주함을 실측으로 확인 —
+  이번 대화에서 다룬 지역 매칭/일수/노이즈 필터/SEO 키워드/UX 체인 전체가
+  실제로 맞물려 작동함이 처음으로 end-to-end 검증됨. 다만 일일 리포트가
+  전체 상태를 "❌ ERROR"로 띄웠는데, 실제 원인은 `project_manager.js`의
+  `PIPELINE_STAGES` 검수가 `output/keywords/keywords_{date}.json` 존재를
+  무조건 요구하는데, `--single` 모드(자동 채굴 건너뜀)는 이 파일을 아예 안
+  써서 생긴 오탐이었다. D-046에서 cli.js의 모든 `--force-keyword` 호출이
+  `--single`을 내포하도록 바꿔뒀으므로, 이 오탐은 이제 cli.js를 통한 거의
+  모든 실행에서 상시로 뜨게 된 상태였다 — 방치하면 "매번 ERROR가 뜨니 무시해도
+  됨"이라는 알람 피로로 진짜 문제를 가릴 위험이 있었다. `--single` 경로에서도
+  처리한 키워드 1개를 최소한으로 `keywords_{date}.json`에 기록하도록 정정해
+  검수 파일이 실제 상황을 반영하게 했다.
+- **버린 대안**: `project_manager.js`의 `PIPELINE_STAGES`에서 `--single` 모드일
+  때 '키워드' 단계를 검수 대상에서 아예 빼는 방안 — 채택 안 함. 파일을 실제로
+  써서 상황을 기록하는 쪽이 "이 실행에서 정확히 어떤 키워드가 처리됐는지"를
+  다른 리포트 도구들도 그대로 참조할 수 있어 더 일반적이다.
+- **관련 파일**: `scripts/run-blog-pipeline.js`(singleMode 분기에서
+  keywords_{date}.json 기록 추가)

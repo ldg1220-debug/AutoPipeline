@@ -610,6 +610,15 @@ async function main() {
 
   if (singleMode) {
     logger.info('[blog:pipeline] --single: 자동 시드 채굴 건너뜀 (--force-keyword만 처리)');
+    // 2026-09-23 실측: --single이 채굴을 건너뛰니 output/keywords/keywords_{date}.json이
+    // 아예 안 생겨서, project_manager.js의 파이프라인 단계 검수가 "단계 출력 파일 없음:
+    // 키워드"를 ERROR로 띄웠다(--force-keyword는 cli.js를 거치면 항상 --single을 내포하므로
+    // 이제 거의 모든 실행에서 뜨는 상시 오탐이 됨). --single로 처리한 키워드를 그대로
+    // 최소 기록해 검수 파일이 실제 상황을 반영하게 한다.
+    await writeJSON(`${outDir}/keywords/keywords_${date}.json`, {
+      contents: forceKeyword ? [{ keyword: forceKeyword, category: forceCategory, score: 100, forced: true }] : [],
+      mode: 'single',
+    });
   } else {
     // KEYWORD_SEEDS 오버라이드가 없으면 여행 지역×코스 패턴 시드를 생성한다 (여행 채널 전환).
     const seeds = process.env.KEYWORD_SEEDS
