@@ -295,13 +295,26 @@ const TRANSPORT_MODE_WORDS = {
   car:     ['차량', '차로', '드라이브', '렌터카'],
 };
 
-function sanitizeTitleForTransport(title, tripData) {
-  if (!title || !tripData?.spots?.length) return title;
-  const actualModes = new Set(tripData.spots.map((s) => s.toNextMode).filter(Boolean));
+/**
+ * 2026-09-23 정정(작업지시서 "본문은 좋아졌습니다. 제목이 사실과 다릅니다" §3):
+ * 기존 로직은 "그 이동수단이 데이터에 한 번이라도 있으면 통과"였다 — 발리(우붓)
+ * 실측: walk 4 · car 6 · transit 1(11구간 중 1개뿐, 과반 아님)인데도 transit이
+ * "있긴 있어서" 제목의 "대중교통과 도보로 즐기는"이 그대로 통과했다. 과반
+ * 기준으로 바꾼다: 과반 모드만 허용, 과반이 없으면 이동수단 단어 자체를 전부 뺀다.
+ */
+function computeMajorityTransportMode(tripData) {
+  const modes = (tripData?.spots ?? []).map((s) => s.toNextMode).filter(Boolean);
+  if (modes.length === 0) return null;
+  const counts = {};
+  for (const m of modes) counts[m] = (counts[m] ?? 0) + 1;
+  const [topMode, topCount] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return topCount > modes.length / 2 ? topMode : null;
+}
 
-  let sanitized = title;
+function stripTransportWords(text, allowedMode) {
+  let sanitized = text;
   for (const [mode, words] of Object.entries(TRANSPORT_MODE_WORDS)) {
-    if (actualModes.has(mode)) continue; // 실제 데이터에 있는 이동수단이면 그대로 둠
+    if (mode === allowedMode) continue; // 과반 모드는 그대로 둠
     for (const word of words) {
       if (!sanitized.includes(word)) continue;
       // "대중교통으로 즐기는 1박2일 일정" 처럼 흔한 패턴을 통째로 걷어내고, 남는 조사·공백을 정리
@@ -312,10 +325,75 @@ function sanitizeTitleForTransport(title, tripData) {
         .trim();
     }
   }
+  return sanitized;
+}
+
+function sanitizeTitleForTransport(title, tripData) {
+  if (!title || !tripData?.spots?.length) return title;
+  const majorityMode = computeMajorityTransportMode(tripData);
+  const sanitized = stripTransportWords(title, majorityMode);
   if (sanitized !== title) {
-    logger.warn(`[blog_content_enhancer] 제목 이동수단 모순 감지 → 보정: "${title}" → "${sanitized}"`);
+    logger.warn(`[blog_content_enhancer] 제목 이동수단 모순 감지(과반: ${majorityMode ?? '없음'}) → 보정: "${title}" → "${sanitized}"`);
   }
   return sanitized || title; // 과도하게 지워져 빈 문자열이 되면 원본 유지 (안전장치)
+}
+
+/**
+ * 섹션 제목에도 같은 과반 기준을 적용한다 — 코타키나발루(transit 0/14, 과반 없음)
+ * 실측에서 "대중교통 이용 팁 및 효율적인 노선" 섹션이 통째로 생성된 걸 막는다.
+ * sanitizeOutlineForNoTripData와 같은 방식(안전한 헤딩으로 교체)을 쓰되, 과반
+ * 모드가 있으면 그 모드 단어는 헤딩에 남겨둔다.
+ */
+function headingHasWrongTransportWord(heading, majorityMode) {
+  for (const [mode, words] of Object.entries(TRANSPORT_MODE_WORDS)) {
+    if (mode === majorityMode) continue;
+    if (words.some((w) => heading.includes(w))) return true;
+  }
+  return false;
+}
+
+function sanitizeOutlineTransport(outline, tripData) {
+  if (!tripData?.spots?.length) return outline;
+  const majorityMode = computeMajorityTransportMode(tripData);
+  const sections = outline.sections ?? [];
+  let fallbackIdx = 0;
+  const sanitizedSections = sections.map((s) => {
+    const heading = s.heading ?? '';
+    if (!headingHasWrongTransportWord(heading, majorityMode)) return s;
+    const newHeading = SAFE_HEADING_FALLBACKS[fallbackIdx % SAFE_HEADING_FALLBACKS.length];
+    fallbackIdx += 1;
+    logger.warn(`[blog_content_enhancer] 이동수단 과반(${majorityMode ?? '없음'})과 다른 섹션 감지 → 대체: "${heading}" → "${newHeading}"`);
+    return { ...s, heading: newHeading };
+  });
+  return { ...outline, sections: sanitizedSections };
+}
+
+/**
+ * 2026-09-23(작업지시서 "본문은 좋아졌습니다. 제목이 사실과 다릅니다" §2): 키워드에
+ * "5박 7일"처럼 적혀 있어도 course-brief는 API 상한(3일, D-042)까지만 받아온다.
+ * 그런데 제목·본문 텍스트는 원본 키워드의 "5박 7일"을 그대로 베껴 써서, 코스는
+ * 3일치인데 제목·본문은 "5박 7일"이라고 우기는 글이 실측 확인됨(코타키나발루/265,
+ * 발리/267). trip_data.days로부터 실제 일수 문구를 계산해 키워드에 적힌(더 큰)
+ * 일수 문구를 텍스트에서 교체한다.
+ */
+function sanitizeDaysAgainstTripData(text, tripData, keyword) {
+  if (!text || !tripData?.days) return text;
+  const match = (keyword ?? '').match(/(\d+)\s*박\s*(\d+)\s*일/);
+  if (!match) return text;
+  const statedDays = Number(match[2]);
+  if (statedDays <= tripData.days) return text; // 키워드 일수가 이미 코스 일수 이하면 문제 없음
+
+  const correctPhrase = `${tripData.days - 1}박${tripData.days}일`;
+  const statedVariants = [
+    `${match[1]}박${match[2]}일`,
+    `${match[1]}박 ${match[2]}일`,
+    `${match[1]}박 ${match[2]} 일`,
+  ];
+  let sanitized = text;
+  for (const variant of statedVariants) {
+    sanitized = sanitized.split(variant).join(correctPhrase);
+  }
+  return sanitized;
 }
 
 // 2026-09-23(사용자 요청 "다음부턴 안그러도록 방지"): 프롬프트가 이미
@@ -391,11 +469,13 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     transport_summary:    summarizeTransportModes(tripData),
   }) + benchmarkCtx;
   await throttle(2000);
-  const outline = await callGPT4oMini(prompt);
+  let outline = await callGPT4oMini(prompt);
   if (outline?.title) {
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
     outline.title = sanitizeTitleForBannedWords(outline.title);
+    outline.title = sanitizeDaysAgainstTripData(outline.title, tripData, keyword);
   }
+  outline = sanitizeOutlineTransport(outline, tripData);
   return outline;
 }
 
@@ -796,7 +876,18 @@ async function enhanceBlogDraft(content) {
   const today5 = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   logger.info(`[blog_content_enhancer] Pass 5 (Claude review): ${keyword}`);
   const reviewResult = await pass5GeminiReview(keyword, checkedSections, today5);
-  const finalSections = reviewResult.sections;
+  // §2: 제목만 고치고 본문(각 섹션 body·FAQ 답변)에 남은 "5박 7일" 같은 틀린 일수
+  // 문구는 그대로 두면 "제목은 맞는데 본문은 여전히 틀림"이 되므로 본문·FAQ에도
+  // 동일하게 적용한다. 이동수단은 섹션 헤딩(sanitizeOutlineTransport)에서만
+  // 걸러도 충분 — 본문 문장 하나하나까지 치환하면 문맥이 깨질 위험이 더 크다.
+  const finalSections = reviewResult.sections.map((s) => ({
+    ...s,
+    body: sanitizeDaysAgainstTripData(s.body, tripData, keyword),
+  }));
+  const finalFaqSections = faqSections.map((f) => ({
+    ...f,
+    a: sanitizeDaysAgainstTripData(f.a, tripData, keyword),
+  }));
 
   const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);
@@ -817,7 +908,7 @@ async function enhanceBlogDraft(content) {
       sections:         finalSections,
       review_verdict:   reviewResult.verdict,
       review_issues:    reviewResult.issues,
-      faq:              faqSections,
+      faq:              finalFaqSections,
       affiliate_hooks:  buildAffiliateHooks(completedSections, intent.affiliate_category),
       json_ld:          buildJsonLd(outline.title || keyword, keyword, outline.slug || ''),
       youtube_embed:    '{{YOUTUBE_EMBED}}',  // auto_publisher가 영상 업로드 후 교체

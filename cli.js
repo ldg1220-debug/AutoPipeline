@@ -361,6 +361,23 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       let regionGuessReason = '';
       const dayGuess = parseDayFromText(raw) ?? DAY_OPTIONS[1];
 
+      // 2026-09-23(작업지시서 "본문은 좋아졌습니다. 제목이 사실과 다릅니다" §2):
+      // "5박 7일"을 입력해도 course-brief는 최대 3일까지만 받는다(API_MAX_DAYS,
+      // tradule_source.js) — dayGuess.label은 이미 클램프된 값("3박4일")을 보여주지만
+      // raw 텍스트 자체("5박 7일")는 안 바뀌어서 그대로 --force-keyword로 나가 제목·
+      // 본문에 "5박 7일"이 남는 사고가 실측 확인됐다(코타키나발루/265, 발리/267).
+      // 여기서 미리 경고하고, 진행하면 키워드 텍스트 자체를 클램프된 일수로 고친다.
+      let keywordText = raw;
+      const statedDayMatch = raw.match(/(\d+)\s*박\s*(\d+)\s*일/);
+      if (statedDayMatch && Number(statedDayMatch[2]) > dayGuess.apiDays) {
+        console.log(`  ⚠ "${statedDayMatch[0]}"은 트레쥴 코스가 최대 3일까지만 있습니다.`);
+        const proceedShorter = await askYesNoNav(rl, `${dayGuess.label} 코스로 진행할까요? (아니오 = 취소)`, true);
+        if (proceedShorter === HOME) return rl;
+        if (proceedShorter !== true) { console.log('  취소했습니다.'); return rl; }
+        keywordText = raw.replace(statedDayMatch[0], dayGuess.label);
+        console.log(`  → "${keywordText}"로 진행합니다.`);
+      }
+
       // 2026-09-18: 문자 그대로 지역명이 없어도("규슈") 검색 API로 실제 도시를
       // 추정해본다 — Tavily 키가 없으면 resolveRegionByTheme가 그냥 null을 반환하고
       // 기존처럼 목록 선택으로 폴백한다.
@@ -405,7 +422,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
               state.mode = 'direct';
               state.region = region;
               state.days = dayGuess;
-              state.rawText = raw;
+              state.rawText = keywordText;
               step = 3;
               continue;
             }
@@ -425,7 +442,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
           state.mode = 'direct';
           state.region = null;
           state.days = dayGuess;
-          state.rawText = raw;
+          state.rawText = keywordText;
           step = 3;
           continue;
         }
@@ -450,7 +467,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       // 키워드 감지(isClaimKeyword)가 작동할 기회조차 없었다. 원문을 그대로 키워드로
       // 쓴다 — extractDays()/resolveDays()가 어차피 임의 텍스트에서 일정을 파싱하므로
       // 정형 패턴으로 다시 쓸 필요가 없다.
-      state.rawText = raw;
+      state.rawText = keywordText;
       step = 3;
       continue;
     }

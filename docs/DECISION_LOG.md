@@ -950,3 +950,33 @@
 - **관련 파일**: `src/agents/blog_content_enhancer.js`
   (sanitizeTitleForBannedWords 신규, pass2Outline에서 호출, 최후 폴백 제목
   수정)
+
+### D-053: 제목의 일수·이동수단이 실제 trip_data와 대조 없이 그대로 나감
+- **결정**: 실측(`maeilg.com` /264~267) — 발행된 4편 전부 제목에 사실과
+  다른 요소가 하나 이상 있었다. (1) "5박 7일"을 입력하면 D-042가
+  course-brief를 3일치로 클램프해 실제 코스는 1~3일차뿐인데, 제목·본문의
+  "5박 7일" 텍스트는 원본 키워드 그대로 남아 있었다 — 코스는 3일인데
+  제목·본문은 5박7일이라고 우기는 글이 됨. (2) 기존
+  `sanitizeTitleForTransport()`가 "그 이동수단이 데이터에 한 번이라도
+  있으면 통과"라는 기준이었는데, 발리 실측(walk4·car6·transit1, 11구간 중
+  transit 1개뿐)에서 "대중교통과 도보로 즐기는"이 그대로 통과했다 — 과반이
+  아니어도 "있기만 하면" 통과였던 게 원인.
+  `sanitizeDaysAgainstTripData()`(제목+본문+FAQ 전부에 적용)와 과반 기준으로
+  재작성한 `sanitizeTitleForTransport()`/신규 `sanitizeOutlineTransport()`
+  (섹션 헤딩용)를 추가. `cli.js`에도 입력 직후 일수 경고를 추가해, 애초에
+  API 상한을 넘는 일수 텍스트가 키워드에 실리지 않도록 막았다 — 원본 텍스트
+  자체를 클램프된 표현으로 고쳐서 제목·본문·DB 저장 전부가 처음부터
+  일관되게 한다(사후 치환은 그 위의 2차 안전망).
+- **버린 대안**: 없음 — 둘 다 "프롬프트 지시 + 코드 2차 강제" 패턴을 그대로
+  적용한 단순 정정. 이 세션에서 반복된 패턴(sanitizeTitleForTransport,
+  sanitizeOutlineForNoTripData, sanitizeTitleForBannedWords)의 연장.
+- **교훈**: "본문 품질이 좋아졌다"와 "제목·주장이 사실과 일치한다"는 서로
+  다른 검증이다 — 본문에 실제 수치가 많이 들어간다고 제목까지 저절로
+  맞춰지지 않는다. 발행 전에 제목을 trip_data와 대조하는 단계가 따로
+  있어야 한다는 걸 이번 실측으로 확인했다.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
+  (sanitizeDaysAgainstTripData/computeMajorityTransportMode/
+  sanitizeOutlineTransport 신규, sanitizeTitleForTransport 과반 기준으로
+  재작성, pass2Outline·finalSections·FAQ에 배선), `cli.js`(입력 직후 일수
+  경고 + 키워드 텍스트 클램프), `docs/work-orders/2026-09-23_title-facts-
+  enforcement.md`
