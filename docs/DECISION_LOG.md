@@ -793,3 +793,46 @@
   (지금 로직을 버리는 게 아니라 상위 폴백으로 유지 가능).
 - **관련 파일**: `cli.js`(levenshtein/suggestSimilarRegions 신규, 지역 실패
   분기에 후보 제시 UI 추가)
+
+### D-050: 트레쥴 미지원 지역은 웹 검색으로 스팟 데이터 대체 (사용자 요청)
+- **결정**: "트레쥴에 없으면 없는대로 트레쥴에서 갖고있는 api 이용해서 하거나,
+  인터넷 이용하면안돼?" — D-041/D-046에서 굳힌 "trip_data 없으면 스킵" 원칙을
+  다시 열어달라는 요청. 방향을 확인(AskUserQuestion)한 결과 "스팟별 평점·
+  리뷰수까지 웹검색으로 채움(트레쥴 API 수준 정확도는 포기하되 출처 표기)"을
+  선택. `src/utils/factSearch.js`에 `searchRegionSpots(region, days)` 신규 —
+  Tavily로 "{지역} 가볼만한곳 맛집 평점 리뷰 추천" 검색 후, LLM이 스니펫에
+  **실제로 이름이 나온 장소만** 뽑고 평점·리뷰수는 스니펫에 숫자로 없으면
+  null(지어내지 않음) — `searchAndVerify()`와 같은 "검증된 사실만" 패턴을
+  그대로 재사용.
+- **적용 범위 제한**: `attachTripData()`에서 지역 매칭 실패 시 두 갈래로
+  나눔 — (1) **국가/광역권 단위 제외**(일본 등, D-040이 막던 "다도시 뒤섞임"
+  문제)는 여전히 그대로 스킵 유지, 웹 검색 폴백 대상이 아님. (2)
+  **트레쥴에 아예 없는 지역**(코타키나발루류 → 이제는 대부분 스냅샷에 있지만,
+  모리셔스처럼 정말 없는 경우)만 웹 검색 폴백을 시도한다. 국가 단위까지
+  웹 검색으로 열어주면 D-040을 다시 무너뜨리므로 명확히 선을 그었다.
+- **C-2 동일 적용**: 웹 검색으로 얻은 스팟도 `filterUnratedSpots()`(평점 없는
+  스팟 제외)·`MIN_SPOTS`(6곳 미만 스킵) 기준을 그대로 통과해야 trip_data로
+  채택된다 — 데이터 출처가 달라졌다고 품질 기준을 낮추지 않는다.
+- **좌표 없음 명시**: 웹 검색으로는 위경도를 확보할 수 없으므로
+  `totalDistanceKm`·`distanceSource`·`dayTotals`·`appUrl`·`imageUrl`을 전부
+  `null`로 둔다 — 기존 코드가 이미 이 필드들을 null-safe하게 처리하고 있어서
+  (예: `formatDistancePhrase()`가 `!totalKm`이면 빈 문자열 반환)
+  `monetizer.js`/`write-kin-answer.js`에 추가 수정이 필요 없었다.
+  `hasInterDayCityJump()`도 좌표가 없으면 판단을 보류(스킵 안 시킴)하도록
+  이미 그렇게 짜여 있었다(D-040).
+- **브랜드 오표기 방지**: `trip_data.sourceType`을 `'web_search'`로 표시하고,
+  `blog_pass3_body.md`에 "sourceType이 web_search면 '트레쥴 앱' 언급 금지"
+  지시를 추가 — appUrl이 null이라 CTA 버튼 자체는 이미 안 뜨지만, 본문
+  서술에서까지 "트레쥴 앱에서 확인하세요"라고 하면 트레쥴이 실제로 커버하지
+  않는 지역에 대해 없는 서비스 커버리지를 있는 것처럼 안내하는 것이라 프롬프트
+  수준에서 한 번 더 막았다(코드로 100% 강제는 안 됨 — 이 프로젝트의 다른
+  "지어내지 말 것" 규칙들과 같은 한계).
+- **버린 대안**: 웹 검색 결과를 트레쥴 API 응답과 동일한 신뢰도로 표시(출처
+  구분 없이) — 채택 안 함. 정확도가 떨어지는 걸 사용자도 인지하고 선택했으므로
+  (질문에서 "정확도는 트레쥴 API보다 떨어짐 — 출처 표기 필수"라고 명시된
+  옵션을 골랐다), ratingSource에 "웹 검색"을 남겨 독자에게도 구분이 가게
+  했다.
+- **관련 파일**: `src/utils/factSearch.js`(searchRegionSpots 신규 export),
+  `src/agents/tradule_source.js`(guessRegionLabel 신규, attachTripData의
+  region-null 분기에 웹 검색 폴백 배선), `prompts/blog_pass3_body.md`
+  (web_search sourceType일 때 트레쥴 앱 언급 금지 지시)

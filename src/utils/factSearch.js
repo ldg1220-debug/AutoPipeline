@@ -170,6 +170,80 @@ JSON 형식: {"region": "목록 중 하나 또는 null", "reason": "왜 그렇�
   return { region: parsed.region, reason: parsed.reason ?? '' };
 }
 
+/**
+ * 트레쥴이 지원하지 않는 지역(예: "모리셔스")에 대해 웹 검색으로 스팟(장소·평점·
+ * 리뷰수)을 채운다. 2026-09-23 사용자 요청("트레쥴에 없으면 없는대로 인터넷
+ * 이용하면 안돼?") — 트레쥴 course-brief와 같은 shape(spots 배열)을 흉내 내되,
+ * 좌표(lat/lng)는 웹 검색으로 확보할 수 없으므로 넣지 않는다(=hasInterDayCityJump
+ * 같은 좌표 기반 체크는 이 데이터에 대해 자동으로 스킵됨 — 판단 보류가 기본값).
+ * 평점·리뷰수는 검색 스니펫에 실제로 적힌 숫자만 쓰고, 없으면 null(지어내지 않음) —
+ * attachTripData()가 이후 rating이 null인 스팟은 그대로 걸러낸다(§C-2와 동일 기준).
+ */
+export async function searchRegionSpots(region, days) {
+  if (!config.tavily?.apiKey) {
+    logger.info(`[factSearch] TAVILY_API_KEY 미설정 — "${region}" 웹 스팟 검색 스킵`);
+    return null;
+  }
+
+  let results;
+  try {
+    await throttle(1000, 'tavily');
+    results = await searchTavily(`${region} 여행 가볼만한곳 맛집 평점 리뷰 추천`);
+  } catch (err) {
+    logger.warn(`[factSearch] "${region}" 웹 스팟 검색 실패: ${err.message}`);
+    return null;
+  }
+  if (results.length === 0) {
+    logger.warn(`[factSearch] "${region}" 웹 스팟 검색 결과 0건`);
+    return null;
+  }
+
+  const snippetBlock = results.map((r, i) => `[${i + 1}] ${r.title}\n${r.content}\n출처: ${r.url}`).join('\n\n');
+  const prompt = `아래는 "${region}" 여행지를 검색한 실제 결과입니다. 이 스니펫에 실제로 이름이 나온
+장소만 뽑아 JSON으로 정리하세요. 스니펫에 없는 장소·평점·리뷰수는 절대 지어내지 마세요.
+평점/리뷰수가 스니펫에 숫자로 명시되지 않았으면 반드시 null로 두세요(추측 금지).
+${days}일 일정이므로 장소를 1~${days}일에 고르게 나눠 day 필드를 배정하세요.
+
+검색 결과:
+${snippetBlock}
+
+JSON 형식:
+{
+  "spots": [
+    {"name": "실제 장소명", "category": "관광지|음식점|카페 등", "rating": 4.3 또는 null, "reviewCount": 1200 또는 null, "day": 1}
+  ]
+}`;
+
+  const parsed = await callLLM(prompt);
+  const spots = (parsed?.spots ?? []).filter((s) => s?.name);
+  if (spots.length === 0) {
+    logger.warn(`[factSearch] "${region}" 웹 검색에서 장소를 추출하지 못함`);
+    return null;
+  }
+
+  logger.info(`[factSearch] "${region}" 웹 스팟 검색: ${spots.length}곳 추출 (출처 ${results.length}건)`);
+  return {
+    region,
+    days,
+    totalDistanceKm: null, // 좌표·경로 정보가 없어 거리 계산 불가 — 지어내지 않음
+    spots: spots.map((s, i) => ({
+      name:        s.name,
+      category:    s.category ?? null,
+      rating:      typeof s.rating === 'number' ? s.rating : null,
+      reviewCount: typeof s.reviewCount === 'number' ? s.reviewCount : null,
+      day:         Number.isInteger(s.day) && s.day >= 1 ? s.day : 1,
+      order:       i + 1,
+    })),
+    appUrl:         null, // 트레쥴 코스가 아니므로 앱 딥링크 없음
+    imageUrl:       null,
+    ratingSource:   '웹 검색',
+    distanceSource: null,
+    dayTotals:      null,
+    sourceType:     'web_search',
+    sources:        results.map((r) => ({ title: r.title, url: r.url })),
+  };
+}
+
 /** Pass1/Pass3 프롬프트에 주입할 컨텍스트 문자열로 변환. */
 export function formatFactCheckContext(factCheck) {
   if (!factCheck) return '';

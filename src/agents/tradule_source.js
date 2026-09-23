@@ -24,6 +24,7 @@ import { config } from '../config/index.js';
 import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { REGION_PROFILES } from '../data/regionProfiles.js';
+import { searchRegionSpots } from '../utils/factSearch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -321,6 +322,21 @@ function suggestChildRegions(keyword) {
 }
 
 /**
+ * 트레쥴이 지원하지 않는 지역명을 웹 검색으로 대체할 때(2026-09-23) 쓸 검색어/
+ * 표시용 라벨을 만든다 — "모리셔스 5박 7일"에서 일정 표현·범용 단어를 떼어내
+ * "모리셔스"만 남긴다. 못 떼어내면(모호하면) 원본 키워드를 그대로 쓴다(호출부에서
+ * 폴백).
+ */
+function guessRegionLabel(keyword) {
+  const clean = (keyword ?? '')
+    .replace(/\d+\s*박\s*\d*\s*일?|\d+\s*일(?!차)|당일치기|여행|코스|투어|일정/g, '')
+    .replace(/[,&]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean;
+}
+
+/**
  * keywordData.contents 각 항목에 trip_data(스팟 배열)를 주입한다.
  * 2026-09-22 정정(작업지시서 "매칭 실패는 '통과'가 아니라 '스킵'입니다" §3): 지역
  * 매칭 실패 시 trip_data 없이 그냥 통과시키면, category='travel'인 코스 키워드가
@@ -350,9 +366,52 @@ export async function attachTripData(keywordData) {
         // 국가/광역권 이름이 그대로 포함돼 있는지로 원인을 나눈다.
         const suggestion = suggestChildRegions(item.keyword ?? '');
         const isExcludedParent = Boolean(suggestion);
+        let webSearchTriedButShort = false;
+
+        // 2026-09-23 추가(사용자 요청 "트레쥴에 없으면 없는대로... 인터넷 이용하면
+        // 안돼?"): 국가/광역권 단위 제외(일본 등)는 그대로 스킵 유지 — 도시를
+        // 구체화하지 않고 웹 검색으로 때우면 D-040이 막으려던 "다도시 뒤섞임" 문제가
+        // 그대로 재발한다. 반면 "코타키나발루"처럼 트레쥴에 아예 없는 지역은 웹 검색
+        // 폴백을 시도한다 — 스팟별 평점·리뷰수까지 검색 스니펫에 실제로 있는 것만
+        // 뽑고(지어내지 않음), C-2와 동일하게 평점 없는 스팟 제외·최소 6곳 기준을
+        // 그대로 적용한다.
+        if (!isExcludedParent) {
+          const webRegion = guessRegionLabel(item.keyword ?? '') || item.keyword;
+          const webDays = Math.min(Math.max(extractDays(item.keyword ?? ''), 1), API_MAX_DAYS);
+          const webBrief = await searchRegionSpots(webRegion, webDays);
+          if (webBrief) {
+            rawResponses[item.keyword] = webBrief;
+            const webCleanSpots = filterUnratedSpots(webBrief.spots);
+            if (webCleanSpots.length >= MIN_SPOTS) {
+              logger.info(`[tradule_source] "${item.keyword}" → 트레쥴 미지원, 웹 검색으로 스팟 ${webCleanSpots.length}개 확보`);
+              updated.push({
+                ...item,
+                trip_data: {
+                  region:          webBrief.region,
+                  days:            webBrief.days,
+                  totalDistanceKm: null,
+                  spots:           webCleanSpots,
+                  appUrl:          null,
+                  imageUrl:        null,
+                  ratingSource:    webBrief.ratingSource,
+                  distanceSource:  null,
+                  dayTotals:       null,
+                  sourceType:      'web_search',
+                  sources:         webBrief.sources,
+                },
+              });
+              continue;
+            }
+            logger.warn(`[tradule_source] "${item.keyword}" → 웹 검색도 스팟 부족 (평점 있는 곳 ${webCleanSpots.length}개, 최소 ${MIN_SPOTS}개) → 스킵`);
+            webSearchTriedButShort = true;
+          }
+        }
+
         const reason = isExcludedParent
           ? '국가/광역권 단위는 코스 불가'
-          : '트레쥴 지원 목록에 없는 지역';
+          : webSearchTriedButShort
+            ? '트레쥴 지원 목록에 없는 지역 (웹 검색도 스팟 부족)'
+            : '트레쥴 지원 목록에 없는 지역';
         const suggestionMsg = suggestion
           ? ` (대체 후보: ${suggestion.children.map((c) => `${c} 2박3일 코스`).join(', ')})`
           : '';
