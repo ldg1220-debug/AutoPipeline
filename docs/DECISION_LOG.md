@@ -836,3 +836,22 @@
   `src/agents/tradule_source.js`(guessRegionLabel 신규, attachTripData의
   region-null 분기에 웹 검색 폴백 배선), `prompts/blog_pass3_body.md`
   (web_search sourceType일 때 트레쥴 앱 언급 금지 지시)
+
+### D-050 후속: cli.js가 웹 검색 폴백을 몰라서 여전히 목록으로만 보냄
+- **결정**: D-050 배포 후 "모리셔스 5박 7일" 재현에서 `attachTripData()`가
+  웹 검색을 시도할 기회조차 없이 cli.js가 여전히 22페이지 목록으로 바로
+  보냈다. 원인: cli.js의 "방식" 입력 단계(step 0)는 로컬 문자열 매칭으로
+  `region`을 확정 못 하면 `state.mode='structured'`로 강제 전환해 구조화
+  선택 화면(`pickRegionNav`)으로 보내는데, 이건 D-046(종합형 제거) 당시
+  "region 없으면 무조건 스킵되니 진행시키지 말자"는 전제로 짠 로직이었다 —
+  그런데 D-050으로 그 전제 자체가 바뀌었다(웹 검색 폴백이 생겨 region 없이도
+  trip_data를 채울 수 있게 됨). cli.js가 이 변화를 반영 못 하고 있었다.
+  "웹 검색으로 시도할까요?"를 물어 예/아니오로 명시적 선택지를 주고, 예를
+  고르면 `state.region=null`인 채로 `state.mode='direct'`로 진행시킨다 —
+  실제 지역 해석·웹 검색 폴백은 다운스트림(`attachTripData`)이 전담하므로
+  cli.js는 region을 몰라도 `--force-keyword`만 넘기면 된다.
+- **버린 대안**: 기본값을 "예"로 — 채택 안 함. 웹 검색 데이터는 트레쥴
+  API보다 정확도가 낮다는 걸 사용자도 인지하고 선택한 트레이드오프이므로,
+  매번 명시적으로 묻고 기본값은 "아니오"(목록에서 확실한 지역 고르기)로
+  뒀다.
+- **관련 파일**: `cli.js`(지역 실패 분기에 "웹 검색으로 시도" 선택지 추가)
