@@ -393,6 +393,12 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       // region이 이미 위에서 잡혔으면(377행) 그 지역의 실제 상한을 조회해서 비교하고,
       // 못 잡았으면(뒤에서 AI 추정으로 잡힐 수도 있음) 예전처럼 안전 기본값 3일로 비교.
       let keywordText = raw;
+      // 확인 화면에 보여줄 일수 라벨 — 기본은 dayGuess.label(고정 4버킷)이지만,
+      // 아래에서 키워드에 적힌 실제 일수가 지역 상한 이내로 확인되면 그 실제
+      // 값으로 덮어쓴다("세부 5박7일" 실측 버그: dayGuess.label이 예전 버킷의
+      // "3박4일"로 남아 있어, 실제로는 7일로 진행되는데 화면엔 "3박4일"이라고
+      // 잘못 표시됐다).
+      let displayDayLabel = dayGuess.label;
       const statedDayMatch = raw.match(/(\d+)\s*박\s*(\d+)\s*일/);
       if (statedDayMatch) {
         const statedDays = Number(statedDayMatch[2]);
@@ -404,7 +410,11 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
           if (proceedShorter === HOME) return rl;
           if (proceedShorter !== true) { console.log('  취소했습니다.'); return rl; }
           keywordText = raw.replace(statedDayMatch[0], clampedLabel);
+          displayDayLabel = clampedLabel;
           console.log(`  → "${keywordText}"로 진행합니다.`);
+        } else {
+          // 상한 이내면 키워드에 실제 적힌 일수 문구를 그대로 화면에도 보여준다.
+          displayDayLabel = statedDayMatch[0].replace(/\s+/g, '');
         }
       }
 
@@ -445,7 +455,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
           const idx = Number(pick);
           if (Number.isInteger(idx) && idx >= 1 && idx <= candidates.length) {
             region = candidates[idx - 1];
-            console.log(`\n  지역: ${region}    일수: ${dayGuess.label}`);
+            console.log(`\n  지역: ${region}    일수: ${displayDayLabel}`);
             const confirmed2 = await askYesNoNav(rl, '맞습니까?', true);
             if (confirmed2 === HOME) return rl;
             if (confirmed2 === true) {
@@ -481,7 +491,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
         step = 1;
         continue;
       }
-      console.log(`\n  지역: ${region}    일수: ${dayGuess.label}${regionGuessReason ? `\n  (AI 추정 근거: ${regionGuessReason})` : ''}`);
+      console.log(`\n  지역: ${region}    일수: ${displayDayLabel}${regionGuessReason ? `\n  (AI 추정 근거: ${regionGuessReason})` : ''}`);
       const confirmed = await askYesNoNav(rl, '맞습니까?', true);
       if (confirmed === HOME) return rl;
       if (confirmed === BACK) { step = 0; continue; }
