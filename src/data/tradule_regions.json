@@ -2,333 +2,411 @@
   "domestic": [
     {
       "name": "종로",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "성수",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "강남",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "홍대",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "명동",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "잠실",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "이태원",
-      "parent": "서울"
+      "parent": "서울",
+      "style": "city"
     },
     {
       "name": "수원",
-      "parent": "경기"
+      "parent": "경기",
+      "style": "city"
     },
     {
       "name": "용인",
-      "parent": "경기"
+      "parent": "경기",
+      "style": "city"
     },
     {
       "name": "가평",
-      "parent": "경기"
+      "parent": "경기",
+      "style": "city"
     },
     {
       "name": "파주",
-      "parent": "경기"
+      "parent": "경기",
+      "style": "city"
     },
     {
       "name": "포천",
-      "parent": "경기"
+      "parent": "경기",
+      "style": "city"
     },
     {
       "name": "양평",
-      "parent": "경기"
+      "parent": "경기",
+      "style": "city"
     },
     {
       "name": "송도",
-      "parent": "인천"
+      "parent": "인천",
+      "style": "city"
     },
     {
       "name": "월미도",
-      "parent": "인천"
+      "parent": "인천",
+      "style": "city"
     },
     {
       "name": "강화",
-      "parent": "인천"
+      "parent": "인천",
+      "style": "city"
     },
     {
       "name": "영종도",
-      "parent": "인천"
+      "parent": "인천",
+      "style": "city"
     },
     {
       "name": "강릉",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "속초",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "춘천",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "평창",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "양양",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "정선",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "동해",
-      "parent": "강원"
+      "parent": "강원",
+      "style": "city"
     },
     {
       "name": "대전",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "청주",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "공주",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "단양",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "보령",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "태안",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "천안",
-      "parent": "충청"
+      "parent": "충청",
+      "style": "city"
     },
     {
       "name": "광주",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "전주",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "여수",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "순천",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "목포",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "군산",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "담양",
-      "parent": "전라"
+      "parent": "전라",
+      "style": "city"
     },
     {
       "name": "대구",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "울산",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "경주",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "통영",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "거제",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "진주",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "김해",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "남해",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "안동",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "포항",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "문경",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "울릉",
-      "parent": "경상"
+      "parent": "경상",
+      "style": "city"
     },
     {
       "name": "해운대",
-      "parent": "부산"
+      "parent": "부산",
+      "style": "city"
     },
     {
       "name": "광안리",
-      "parent": "부산"
+      "parent": "부산",
+      "style": "city"
     },
     {
       "name": "남포동",
-      "parent": "부산"
+      "parent": "부산",
+      "style": "city"
     },
     {
       "name": "사하",
-      "parent": "부산"
+      "parent": "부산",
+      "style": "city"
     },
     {
       "name": "기장",
-      "parent": "부산"
+      "parent": "부산",
+      "style": "city"
     },
     {
       "name": "제주시",
-      "parent": "제주"
+      "parent": "제주",
+      "style": "city"
     },
     {
       "name": "서귀포",
-      "parent": "제주"
+      "parent": "제주",
+      "style": "resort"
     },
     {
       "name": "애월",
-      "parent": "제주"
+      "parent": "제주",
+      "style": "resort"
     },
     {
       "name": "성산",
-      "parent": "제주"
+      "parent": "제주",
+      "style": "city"
     },
     {
       "name": "중문",
-      "parent": "제주"
+      "parent": "제주",
+      "style": "resort"
     },
     {
       "name": "한림",
-      "parent": "제주"
+      "parent": "제주",
+      "style": "city"
     }
   ],
   "overseas": [
     {
       "name": "오사카",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "오이타",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "후쿠오카",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "도쿄",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "교토",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "삿포로",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "나라",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "나고야",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "요코하마",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "고베",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "오키나와",
       "parent": "일본",
+      "style": "resort",
       "popularity": 1
     },
     {
       "name": "유후인",
       "parent": "일본",
+      "style": "city",
       "popularity": 1
     },
     {
       "name": "다낭",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "하롱",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "하노이",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "호이안",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "냐짱",
       "parent": "베트남",
+      "style": "resort",
       "aliases": [
         "나트랑"
       ],
@@ -337,26 +415,31 @@
     {
       "name": "푸꾸옥",
       "parent": "베트남",
+      "style": "resort",
       "popularity": 2
     },
     {
       "name": "달랏",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "사파",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "하이퐁",
       "parent": "베트남",
+      "style": "city",
       "popularity": 2
     },
     {
       "name": "호치민",
       "parent": "베트남",
+      "style": "city",
       "aliases": [
         "호찌민"
       ],
@@ -365,41 +448,49 @@
     {
       "name": "방콕",
       "parent": "태국",
+      "style": "city",
       "popularity": 3
     },
     {
       "name": "파타야",
       "parent": "태국",
+      "style": "city",
       "popularity": 3
     },
     {
       "name": "아유타야",
       "parent": "태국",
+      "style": "city",
       "popularity": 3
     },
     {
       "name": "코사무이",
       "parent": "태국",
+      "style": "resort",
       "popularity": 3
     },
     {
       "name": "끄라비",
       "parent": "태국",
+      "style": "resort",
       "popularity": 3
     },
     {
       "name": "후아힌",
       "parent": "태국",
+      "style": "resort",
       "popularity": 3
     },
     {
       "name": "치앙마이",
       "parent": "태국",
+      "style": "city",
       "popularity": 3
     },
     {
       "name": "타이베이",
       "parent": "대만",
+      "style": "city",
       "aliases": [
         "타이페이"
       ],
@@ -408,532 +499,667 @@
     {
       "name": "타이난",
       "parent": "대만",
+      "style": "city",
       "popularity": 5
     },
     {
       "name": "화롄",
       "parent": "대만",
+      "style": "city",
       "popularity": 5
     },
     {
       "name": "신베이",
       "parent": "대만",
+      "style": "city",
       "popularity": 5
     },
     {
       "name": "지룽",
       "parent": "대만",
+      "style": "city",
       "popularity": 5
     },
     {
       "name": "베이징",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "상하이",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "광저우",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "선전",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "홍콩",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "마카오",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "청두",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "충칭",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "시안",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "항저우",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "칭다오",
       "parent": "중국",
+      "style": "city",
       "popularity": 4
     },
     {
       "name": "세부",
       "parent": "필리핀",
+      "style": "resort",
       "popularity": 6
     },
     {
       "name": "보라카이",
       "parent": "필리핀",
+      "style": "resort",
       "popularity": 6
     },
     {
       "name": "마닐라",
       "parent": "필리핀",
+      "style": "city",
       "popularity": 6
     },
     {
       "name": "팔라완",
       "parent": "필리핀",
+      "style": "resort",
+      "popularity": 6
+    },
+    {
+      "name": "보홀",
+      "parent": "필리핀",
+      "style": "resort",
       "popularity": 6
     },
     {
       "name": "우붓",
       "parent": "인도네시아",
+      "style": "resort",
+      "aliases": [
+        "발리"
+      ],
       "popularity": 10
     },
     {
       "name": "쿠타",
       "parent": "인도네시아",
+      "style": "resort",
       "popularity": 10
     },
     {
       "name": "스미냑",
       "parent": "인도네시아",
+      "style": "resort",
       "popularity": 10
     },
     {
       "name": "자카르타",
       "parent": "인도네시아",
+      "style": "city",
       "popularity": 10
     },
     {
       "name": "싱가포르",
       "parent": "싱가포르",
+      "style": "city",
       "popularity": 9
     },
     {
       "name": "코타키나발루",
-      "parent": "말레이시아"
+      "parent": "말레이시아",
+      "style": "resort",
+      "aliases": [
+        "코타"
+      ]
     },
     {
       "name": "쿠알라룸푸르",
-      "parent": "말레이시아"
+      "parent": "말레이시아",
+      "style": "city"
     },
     {
       "name": "페낭",
-      "parent": "말레이시아"
+      "parent": "말레이시아",
+      "style": "resort"
     },
     {
       "name": "런던",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "버밍엄",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "리버풀",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "글래스고",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "옥스퍼드",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "캠브리지",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "브리스틀",
-      "parent": "영국"
+      "parent": "영국",
+      "style": "city"
     },
     {
       "name": "파리",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "마르세유",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "보르도",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "스트라스부르",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "툴루즈",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "칸",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "릴",
-      "parent": "프랑스"
+      "parent": "프랑스",
+      "style": "city"
     },
     {
       "name": "로마",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "밀라노",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "나폴리",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "토리노",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "제노바",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "팔레르모",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "볼로냐",
-      "parent": "이탈리아"
+      "parent": "이탈리아",
+      "style": "city"
     },
     {
       "name": "바르셀로나",
-      "parent": "스페인"
+      "parent": "스페인",
+      "style": "city"
     },
     {
       "name": "발렌시아",
-      "parent": "스페인"
+      "parent": "스페인",
+      "style": "city"
     },
     {
       "name": "빌바오",
-      "parent": "스페인"
+      "parent": "스페인",
+      "style": "city"
     },
     {
       "name": "그라나다",
-      "parent": "스페인"
+      "parent": "스페인",
+      "style": "city"
     },
     {
       "name": "말라가",
-      "parent": "스페인"
+      "parent": "스페인",
+      "style": "city"
     },
     {
       "name": "사라고사",
-      "parent": "스페인"
+      "parent": "스페인",
+      "style": "city"
     },
     {
       "name": "베를린",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "뮌헨",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "프랑크푸르트",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "함부르크",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "쾰른",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "슈투트가르트",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "뒤셀도르프",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "드레스덴",
-      "parent": "독일"
+      "parent": "독일",
+      "style": "city"
     },
     {
       "name": "카이로",
-      "parent": "이집트"
+      "parent": "이집트",
+      "style": "city"
     },
     {
       "name": "룩소르",
-      "parent": "이집트"
+      "parent": "이집트",
+      "style": "city"
     },
     {
       "name": "후르가다",
-      "parent": "이집트"
+      "parent": "이집트",
+      "style": "city"
     },
     {
       "name": "마라케시",
-      "parent": "모로코"
+      "parent": "모로코",
+      "style": "city"
     },
     {
       "name": "카사블랑카",
-      "parent": "모로코"
+      "parent": "모로코",
+      "style": "city"
     },
     {
       "name": "셰프샤우엔",
-      "parent": "모로코"
+      "parent": "모로코",
+      "style": "city"
     },
     {
       "name": "케이프타운",
-      "parent": "남아프리카공화국"
+      "parent": "남아프리카공화국",
+      "style": "city"
     },
     {
       "name": "요하네스버그",
-      "parent": "남아프리카공화국"
+      "parent": "남아프리카공화국",
+      "style": "city"
     },
     {
       "name": "나이로비",
-      "parent": "케냐"
+      "parent": "케냐",
+      "style": "city"
     },
     {
       "name": "몸바사",
-      "parent": "케냐"
+      "parent": "케냐",
+      "style": "city"
     },
     {
       "name": "뉴욕",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "샌프란시스코",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "시카고",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "마이애미",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "워싱턴 D.C.",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "보스턴",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "시애틀",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "휴스턴",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "댈러스",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "호놀룰루",
       "parent": "미국",
+      "style": "city",
       "popularity": 7
     },
     {
       "name": "괌",
       "parent": "미국",
+      "style": "resort",
       "popularity": 7
     },
     {
       "name": "사이판",
       "parent": "미국",
+      "style": "resort",
       "popularity": 7
     },
     {
       "name": "밴쿠버",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "캘거리",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "오타와",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "퀘벡시티",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "에드먼턴",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "빅토리아",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "핼리팩스",
-      "parent": "캐나다"
+      "parent": "캐나다",
+      "style": "city"
     },
     {
       "name": "멕시코시티",
-      "parent": "멕시코"
+      "parent": "멕시코",
+      "style": "city"
     },
     {
       "name": "칸쿤",
-      "parent": "멕시코"
+      "parent": "멕시코",
+      "style": "city"
     },
     {
       "name": "몬테레이",
-      "parent": "멕시코"
+      "parent": "멕시코",
+      "style": "city"
     },
     {
       "name": "과달라하라",
-      "parent": "멕시코"
+      "parent": "멕시코",
+      "style": "city"
     },
     {
       "name": "메리다",
-      "parent": "멕시코"
+      "parent": "멕시코",
+      "style": "city"
     },
     {
       "name": "푸에블라",
-      "parent": "멕시코"
+      "parent": "멕시코",
+      "style": "city"
     },
     {
       "name": "상파울루",
-      "parent": "브라질"
+      "parent": "브라질",
+      "style": "city"
     },
     {
       "name": "리우데자네이루",
-      "parent": "브라질"
+      "parent": "브라질",
+      "style": "city"
     },
     {
       "name": "브라질리아",
-      "parent": "브라질"
+      "parent": "브라질",
+      "style": "city"
     },
     {
       "name": "사우바도르",
-      "parent": "브라질"
+      "parent": "브라질",
+      "style": "city"
     },
     {
       "name": "포르탈레자",
-      "parent": "브라질"
+      "parent": "브라질",
+      "style": "city"
     },
     {
       "name": "벨루오리존치",
-      "parent": "브라질"
+      "parent": "브라질",
+      "style": "city"
     },
     {
       "name": "부에노스아이레스",
-      "parent": "아르헨티나"
+      "parent": "아르헨티나",
+      "style": "city"
     },
     {
       "name": "멘도사",
-      "parent": "아르헨티나"
+      "parent": "아르헨티나",
+      "style": "city"
     },
     {
       "name": "리마",
-      "parent": "페루"
+      "parent": "페루",
+      "style": "city"
     },
     {
       "name": "쿠스코",
-      "parent": "페루"
+      "parent": "페루",
+      "style": "city"
     },
     {
       "name": "시드니",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "멜버른",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "브리즈번",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "퍼스",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "골드코스트",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "애들레이드",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "캔버라",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "호바트",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "다윈",
-      "parent": "호주"
+      "parent": "호주",
+      "style": "city"
     },
     {
       "name": "오클랜드",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     },
     {
       "name": "웰링턴",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     },
     {
       "name": "크라이스트처치",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     },
     {
       "name": "퀸즈타운",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     },
     {
       "name": "로터루아",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     },
     {
       "name": "해밀턴",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     },
     {
       "name": "더니든",
-      "parent": "뉴질랜드"
+      "parent": "뉴질랜드",
+      "style": "city"
     }
   ],
-  "fetchedAt": "2026-09-23T00:34:38.691Z",
+  "fetchedAt": "2026-09-25T22:22:10.670Z",
   "source": "https://www.tradule.co.kr/api/content/regions"
 }

@@ -41,11 +41,17 @@ const PAGE_SIZE = 10;
 // (N+1)일치를 요청해야 하며(2박3일→3), API 상한을 넘는 "3박4일"은 실제 스팟이
 // 배정되는 최대치인 3으로 맞춘다 — 예전엔 2박3일·3박4일 둘 다 apiDays:2로 잘못
 // 상한을 걸고 있었다.
+// 2026-09-25 확장(작업지시서 "휴양지 글은 일수 상한과 구성이 다릅니다" §1, 짝
+// 지시서 "코스일수 5일까지 확장" 배포 확인 후): city 지역은 최대 5일, resort
+// 지역(세부·발리 등 휴양지)은 최대 7일까지 코스 데이터가 있다. 4박5일·5박7일
+// 옵션을 추가하고, pickDaysNav가 고른 지역의 스타일에 맞는 옵션만 보여준다.
 const DAY_OPTIONS = [
   { label: '당일', pattern: '당일치기', apiDays: 1 },
   { label: '1박2일', pattern: '1박2일 코스', apiDays: 2 },
   { label: '2박3일', pattern: '2박3일 코스', apiDays: 3 },
   { label: '3박4일', pattern: '3박4일 코스', apiDays: 3 },
+  { label: '4박5일', pattern: '4박5일 코스', apiDays: 5 },
+  { label: '5박7일', pattern: '5박7일 코스', apiDays: 7 },
 ];
 
 // ── 내비게이션 신호 (§6: 뒤로 가기) ──────────────────────────────────────────
@@ -230,6 +236,16 @@ async function fetchRegions(config, fallbackDomestic, fallbackOverseas) {
     }
     const domestic = domesticRaw.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
     const overseas = overseasRaw.map((r) => (typeof r === 'string' ? r : r.name)).filter(Boolean);
+    // 2026-09-25(작업지시서 "휴양지 글은 일수 상한과 구성이 다릅니다" §1): 트레쥴이
+    // style: "city"|"resort"를 region마다 실어 보내기 시작함(실측: 오사카→city,
+    // 세부→resort). 자식(구체 지역)엔 있고 부모(광역/국가)엔 없으므로, 부모 문자열로
+    // 조회될 때는 그 부모 밑 자식 하나의 스타일을 대표값으로 쓴다.
+    const styleByName = new Map();
+    const styleByParentSample = new Map();
+    for (const r of [...domesticRaw, ...overseasRaw]) {
+      if (r?.name && r?.style) styleByName.set(r.name, r.style);
+      if (r?.parent && r?.style && !styleByParentSample.has(r.parent)) styleByParentSample.set(r.parent, r.style);
+    }
     if (domestic.length || overseas.length) {
       // §3: cli.js가 이미 매 실행마다 라이브로 조회하고 있으니, 성공하면 그 결과를
       // 스냅샷에도 덮어써서 tradule_source.js(파이프라인 쪽, 별도 프로세스)가 다음에
@@ -243,13 +259,20 @@ async function fetchRegions(config, fallbackDomestic, fallbackOverseas) {
       } catch (writeErr) {
         console.log(`  ⚠ 지역 스냅샷 갱신 실패(계속 진행): ${writeErr.message}`);
       }
-      return { domestic, overseas, live: true };
+      return { domestic, overseas, live: true, styleByName, styleByParentSample };
     }
     throw new Error('응답에서 지역 목록을 찾지 못함 (스키마 불일치)');
   } catch (err) {
     console.log(`  ⚠ 트레쥴 지역 목록 조회 실패(${err.message}) — 저장소에 있는 목록으로 대체합니다.`);
-    return { domestic: fallbackDomestic, overseas: fallbackOverseas, live: false };
+    return { domestic: fallbackDomestic, overseas: fallbackOverseas, live: false, styleByName: new Map(), styleByParentSample: new Map() };
   }
+}
+
+const STYLE_MAX_DAYS = { city: 5, resort: 7 };
+/** region 문자열(자식이든 부모든)의 최대 일수 — 스타일 정보 없으면 3(기존 안전 기본값). */
+function regionMaxDaysFor(regions, region) {
+  const style = regions.styleByName?.get(region) ?? regions.styleByParentSample?.get(region);
+  return STYLE_MAX_DAYS[style] ?? 3;
 }
 
 /** 페이지네이션 지역 선택기. 번호·지역명·내비게이션 입력을 받는다. */
@@ -283,19 +306,21 @@ async function pickRegionNav(rl, regions) {
   }
 }
 
-async function pickDaysNav(rl) {
+/** maxDays가 있으면 그 상한을 넘는 옵션(예: city 지역에서 5박7일)은 숨긴다. */
+async function pickDaysNav(rl, maxDays = 3) {
+  const options = DAY_OPTIONS.filter((d) => d.apiDays <= maxDays);
   console.log('\n[일수]');
-  DAY_OPTIONS.forEach((d, i) => console.log(`  ${i + 1}  ${d.label}`));
+  options.forEach((d, i) => console.log(`  ${i + 1}  ${d.label}`));
   return askChoiceHelp(
     rl,
     `선택 ${NAV_HINT} > `,
     (answer) => {
       const num = Number(answer);
-      if (Number.isInteger(num) && num >= 1 && num <= DAY_OPTIONS.length) return DAY_OPTIONS[num - 1];
+      if (Number.isInteger(num) && num >= 1 && num <= options.length) return options[num - 1];
       return null;
     },
-    `1~${DAY_OPTIONS.length} 중 하나를 입력하세요. ${NAV_HINT}`,
-    DAY_OPTIONS.map((d, i) => `  ${i + 1}  ${d.label}`).join('\n')
+    `1~${options.length} 중 하나를 입력하세요. ${NAV_HINT}`,
+    options.map((d, i) => `  ${i + 1}  ${d.label}`).join('\n')
   );
 }
 
@@ -361,21 +386,26 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
       let regionGuessReason = '';
       const dayGuess = parseDayFromText(raw) ?? DAY_OPTIONS[1];
 
-      // 2026-09-23(작업지시서 "본문은 좋아졌습니다. 제목이 사실과 다릅니다" §2):
-      // "5박 7일"을 입력해도 course-brief는 최대 3일까지만 받는다(API_MAX_DAYS,
-      // tradule_source.js) — dayGuess.label은 이미 클램프된 값("3박4일")을 보여주지만
-      // raw 텍스트 자체("5박 7일")는 안 바뀌어서 그대로 --force-keyword로 나가 제목·
-      // 본문에 "5박 7일"이 남는 사고가 실측 확인됐다(코타키나발루/265, 발리/267).
-      // 여기서 미리 경고하고, 진행하면 키워드 텍스트 자체를 클램프된 일수로 고친다.
+      // 2026-09-23(작업지시서 "본문은 좋아졌습니다. 제목이 사실과 다릅니다" §2),
+      // 2026-09-25 정정(짝 지시서 "코스일수 5일까지 확장" 배포 후 — 트레쥴이
+      // style: "city"(최대 5일)|"resort"(최대 7일)를 지역마다 실어 보냄, 실측 확인):
+      // dayGuess.label은 예전 고정 4버킷(최대 3박4일)이라 city/resort 상한을 모른다.
+      // region이 이미 위에서 잡혔으면(377행) 그 지역의 실제 상한을 조회해서 비교하고,
+      // 못 잡았으면(뒤에서 AI 추정으로 잡힐 수도 있음) 예전처럼 안전 기본값 3일로 비교.
       let keywordText = raw;
       const statedDayMatch = raw.match(/(\d+)\s*박\s*(\d+)\s*일/);
-      if (statedDayMatch && Number(statedDayMatch[2]) > dayGuess.apiDays) {
-        console.log(`  ⚠ "${statedDayMatch[0]}"은 트레쥴 코스가 최대 3일까지만 있습니다.`);
-        const proceedShorter = await askYesNoNav(rl, `${dayGuess.label} 코스로 진행할까요? (아니오 = 취소)`, true);
-        if (proceedShorter === HOME) return rl;
-        if (proceedShorter !== true) { console.log('  취소했습니다.'); return rl; }
-        keywordText = raw.replace(statedDayMatch[0], dayGuess.label);
-        console.log(`  → "${keywordText}"로 진행합니다.`);
+      if (statedDayMatch) {
+        const statedDays = Number(statedDayMatch[2]);
+        const maxDaysForRegion = region ? regionMaxDaysFor(regions, region) : 3;
+        if (statedDays > maxDaysForRegion) {
+          const clampedLabel = { 3: '2박3일', 5: '4박5일', 7: '5박7일' }[maxDaysForRegion] ?? dayGuess.label;
+          console.log(`  ⚠ "${statedDayMatch[0]}"은 트레쥴 코스가 최대 ${maxDaysForRegion}일까지만 있습니다.`);
+          const proceedShorter = await askYesNoNav(rl, `${clampedLabel} 코스로 진행할까요? (아니오 = 취소)`, true);
+          if (proceedShorter === HOME) return rl;
+          if (proceedShorter !== true) { console.log('  취소했습니다.'); return rl; }
+          keywordText = raw.replace(statedDayMatch[0], clampedLabel);
+          console.log(`  → "${keywordText}"로 진행합니다.`);
+        }
       }
 
       // 2026-09-18: 문자 그대로 지역명이 없어도("규슈") 검색 API로 실제 도시를
@@ -482,7 +512,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
     }
 
     if (step === 2) {
-      const d = await pickDaysNav(rl);
+      const d = await pickDaysNav(rl, regionMaxDaysFor(regions, state.region));
       if (d === HOME) return rl;
       if (d === BACK) { step = 1; continue; }
       state.days = d;

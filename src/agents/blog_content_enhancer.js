@@ -467,6 +467,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     youtube_hook:         hook,
     trip_spots:           spotsForPrompt.length ? JSON.stringify(spotsForPrompt) : '[]',
     transport_summary:    summarizeTransportModes(tripData),
+    region_style:         tripData?.style ?? '',
   }) + benchmarkCtx;
   await throttle(2000);
   let outline = await callGPT4oMini(prompt);

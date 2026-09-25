@@ -146,23 +146,50 @@ export function extractRegion(keyword) {
   return parentMatch ?? null;
 }
 
+// 2026-09-25(작업지시서 "휴양지 글은 일수 상한과 구성이 다릅니다" §1, 짝 지시서
+// "코스일수 5일까지 확장" 배포 확인 후 착수): /api/content/regions 응답에
+// style: "city" | "resort" 가 실측 확인됨(예: "오사카"→city, "세부"→resort).
+// course-brief도 스타일별 상한을 강제한다(실측: 오사카 days=6 → 400
+// "days exceeds this region's style limit"(city, maxDays:5), 세부는 days=7까지
+// 허용 — 다만 세부는 아직 스팟 데이터가 6~7일치를 못 채워 422 insufficient_spots가
+// 날 수 있음, 이건 상한 문제가 아니라 데이터 커버리지 문제). city=5, resort=7로
+// 로컬 상한도 맞춘다. name(자식)에 없으면 parent(광역/국가) 기준 샘플 스타일로
+// 폴백 — MATCHABLE_PARENT_REGIONS(서울/부산/인천/제주)는 모두 style:"city"로
+// 확인됨.
+const STYLE_MAX_DAYS = { city: 5, resort: 7 };
+const DEFAULT_MAX_DAYS = 3; // 스타일 정보가 없는 지역(구 스냅샷·미분류)의 안전 기본값
+const regionStyleByName = new Map();
+const regionStyleByParentSample = new Map();
+for (const r of [...REGIONS_SNAPSHOT.domestic, ...REGIONS_SNAPSHOT.overseas]) {
+  if (r?.name && r?.style) regionStyleByName.set(r.name, r.style);
+  if (r?.parent && r?.style && !regionStyleByParentSample.has(r.parent)) {
+    regionStyleByParentSample.set(r.parent, r.style);
+  }
+}
+function regionMaxDays(region) {
+  const style = regionStyleByName.get(region) ?? regionStyleByParentSample.get(region);
+  return STYLE_MAX_DAYS[style] ?? DEFAULT_MAX_DAYS;
+}
+
+/** trip_data.style로 내려보낼 "city"|"resort"|null — 본문 구성·제목 패턴을 다르게 할 때 사용(§2·§3). */
+function regionStyle(region) {
+  return regionStyleByName.get(region) ?? regionStyleByParentSample.get(region) ?? null;
+}
+
 /**
  * 키워드에서 "1박2일"/"2박3일"/"3박4일"/"당일치기" 등을 days로 환산한다. 기본 1일.
  * 2026-09-22 정정(실측): "오사카, USJ, 2박 3일" → 기존 로직은 밤 수(nights)만 보고
- * "1박 이상이면 무조건 days=2"로 상한을 걸었는데, 이게 틀렸다. course-brief를 직접
- * 호출해 확인: days=1→200(1일 5곳), days=2→422 insufficient_spots(2일치로는
- * 스팟이 모자람), days=3→200(3일에 걸쳐 스팟 배정), days=4→400 "days must be 1, 2,
- * or 3". 즉 API는 정확히 1~3만 받고, "2박3일"이면 말 그대로 3일치를 요청해야
- * 한다 — 정규식이 이미 캡처한 일수(match[2])를 버리고 있었으므로 그걸 그대로 쓰고,
- * API 상한(3)에 맞춰 클램프한다.
+ * "1박 이상이면 무조건 days=2"로 상한을 걸었는데, 이게 틀렸다 — 정규식이 이미
+ * 캡처한 일수(match[2])를 버리고 있었으므로 그걸 그대로 쓴다. API 상한은
+ * 지역 스타일마다 달라(city=5, resort=7 — 2026-09-25 확장) 여기서는 걸지 않고
+ * resolveDays()에서 지역별로 건다.
  */
-const API_MAX_DAYS = 3;
 function extractDays(keyword) {
   if (/당일|하루/.test(keyword)) return 1;
   const match = keyword.match(/(\d+)\s*박\s*(\d+)\s*일/);
   if (match) {
     const days = Number(match[2]);
-    return Math.min(Math.max(days || 1, 1), API_MAX_DAYS);
+    return Math.max(days || 1, 1);
   }
   return 1;
 }
@@ -176,19 +203,19 @@ function extractDays(keyword) {
 function resolveDays(region, keyword) {
   const raw = extractDays(keyword);
   const profile = REGION_PROFILES[region];
-  if (!profile) return raw;
+  const maxDays = regionMaxDays(region);
 
   let resolved = raw;
-  if (raw < profile.minDays) {
+  if (profile && raw < profile.minDays) {
     logger.warn(`[sanity] "${region} ${keyword}"(days=${raw})은 비현실적 → days=${profile.minDays}로 조정`);
     resolved = profile.minDays;
-  } else if (raw > profile.maxDays) {
+  } else if (profile && raw > profile.maxDays) {
     resolved = profile.maxDays;
   }
-  // REGION_PROFILES.maxDays(최대 5)가 course-brief의 실제 API 상한(1~3, 실측 확인)보다
-  // 클 수 있어 여기서 한 번 더 클램프한다 — 안 그러면 "도쿄 4박5일" 같은 키워드가
-  // days=5로 나가 400(days must be 1, 2, or 3)을 그대로 맞는다.
-  return Math.min(resolved, API_MAX_DAYS);
+  // 지역 스타일별 상한(city=5, resort=7, 미분류=3)에 최종 클램프 — REGION_PROFILES
+  // 값(최대 5)이 스타일 상한보다 클 수도, course-brief 실제 상한이 REGION_PROFILES
+  // 보다 클 수도(resort=7) 있어 항상 여기서 한 번 더 맞춘다.
+  return Math.min(resolved, maxDays);
 }
 
 // 첫 호출은 콜드 스타트 + 캐시 미스 + Google 라이브 조회가 겹치면 8초를 넘길 수 있음(실측:
@@ -396,7 +423,9 @@ export async function attachTripData(keywordData) {
         // 그대로 적용한다.
         if (!isExcludedParent) {
           const webRegion = guessRegionLabel(item.keyword ?? '') || item.keyword;
-          const webDays = Math.min(Math.max(extractDays(item.keyword ?? ''), 1), API_MAX_DAYS);
+          // 미매칭 지역이라 스타일을 알 수 없으므로 안전 기본 상한(3일)만 건다 —
+          // 라이브 프로브(바로 아래)가 성공하면 regionMaxDays()로 다시 정확히 계산됨.
+          const webDays = Math.min(Math.max(extractDays(item.keyword ?? ''), 1), DEFAULT_MAX_DAYS);
 
           // 2026-09-23(작업지시서 "코타키나발루는 이미 됩니다. 스냅샷이 옛것입니다"
           // §5): 스냅샷 대조만으로 "미지원"이라 단정하면, 스냅샷이 뒤처진 사이
@@ -421,6 +450,7 @@ export async function attachTripData(keywordData) {
                   ratingSource:    liveProbe.ratingSource ?? null,
                   distanceSource:  liveProbe.distanceSource ?? null,
                   dayTotals:       liveProbe.dayTotals ?? null,
+                  style:           regionStyle(liveProbe.region ?? webRegion),
                 },
               });
               continue;
@@ -447,6 +477,7 @@ export async function attachTripData(keywordData) {
                   dayTotals:       null,
                   sourceType:      'web_search',
                   sources:         webBrief.sources,
+                  style:           regionStyle(webBrief.region),
                 },
               });
               continue;
@@ -544,6 +575,10 @@ export async function attachTripData(keywordData) {
         // { "1": { distanceKm: 15.2, spots: 6 }, ... } 형태 객체로 옴 — 사용부(write-kin-answer.js
         // extractDayKm())가 숫자·객체 둘 다 방어적으로 처리하도록 이미 수정됨.
         dayTotals:       brief.dayTotals ?? null,
+        // 2026-09-25(작업지시서 "휴양지 글은 일수 상한과 구성이 다릅니다" §2·§3):
+        // "city"|"resort" — blog_content_enhancer.js가 본문 구성·제목 패턴을
+        // 다르게 하는 데 쓴다.
+        style:           regionStyle(brief.region ?? region),
       },
     });
     logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${cleanSpots.length}개 확보`);

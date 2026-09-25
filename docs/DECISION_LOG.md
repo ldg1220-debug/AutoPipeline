@@ -980,3 +980,32 @@
   재작성, pass2Outline·finalSections·FAQ에 배선), `cli.js`(입력 직후 일수
   경고 + 키워드 텍스트 클램프), `docs/work-orders/2026-09-23_title-facts-
   enforcement.md`
+
+### D-054: 트레쥴 style(city/resort) 배포 확인 후 일수 상한·본문 구성 분리
+- **결정**: "휴양지 글은 일수 상한과 구성이 다릅니다" 지시서는 트레쥴 쪽 배포를
+  전제조건으로 달았음(D-042/D-053 시점엔 3일 클램프가 맞다고 명시). 2026-09-23
+  1차 확인 시점엔 미배포(`style` 필드 없음, days>3 전부 400)였고, 사용자 요청
+  "배포 재확인해봐"로 2026-09-25 재확인한 결과 배포됨을 실측 확인 —
+  `/api/content/regions`에 `style:"city"|"resort"`가 붙고, course-brief가
+  스타일별 상한(city=5, resort=7)을 명시적으로 강제함(`"days exceeds this
+  region's style limit"`). 배포 확인 후에만 착수한다는 지시서의 순서를 그대로
+  지켰다. 플랫 `API_MAX_DAYS=3` 상수를 걷어내고 지역별 `regionMaxDays()`로
+  대체(`tradule_source.js`, `cli.js` 양쪽 — 두 계층이 서로 다른 진실을 가지면
+  D-051 후속 같은 사고가 재발하므로 이번엔 처음부터 양쪽에 같은 로직을 뒀다).
+  본문 구성도 스타일별로 분기 — 휴양지(resort)는 도시형 "시간대별 동선" 틀
+  대신 숙소 권역·일자별 일정·액티비티·휴식·맛집 섹션을 쓰도록
+  `blog_pass2_outline.md`에 "B-resort안"을 추가하고, `trip_data.style`을
+  export해 프롬프트에 전달했다.
+- **버린 대안**: §4(QA 기준)는 착수하지 않음 — 코드를 확인해보니 "하루 스팟
+  수" 같은 하드코딩 규칙 자체가 없었고(있는 건 "섹션당 구체 수치 개수" 규칙),
+  실제 문제는 `runBlogLLMQA()`의 LLM 자체 판단 쪽인데 그 호출엔 trip_data/style
+  이 아예 전달되지 않아 정확한 수정이 이번 범위에서 어려웠다. 실제로 휴양형
+  글이 "장소 부족"으로 떨어지는 사례가 확인되면 별도 작업으로 넘긴다 — 확인도
+  안 된 문제를 짐작으로 고치지 않는다.
+- **관련 파일**: `src/data/tradule_regions.json`(재조회, 해외 137→154곳),
+  `src/agents/tradule_source.js`(regionMaxDays/regionStyle 신규, API_MAX_DAYS
+  제거, trip_data.style 추가), `cli.js`(regionMaxDaysFor 신규, DAY_OPTIONS에
+  4박5일·5박7일 추가, pickDaysNav/일수 경고 스타일 인식),
+  `prompts/blog_pass2_outline.md`(B-resort안 섹션 구성, 스타일별 제목 톤),
+  `src/agents/blog_content_enhancer.js`(region_style 템플릿 변수 전달),
+  `docs/work-orders/2026-09-23_resort-days-and-structure.md`

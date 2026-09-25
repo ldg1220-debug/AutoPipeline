@@ -100,7 +100,9 @@ resort  "세부 5박7일 — 리조트에서 쉬며 하루 하나씩, 호핑·�
 
 ---
 
-## 처리 결과 (2026-09-23) — 착수 보류
+## 처리 결과
+
+### 2026-09-23 — 착수 보류 (1차 확인)
 
 지시서 자체가 명시한 전제조건("트레쥴 쪽이 배포된 뒤에 착수하세요")을 확인하기
 위해 직접 라이브 API를 대조했습니다.
@@ -111,7 +113,41 @@ GET /api/content/course-brief?region=세부&days=4~7
   → 전부 400 {"error":"days must be 1, 2, or 3"} (기존과 동일, D-042 때와 변화 없음)
 ```
 
-**짝 지시서(`TRADULE_2026-09-23_코스일수_5일까지_확장.md`)가 아직 배포 전입니다.**
-지시서 지침대로 코드 변경 없이 이 파일만 저장해두고 착수를 보류했습니다 —
-트레쥴 쪽 배포가 확인되면(`style` 필드 등장 + `days>3` 200 응답) 바로 이어서
-진행합니다.
+**짝 지시서(`TRADULE_2026-09-23_코스일수_5일까지_확장.md`)가 아직 배포 전였습니다.**
+지시서 지침대로 코드 변경 없이 이 파일만 저장해두고 착수를 보류했습니다.
+
+### 2026-09-25 — 배포 재확인 후 착수
+
+사용자 요청("배포 재확인해봐")으로 재확인:
+
+```
+GET /api/content/regions
+  → style: "city"|"resort" 필드 등장 확인 (예: 오사카→city, 세부→resort, 서귀포→resort)
+GET .../course-brief?region=오사카&days=6  → 400 "days exceeds this region's style limit" (maxDays:5)
+GET .../course-brief?region=오사카&days=5  → 200, 20곳
+GET .../course-brief?region=세부&days=7    → 422 insufficient_spots(상한 문제 아님, 데이터 커버리지)
+GET .../course-brief?region=세부&days=8    → 400 "days must be an integer from 1 to 7"
+```
+
+배포 확인 후 §1~§3을 구현했습니다.
+
+- §1: `src/data/tradule_regions.json` 재조회(해외 137→154곳 반영). `tradule_source.js`에
+  `regionMaxDays(region)`(city=5, resort=7, 미분류=3 기본값) 추가 — 기존 플랫
+  `API_MAX_DAYS=3` 상수를 대체. `extractDays()`는 더 이상 자체 클램프하지 않고
+  `resolveDays()`가 지역별 상한을 최종 적용. `cli.js`도 동일 로직으로
+  `regionMaxDaysFor()` 추가, `DAY_OPTIONS`에 4박5일(city)·5박7일(resort) 옵션 추가,
+  구조화 선택 화면(`pickDaysNav`)이 고른 지역의 스타일에 맞는 옵션만 보여주도록
+  정정. 자유 입력 시 일수 경고(D-053)도 스타일별 실제 상한으로 비교하도록 갱신.
+- §2: `blog_pass2_outline.md`에 "B-resort안" 섹션 구성을 신규 추가(숙소 권역·
+  일자별 일정·액티비티·쉬는 날·맛집)해, 지역 스타일이 resort일 때 도시형
+  "시간대별 동선" 틀 대신 쓰도록 분기. `trip_data.style`을 새로 export해
+  `blog_content_enhancer.js`의 `pass2Outline()`이 `{region_style}` 템플릿
+  변수로 프롬프트에 전달.
+- §3: 같은 프롬프트에 지역 스타일별 제목 톤 가이드(resort=휴식·액티비티 중심,
+  city=기존 동선·코스 개수 중심) 추가.
+- §4: 착수 안 함 — 코드에 "하루 스팟 수" 하드코딩 규칙 자체가 없었음(확인 결과
+  `BLOG_MIN_NUMBERS_PER_SECTION`은 "섹션당 구체 수치 개수" 규칙이지 "하루 장소
+  개수" 규칙이 아니었음). LLM 자체 판단(`runBlogLLMQA`)이 휴양형 콘텐츠를
+  "장소가 적다"고 오판할 위험은 남아있지만, 그 판정 경로에 trip_data/style이
+  아예 전달되지 않아 이번 범위에서 정확한 수정이 어려웠음 — 실제로 휴양형 글이
+  QA에서 그 사유로 떨어지는 게 확인되면 별도로 다시 보겠습니다.
