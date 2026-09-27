@@ -476,6 +476,13 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     outline.title = sanitizeTitleForBannedWords(outline.title);
     outline.title = sanitizeDaysAgainstTripData(outline.title, tripData, keyword);
   }
+  // 2026-09-27 실측("세부 5박7일" → 실제 코스는 3일로 재시도돼 title은 "2박3일"로
+  // 정정됐지만 meta_description은 그대로 남아 QA가 "본문 내용이 제목·메타 설명과
+  // 일치하지 않음"으로 반려): title만 고치고 meta_description을 빠뜨리면 같은 글
+  // 안에서 서로 다른 일수를 주장하는 내부 모순이 생긴다 — 같이 정정한다.
+  if (outline?.meta_description) {
+    outline.meta_description = sanitizeDaysAgainstTripData(outline.meta_description, tripData, keyword);
+  }
   outline = sanitizeOutlineTransport(outline, tripData);
   return outline;
 }
@@ -905,7 +912,11 @@ async function enhanceBlogDraft(content) {
       title:            outline.title || blog_draft?.title || `${keyword} 정리`,
       slug:             outline.slug  || keyword.replace(/\s+/g, '-'),
       meta_description: outline.meta_description || '',
-      seo_keywords:     blog_draft?.seo_keywords ?? splitKeywordPhrases(keyword),
+      // 2026-09-27 실측: seo_keywords 기본값이 원본 키워드("세부 5박7일")를 그대로
+      // 쓰면, 실제 코스는 3일이라 본문·제목이 "2박3일"로 정정된 뒤에도 QA가 "SEO
+      // 키워드 확인 필요: [세부 5박7일]"을 계속 낸다 — 본문에 있을 수 없는 문구를
+      // 기준으로 검사하는 셈이라 title과 같은 정정을 여기도 적용한다.
+      seo_keywords:     blog_draft?.seo_keywords ?? splitKeywordPhrases(sanitizeDaysAgainstTripData(keyword, tripData, keyword)),
       sections:         finalSections,
       review_verdict:   reviewResult.verdict,
       review_issues:    reviewResult.issues,

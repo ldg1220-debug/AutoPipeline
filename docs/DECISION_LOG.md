@@ -1026,3 +1026,20 @@
   분리돼 있으면 한쪽만 고치고 넘어가기 쉽다). 다음에 비슷한 로직을 고칠
   때는 "이 값을 참조하는 다른 곳이 있는가"를 grep으로 먼저 확인할 것.
 - **관련 파일**: `cli.js`(displayDayLabel 신규, 확인 화면 2곳 교체)
+
+### D-053 후속: 일수 정정이 title만 하고 meta_description·seo_keywords는 빠뜨림
+- **결정**: "세부 5박7일" 실측(3일로 재시도돼 title은 "세부 2박3일"로 정정됨) —
+  QA가 "본문의 내용이 제목과 메타 설명과 일치하지 않음" / "SEO 키워드 확인
+  필요: [세부 5박7일]"로 반려됨. 원인: D-053의 `sanitizeDaysAgainstTripData()`
+  적용을 title·본문 섹션·FAQ에만 하고 `meta_description`·`seo_keywords`
+  기본값(원본 키워드 그대로)엔 빠뜨려서, 같은 글 안에서 title은 "2박3일"인데
+  meta_description·SEO 키워드 목록은 여전히 "5박7일"을 주장하는 내부 모순이
+  생겼다. `meta_description`에도 같은 정정을 적용하고, `seo_keywords` 기본값도
+  원본 키워드 대신 일수 정정을 거친 키워드로 분리하도록 수정.
+- **교훈**: 이 세션에서 "판단 로직만 고치고 참조하는 다른 필드는 빠뜨리는"
+  실수가 세 번째다(D-051 후속, D-054 후속과 같은 계열) — 한 값(키워드의
+  일수 표현)이 여러 필드(title·meta_description·seo_keywords·본문·FAQ)에
+  파생되는 구조에서는 정정 지점 하나를 고칠 때 "이 원본 값을 그대로 베끼는
+  다른 필드가 더 있는가"를 먼저 전부 grep해서 확인해야 한다.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`(pass2Outline에서
+  meta_description도 정정, blog_draft.seo_keywords 기본값 정정)
