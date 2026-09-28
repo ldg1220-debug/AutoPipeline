@@ -7,7 +7,7 @@ import readline from 'readline';
 import axios from 'axios';
 import fs from 'fs';
 import { mineKeywords, generateTravelSeeds } from '../src/agents/keyword_miner.js';
-import { enhanceAllBlogDrafts, rewriteUnderperformers, sanitizeDaysAgainstTripData } from '../src/agents/blog_content_enhancer.js';
+import { enhanceAllBlogDrafts, rewriteUnderperformers, sanitizeDaysAgainstTripData, regenerateFailedSections } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll, reloadCoupangLinks } from '../src/agents/monetizer.js';
 import { publishBlogPosts, editBlogPosts } from '../src/agents/blog_publisher.js';
@@ -1007,30 +1007,69 @@ async function main() {
     await writeJSON(`${outDir}/blog/qa_${date}.json`, qaData);
 
     // REJECTED 항목 → 재작성 1회 시도
+    // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2④): 예전엔 REJECTED면
+    // 모든 섹션 body를 비우고 Pass1부터 전체를 다시 돌렸는데, 그때마다
+    // 게이트가 다시 걸러내면서 매번 더 짧아지는 사고가 반복됐다(실측:
+    // 세부 4080→2221자, 경주 3243→1662자, 세부5박7일 3784→1345자). 반려
+    // 사유 문자열에서 문제된 섹션 헤딩만 뽑아 그 섹션만 재생성한다
+    // (regenerateFailedSections — 순손실이면 원본 섹션을 그대로 유지).
+    // 헤딩을 못 뽑는 반려 사유(예: 구조적 문제)만 있으면 안전장치로 기존
+    // 전체 재작성 경로를 그대로 쓴다.
+    const HEADING_LIST_ISSUE = /(?:섹션 글자 수 미달|구체 수치 부족): \[([^\]]+)\]/g;
+    function extractFailedHeadings(issues) {
+      const headings = new Set();
+      for (const issue of issues ?? []) {
+        for (const m of issue.matchAll(HEADING_LIST_ISSUE)) {
+          m[1].split(',').map((h) => h.trim()).filter(Boolean).forEach((h) => headings.add(h));
+        }
+      }
+      return [...headings];
+    }
+
     const rejectedItems = qaData.contents?.filter((c) => c.blog_qa?.status === 'REJECTED') ?? [];
     if (rejectedItems.length > 0) {
       logger.info(`[blog:pipeline] QA 탈락 ${rejectedItems.length}개 → 재작성 시도`);
       try {
-        // QA 피드백을 포함해 재작성 — body 초기화해야 enhancer가 스킵하지 않음
-        const retryInput = {
-          ...draftData,
-          contents: rejectedItems.map((c) => ({
-            ...c,
-            qa_feedback:    c.blog_qa?.suggestions ?? [],
-            qa_issues:      c.blog_qa?.issues ?? [],
-            blog_draft: c.blog_draft ? {
-              ...c.blog_draft,
-              sections: (c.blog_draft.sections ?? []).map((s) => ({ ...s, body: '' })),
-            } : null,
-          })),
-        };
-        const retryDraft = await enhanceAllBlogDrafts(retryInput);
-        const retryQa = await runBlogQA(retryDraft);
+        const partial = [];
+        const needsFullRewrite = [];
+        for (const c of rejectedItems) {
+          const failedHeadings = extractFailedHeadings(c.blog_qa?.issues);
+          if (failedHeadings.length > 0) {
+            partial.push({ content: c, failedHeadings });
+          } else {
+            needsFullRewrite.push(c);
+          }
+        }
+
+        const partialResults = [];
+        for (const { content: c, failedHeadings } of partial) {
+          logger.info(`[blog:pipeline] "${c.keyword}" → 섹션 ${failedHeadings.length}개만 재생성: [${failedHeadings.join(', ')}]`);
+          partialResults.push(await regenerateFailedSections(c, failedHeadings));
+        }
+
+        let fullRewriteResults = [];
+        if (needsFullRewrite.length > 0) {
+          logger.info(`[blog:pipeline] "${needsFullRewrite.map((c) => c.keyword).join(', ')}" → 헤딩 특정 불가, 전체 재작성`);
+          const retryInput = {
+            ...draftData,
+            contents: needsFullRewrite.map((c) => ({
+              ...c,
+              qa_feedback:    c.blog_qa?.suggestions ?? [],
+              qa_issues:      c.blog_qa?.issues ?? [],
+              blog_draft: c.blog_draft ? {
+                ...c.blog_draft,
+                sections: (c.blog_draft.sections ?? []).map((s) => ({ ...s, body: '' })),
+              } : null,
+            })),
+          };
+          const retryDraft = await enhanceAllBlogDrafts(retryInput);
+          fullRewriteResults = retryDraft.contents ?? [];
+        }
+
+        const retryQa = await runBlogQA({ ...draftData, contents: [...partialResults, ...fullRewriteResults] });
         const retryApproved = retryQa.contents?.filter((c) => c.blog_qa?.status !== 'REJECTED') ?? [];
         logger.info(`[blog:pipeline] 재작성 후 승인: ${retryApproved.length}/${rejectedItems.length}개`);
 
-        // 재작성 통과한 것 합산
-        const passedKeywords = new Set(retryApproved.map((c) => c.keyword));
         qaData = {
           ...qaData,
           contents: [

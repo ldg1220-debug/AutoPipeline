@@ -578,39 +578,48 @@ export async function attachTripData(keywordData) {
     // — 트레쥴 쪽 스팟이 늘어나면 다음 실행에서 그대로 살아난다.
     let brief = null;
     let days = startDays;
+    // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §3): filterUnratedSpots()로
+    // 평점 없는 스팟을 아예 빼고 그 목록을 trip_data.spots로 그대로 내보냈더니,
+    // 트레쥴이 실제로 준 "A→B→C" 구간 사슬에서 가운데(B, 평점 없음)가 빠져
+    // "A→C"가 되는데 toNextMinutes/toNextMode는 원래 "A→B" 값 그대로 남아
+    // 트레쥴에 없는 가짜 구간이 만들어졌다(실측: 경주 황리단길→대구갈비 8분을
+    // 빼면 "황리단길→성동시장 8분"이라는, 트레쥴에 없는 구간이 생김). 경로용
+    // 스팟 목록(cleanSpots)은 평점 유무와 무관하게 트레쥴이 준 전체를 그대로
+    // 쓰고, "평점 있는 스팟이 최소 6곳인가"라는 생존성 판정에만 별도로
+    // filterUnratedSpots()를 쓴다. 여행사·공항 스팟은 실제 방문지가 아니므로
+    // 여전히 경로에서도 제외한다(구간 사슬 문제가 실측 확인된 적 없음).
     let cleanSpots = [];
+    let ratedCount = 0;
     const attemptLog = [];
     const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
       const rawCount = Array.isArray(attempt?.spots) ? attempt.spots.length : 0;
       const sanitized = Array.isArray(attempt?.spots) ? sanitizeSpots(attempt.spots) : [];
-      const afterUnrated = filterUnratedSpots(sanitized);
-      const attemptSpots = filterTravelAgencySpots(afterUnrated);
-      // 2026-09-28(작업지시서 §10): "N일=M곳"만으로는 어느 필터가 몇 곳을 걸렀는지
-      // 알 수 없어 실제 요청이 나갔는지·왜 부족한지 추적이 안 됐다. 필터 단계별로
-      // 몇 곳이 빠졌는지 남긴다.
-      const unratedDropped = sanitized.length - afterUnrated.length;
-      const agencyDropped = afterUnrated.length - attemptSpots.length;
+      const agencyFiltered = filterTravelAgencySpots(sanitized);
+      const ratedSpots = filterUnratedSpots(agencyFiltered);
+      const agencyDropped = sanitized.length - agencyFiltered.length;
       attemptLog.push(
-        `${d}일=${attemptSpots.length}곳(원본${rawCount}, 평점없음제외-${unratedDropped}, 여행사·공항제외-${agencyDropped})`
+        `${d}일=${agencyFiltered.length}곳(원본${rawCount}, 평점있는곳${ratedSpots.length}, 여행사·공항제외-${agencyDropped})`
       );
-      if (attemptSpots.length >= MIN_SPOTS) {
+      if (ratedSpots.length >= MIN_SPOTS) {
         brief = attempt;
         days = d;
-        cleanSpots = attemptSpots;
+        cleanSpots = agencyFiltered;
+        ratedCount = ratedSpots.length;
         break;
       }
       // 이번 시도가 최선이면 (스킵하게 되더라도) 로그·디버그 저장용으로 남겨둔다.
-      if (!brief || attemptSpots.length > cleanSpots.length) {
+      if (!brief || ratedSpots.length > ratedCount) {
         brief = attempt;
         days = d;
-        cleanSpots = attemptSpots;
+        cleanSpots = agencyFiltered;
+        ratedCount = ratedSpots.length;
       }
     }
     rawResponses[item.keyword] = brief;
 
-    if (cleanSpots.length < MIN_SPOTS) {
+    if (ratedCount < MIN_SPOTS) {
       const retryNote = isResortStyleRegion
         ? `휴양지라 일수를 줄이지 않고 ${startDays}일 그대로 시도함 — 데이터 부족, 상한 문제 아님`
         : `일수를 줄여도 ${MIN_SPOTS}곳 미달`;
@@ -618,7 +627,7 @@ export async function attachTripData(keywordData) {
         `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, ${retryNote} ` +
         `(시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
       );
-      updated.push({ ...item, skip_reason: `스팟 ${cleanSpots.length}개 (최소 ${MIN_SPOTS}개, 평점 있는 스팟 기준)` });
+      updated.push({ ...item, skip_reason: `평점 있는 스팟 ${ratedCount}개 (최소 ${MIN_SPOTS}개)` });
       continue;
     }
     if (days !== startDays) {
@@ -660,7 +669,7 @@ export async function attachTripData(keywordData) {
         style:           regionStyle(brief.region ?? region),
       },
     });
-    logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${cleanSpots.length}개 확보`);
+    logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${cleanSpots.length}개 확보(평점 있는 곳 ${ratedCount}개)`);
   }
 
   // 디버깅용 원본 응답 저장

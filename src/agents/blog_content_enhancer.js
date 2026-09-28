@@ -408,7 +408,10 @@ export function sanitizeDaysAgainstTripData(text, tripData, keyword) {
 // "'완벽'이라는 단어 자체 금지"라고 명시했는데도(blog_pass2_outline.md) 실측
 // 발행(maeilg.com/267 "발리 5박 6일, 대중교통과 도보로 즐기는 완벽 코스")에서
 // 재발함 — sanitizeTitleForTransport와 같은 패턴으로 코드에서 한 번 더 막는다.
-const BANNED_TITLE_WORDS = ['완벽', '꿀팁', '성지', '역대급', '총정리'];
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §4): "비용 최소화"·"가성비" 같은
+// 각도는 가격 이야기를 부르는데, 가격은 게이트④가 이미 막고 있는 데이터라
+// 본문이 제목을 못 따라간다(§7의 "vs/비교/패키지"와 같은 문제 계열).
+const BANNED_TITLE_WORDS = ['완벽', '꿀팁', '성지', '역대급', '총정리', '비용', '가성비', '최소화', '저렴', '절약'];
 
 function sanitizeTitleForBannedWords(title) {
   if (!title) return title;
@@ -483,7 +486,12 @@ function sanitizeOutlineForbidden(outline) {
 // 실측 확인됐다(3일 코스에 일정이 네 갈래로 갈림). "섹션을 통째로 재설계"하는
 // 대신 이 섹션 유형만 LLM 호출 자체를 건너뛰고 trip_data로 코드가 직접 문장을
 // 만든다 — 날조가 아예 불가능한 유일한 방법.
-const ITINERARY_NARRATION_PATTERN = /시간대별\s*동선|일자별\s*(상세\s*)?일정|동선\s*계획|일정\s*계획/;
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2②) 확장: 일자 섹션을 코드로
+// 만들면(§5) "이동 방법 및 교통편"·"동선 및 소요시간"류 섹션이 같은 내용을
+// LLM이 다시 서술하면서 (a) 트레쥴 값과 다르게 쓰고 (b) 게이트가 틀린 문장을
+// 지우면서 섹션이 텅 비는 사고로 이어졌다 — 패턴을 넓혀서 일자 섹션이 있을 땐
+// 이런 중복 섹션 자체를 제거한다.
+const ITINERARY_NARRATION_PATTERN = /시간대별\s*동선|일자별\s*(상세\s*)?일정|동선\s*계획|일정\s*계획|이동\s*방법|교통편|동선\s*및?\s*소요시간|이동\s*경로/;
 
 function isItineraryNarrationSection(heading) {
   return ITINERARY_NARRATION_PATTERN.test(heading ?? '');
@@ -497,9 +505,7 @@ function buildDeterministicItinerary(tripData) {
   const paragraphs = dayNumbers.map((day) => {
     const daySpots = byDay.get(day);
     const parts = daySpots.map((s, i) => {
-      const ratingPart = typeof s.rating === 'number'
-        ? ` (평점 ${s.rating}${typeof s.reviewCount === 'number' ? `, 리뷰 ${s.reviewCount.toLocaleString()}개` : ''})`
-        : '';
+      const ratingPart = formatRatingPart(s);
       const next = daySpots[i + 1];
       const nextPart = (next && typeof s.toNextMinutes === 'number')
         // "도보로"/"차량으로" 조사(로/으로) 분기를 피하려고 "OO 이동 N분" 고정 형태로 쓴다.
@@ -510,6 +516,17 @@ function buildDeterministicItinerary(tripData) {
     return `<strong>${day}일차</strong> — ${parts.join(' → ')}`;
   });
   return paragraphs.join('\n\n');
+}
+
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §3): 평점 없는 스팟도 이제
+// 경로(cleanSpots)에 그대로 남는다(tradule_source.js 참고) — 구간 사슬이
+// 끊기지 않도록. 대신 서술에서는 평점을 지어내지 않고 "평점 정보 없음"이라고
+// 명시한다(추천 어조 없이 사실만).
+function formatRatingPart(s) {
+  if (typeof s.rating === 'number') {
+    return ` (평점 ${s.rating}${typeof s.reviewCount === 'number' ? `, 리뷰 ${s.reviewCount.toLocaleString()}개` : ''})`;
+  }
+  return ' (평점 정보 없음)';
 }
 
 // 2026-09-28(작업지시서 "세부 초안 3차" §5): "N일차" 제목 섹션은 아웃라인이
@@ -523,9 +540,7 @@ function buildDeterministicItineraryForDay(tripData, day) {
   const daySpots = byDay.get(day) ?? [];
   if (!daySpots.length) return '';
   const parts = daySpots.map((s, i) => {
-    const ratingPart = typeof s.rating === 'number'
-      ? ` (평점 ${s.rating}${typeof s.reviewCount === 'number' ? `, 리뷰 ${s.reviewCount.toLocaleString()}개` : ''})`
-      : '';
+    const ratingPart = formatRatingPart(s);
     const next = daySpots[i + 1];
     const nextPart = (next && typeof s.toNextMinutes === 'number')
       ? ` → ${MODE_KR[s.toNextMode] ?? s.toNextMode ?? ''} 이동 ${s.toNextMinutes}분`
@@ -740,6 +755,75 @@ function fixParticleAfterWord(text, word) {
   return text.replace(re, (_m, p) => word + (hasBatchim(word) ? PARTICLE_PAIRS[p].batchim : PARTICLE_PAIRS[p].noBatchim));
 }
 
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §3 게이트⑥): 분→수단 표만으로는
+// 다른 구간의 같은 분값과 혼동될 수 있다(실측: "경주월드→보문관광단지 차량
+// 7분" — 실제 경주월드→보문 구간은 도보 10분인데, 다른 구간(보문→야드,
+// 차량 7분)의 분·수단을 가져다 썼다. 수단이 우연히 맞아 보여서 기존
+// 분→수단 치환은 그대로 통과시켰다). 문장에 스팟 이름이 두 개 이상 나오면
+// 그 쌍의 실제 구간과 대조한다 — 구간 자체가 없거나 분이 다르면 문장을
+// 통째로 지운다("어느 구간인지도 모르면서 숫자만 맞춰준다"는 위험을 없앰).
+function buildLegPairMap(tripData) {
+  const map = new Map();
+  const byDay = groupSpotsByDay(tripData?.spots ?? []);
+  for (const daySpots of byDay.values()) {
+    daySpots.forEach((s, i) => {
+      const next = daySpots[i + 1];
+      if (next && typeof s.toNextMinutes === 'number' && s.toNextMode) {
+        map.set(`${s.name}→${next.name}`, { mode: s.toNextMode, minutes: s.toNextMinutes });
+      }
+    });
+  }
+  return map;
+}
+
+function correctOrStripLegMentions(text, tripData) {
+  const legPairMap = buildLegPairMap(tripData);
+  if (!text || legPairMap.size === 0) return text;
+  const spotNames = [...new Set((tripData?.spots ?? []).map((s) => s.name).filter(Boolean))];
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  let fixedCount = 0;
+  let droppedCount = 0;
+  const kept = [];
+  for (const sentence of sentences) {
+    const minuteMatch = sentence.match(/(\d+)\s*분/);
+    if (!minuteMatch) { kept.push(sentence); continue; }
+    // 문장에 등장하는 스팟명을 나온 순서대로 찾는다 — 먼저 나온 쪽이 출발지.
+    const mentioned = spotNames
+      .map((name) => ({ name, idx: sentence.indexOf(name) }))
+      .filter((m) => m.idx !== -1)
+      .sort((a, b) => a.idx - b.idx);
+    if (mentioned.length < 2) { kept.push(sentence); continue; } // 스팟 쌍 없음 — 분→수단 방식(아래 함수)에 맡김
+    const [from, to] = mentioned;
+    const leg = legPairMap.get(`${from.name}→${to.name}`) ?? legPairMap.get(`${to.name}→${from.name}`);
+    if (!leg) {
+      droppedCount += 1;
+      continue; // 두 스팟 사이에 실제 구간 자체가 없음
+    }
+    const minutes = Number(minuteMatch[1]);
+    if (minutes !== leg.minutes) {
+      droppedCount += 1;
+      continue; // 분이 다름
+    }
+    const foundWord = Object.keys(TRANSPORT_WORD_TO_MODE).find((w) => sentence.includes(w));
+    if (!foundWord || TRANSPORT_WORD_TO_MODE[foundWord] === leg.mode) { kept.push(sentence); continue; }
+    const correctWord = MODE_KR[leg.mode] ?? leg.mode;
+    let corrected = sentence;
+    for (const [word, mode] of Object.entries(TRANSPORT_WORD_TO_MODE)) {
+      if (mode === TRANSPORT_WORD_TO_MODE[foundWord]) corrected = corrected.split(word).join(correctWord);
+    }
+    corrected = fixParticleAfterWord(corrected, correctWord);
+    fixedCount += 1;
+    kept.push(corrected);
+  }
+  if (fixedCount > 0) {
+    logger.warn(`[blog_content_enhancer] 구간 이동수단 오류 ${fixedCount}건 스팟명 대조로 치환`);
+  }
+  if (droppedCount > 0) {
+    logger.warn(`[blog_content_enhancer] 스팟 쌍과 트레쥴 구간이 안 맞는 문장 ${droppedCount}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
 function correctLegTransportMentions(text, tripData) {
   const minuteModeMap = buildLegMinuteModeMap(tripData);
   if (!text || minuteModeMap.size === 0) return text;
@@ -799,6 +883,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     outline.sections = outline.sections.map((s) => ({ ...s, heading: stripHeadingMarks(s.heading) }));
   }
   if (outline?.title) {
+    const titleBeforeGates = outline.title;
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
     outline.title = sanitizeTitleForBannedWords(outline.title);
     outline.title = sanitizeDaysAgainstTripData(outline.title, tripData, keyword);
@@ -822,6 +907,18 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     } else if (tripData?.spots?.length && outline.title.length < keyword.length + 10) {
       // 이동수단·금지어를 걷어내고 나니 "세부 2박3일 코스 — 일정"처럼 빈약한
       // 제목이 남는 사고가 실측 확인됨("지우기만 하면 제목이 빈약해진다").
+      outline.title = buildFallbackTitle();
+    } else if (
+      tripData?.spots?.length && outline.title !== titleBeforeGates &&
+      !/\d/.test(outline.title)
+    ) {
+      // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §4): 위 길이 기준(keyword.length+10)을
+      // 넘겨도 단어만 빠진 제목("대중교통으로 즐기는 여행" → "여행")은 뜻이 없다 —
+      // 실측: "경주 2박3일 코스 — 대중교통으로 즐기는 여행 일정" → "경주 2박3일
+      // 코스 — 여행 일정"(길이는 남았지만 숫자·핵심 정보가 없어짐). 게이트가
+      // 뭔가를 지웠는데 숫자 패턴(예: "9곳", "36.5km")이 하나도 안 남았으면
+      // 뜻이 빈 제목으로 판단해 재작성한다.
+      logger.warn(`[blog_content_enhancer] 제목 게이트가 단어를 지워 의미가 빈약해짐 → 재작성: "${outline.title}"`);
       outline.title = buildFallbackTitle();
     }
   }
@@ -885,6 +982,33 @@ async function pass3Body(keyword, section, targetReader, outlineContext, isFirst
   });
   await throttle(2000);
   // 본문은 자유 텍스트 반환 (JSON 아님)
+  return callGPT4o(prompt, false);
+}
+
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2①): 일자 섹션이 코드가 만든
+// "장소 → 장소" 목록뿐이라 QA의 섹션당 최소 글자수(350자)·구체 수치 규칙에
+// 매번 걸렸다(9/29 지시서 §3②가 원래 요구한 "목록 + 해설 2~4문장"에서 해설이
+// 빠져 있었음). 그날 스팟만 넘겨 짧은 해설을 LLM으로 따로 생성하고, 코드가
+// 만든 목록 뒤에 붙인다 — 해설은 그날 스팟 이외를 언급할 수 없어 다른
+// 섹션·다른 날과 어긋날 여지가 없다.
+async function pass3DayNarrative(keyword, day, daySpots, targetReader) {
+  const spotList = daySpots.map((s) => {
+    const rating = typeof s.rating === 'number' ? `평점 ${s.rating}` : '평점 정보 없음';
+    return `${s.name}(${s.category ?? ''}, ${rating})`;
+  }).join(', ');
+  const prompt = (
+    `"${keyword}" 코스의 ${day}일차 해설을 2~4문장(200~350자)으로 쓰세요.\n` +
+    `독자: ${targetReader}\n` +
+    `이날 방문하는 곳(이 목록에 있는 곳만 언급하세요 — 다른 날짜·다른 스팟은 절대 언급 금지): ${spotList}\n` +
+    `규칙:\n` +
+    `- 현재형/권유형만 쓰세요("~한다", "~하면 좋다"). "~했다", "~즐겼다", "~다녀왔다" 같은 ` +
+    `과거형 체험 서술은 절대 쓰지 마세요(실제로 다녀온 것처럼 쓰지 말 것).\n` +
+    `- 평점은 위 목록에 있는 값만 그대로 인용하세요. "평점 정보 없음"인 곳은 평점을 언급하지 마세요.\n` +
+    `- 구체적인 메뉴명·요금·영업시간을 지어내지 마세요.\n` +
+    `- 마지막 문단·"핵심:" 요약 반복 금지.\n` +
+    `해설 텍스트만 반환하세요(목록 다시 쓰지 말 것):`
+  );
+  await throttle(1500);
   return callGPT4o(prompt, false);
 }
 
@@ -1183,6 +1307,72 @@ function buildAffiliateHooks(sections, affiliateCategory) {
  * Pass 2 (GPT-4o-mini): H2/H3 아웃라인 + FAQ 생성
  * Pass 3 (GPT-4o):      섹션별 본문 작성
  */
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2④): enhanceBlogDraft 안
+// 클로저였던 게이트 체인을 최상위 함수로 뽑아냈다 — regenerateFailedSections()가
+// 전체 재작성 없이 섹션 단위로도 같은 게이트를 적용해야 하기 때문.
+function applyContentGatesFor(text, tripData, keyword) {
+  let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
+  sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
+  sanitized = stripWrongDayMentions(sanitized, tripData);
+  sanitized = stripTimeOfDayMentions(sanitized, tripData);
+  sanitized = correctOrStripLegMentions(sanitized, tripData);
+  sanitized = correctLegTransportMentions(sanitized, tripData);
+  sanitized = stripMismatchedDurationMentions(sanitized, tripData);
+  sanitized = stripUnsourcedMoney(sanitized);
+  sanitized = stripFirstPersonExperienceClaims(sanitized);
+  return sanitized;
+}
+
+/**
+ * QA가 반려한 섹션만 재생성한다(§2④) — 예전엔 REJECTED면 모든 섹션의 body를
+ * 비우고 enhanceBlogDraft를 처음부터(Pass1~5) 다시 돌렸는데, 그때마다 게이트가
+ * 다시 걸러내면서 매번 더 짧아지는 사고가 반복됐다(세부 4080→2221자, 경주
+ * 3243→1662자, 세부5박7일 3784→1345자 — 실측). 아웃라인·제목·다른 섹션은
+ * 그대로 두고 실패한 섹션만 다시 쓴다. 재생성 결과가 원본보다 짧으면(순손실)
+ * 그 섹션은 원본을 유지한다.
+ */
+export async function regenerateFailedSections(content, failedHeadings) {
+  const { keyword, blog_draft, trip_data: tripData } = content;
+  const sections = blog_draft?.sections ?? [];
+  const targetReader = blog_draft?.target_reader ?? '여행 계획 중인 독자';
+  const failedSet = new Set(failedHeadings ?? []);
+  if (failedSet.size === 0 || !sections.length) return content;
+
+  const outlineContext = `제목: ${blog_draft.title}, 섹션: ${sections.map((s) => s.heading).join(' / ')}`;
+  const byDay = tripData?.spots?.length ? groupSpotsByDay(tripData.spots) : new Map();
+
+  const newSections = await Promise.all(sections.map(async (section) => {
+    if (!failedSet.has(section.heading)) return section;
+    const dayMatch = (section.heading ?? '').match(DAY_SECTION_PATTERN);
+    let newBody;
+    if (dayMatch && tripData?.spots?.length) {
+      const day = Number(dayMatch[1]);
+      const list = buildDeterministicItineraryForDay(tripData, day);
+      const daySpots = byDay.get(day) ?? [];
+      let narrative = daySpots.length ? await pass3DayNarrative(keyword, day, daySpots, targetReader) : '';
+      narrative = stripFirstPersonExperienceClaims(narrative);
+      narrative = stripWrongDayMentions(narrative, tripData);
+      newBody = narrative ? `${list}\n\n${narrative}` : list;
+    } else {
+      const sectionTripData = sliceTripDataForSection(tripData, section);
+      newBody = await pass3Body(keyword, section, targetReader, outlineContext, false, sectionTripData);
+      newBody = applyContentGatesFor(newBody, tripData, keyword);
+    }
+    // 순손실 방지: 재생성이 원본보다 짧으면 원본을 유지한다.
+    if ((newBody?.length ?? 0) < (section.body?.length ?? 0)) {
+      logger.warn(`[blog_content_enhancer] 섹션 [${section.heading}] 재생성 결과가 원본보다 짧음(${newBody?.length ?? 0} < ${section.body?.length ?? 0}) → 원본 유지`);
+      return section;
+    }
+    return { ...section, body: newBody };
+  }));
+
+  const wordCount = newSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  return {
+    ...content,
+    blog_draft: { ...blog_draft, sections: newSections, word_count: wordCount },
+  };
+}
+
 async function enhanceBlogDraft(content) {
   const { keyword, category, shortform_script, blog_draft } = content;
 
@@ -1303,7 +1493,17 @@ async function enhanceBlogDraft(content) {
   // 불가능하도록). 아웃라인의 다른 섹션(개요·맛집·이동방법 등)은 그대로 둔다.
   if (tripData?.days && tripData?.spots?.length) {
     const dayIndex = bodySections.findIndex((s) => DAY_SECTION_PATTERN.test(s.heading ?? ''));
-    const nonDaySections = bodySections.filter((s) => !DAY_SECTION_PATTERN.test(s.heading ?? ''));
+    // §2②: 일자 섹션이 생기면 "시간대별 동선/이동 방법/교통편"류는 같은 구간
+    // 정보를 중복 서술하므로 아예 뺀다 — 남겨두면 LLM이 다시 쓰다 틀리고,
+    // 게이트가 틀린 문장을 지우면서 섹션이 비는 사고로 이어졌었다(실측 확인).
+    const nonDaySections = bodySections.filter(
+      (s) => !DAY_SECTION_PATTERN.test(s.heading ?? '') && !ITINERARY_NARRATION_PATTERN.test(s.heading ?? '')
+    );
+    const removedCount = bodySections.length - nonDaySections.length
+      - bodySections.filter((s) => DAY_SECTION_PATTERN.test(s.heading ?? '')).length;
+    if (removedCount > 0) {
+      logger.info(`[blog_content_enhancer] 일자 섹션 생성으로 중복 동선/교통 섹션 ${removedCount}개 제거`);
+    }
     const insertAt = dayIndex === -1 ? Math.min(1, nonDaySections.length) : dayIndex;
     const daySections = [];
     for (let d = 1; d <= tripData.days; d++) {
@@ -1335,8 +1535,21 @@ async function enhanceBlogDraft(content) {
     const sectionTripData = sliceTripDataForSection(tripData, section);
     let body;
     if (section.__deterministic_day) {
-      // §5: 코드가 직접 만든 일자 섹션 — LLM을 거치지 않는다.
-      body = buildDeterministicItineraryForDay(tripData, section.__deterministic_day);
+      // §5: 코드가 직접 만든 목록(장소→장소, 절대 틀리지 않음) + 그날 스팟만
+      // 넘긴 짧은 해설(§2①, QA의 섹션당 최소 글자수를 채우기 위함). 목록은
+      // LLM을 거치지 않고, 해설만 좁게 생성해 뒤에 붙인다.
+      const day = section.__deterministic_day;
+      const list = buildDeterministicItineraryForDay(tripData, day);
+      const byDay = groupSpotsByDay(tripData.spots);
+      const daySpots = byDay.get(day) ?? [];
+      let narrative = daySpots.length
+        ? await pass3DayNarrative(keyword, day, daySpots, intent.target_reader)
+        : '';
+      // 목록과 같은 게이트를 해설에도 적용 — 과거형 체험·다른 날 스팟 언급이
+      // 새어 나올 수 있으므로(LLM 산출물이라 프롬프트만으로는 완전하지 않음).
+      narrative = stripFirstPersonExperienceClaims(narrative);
+      narrative = stripWrongDayMentions(narrative, tripData);
+      body = narrative ? `${list}\n\n${narrative}` : list;
     } else if (isItineraryNarrationSection(section.heading) && tripData?.spots?.length) {
       // 게이트②①: "시간대별 동선"류 섹션은 LLM에 자유 서술을 맡기지 않고 trip_data로
       // 코드가 직접 문장을 만든다 — 다른 섹션·FAQ와 일정이 어긋날 여지 자체를 없앤다.
@@ -1381,17 +1594,7 @@ async function enhanceBlogDraft(content) {
   // 2026-09-28 게이트①④⑤(작업지시서 "세부 글 해부") — 일수 정정과 같은 자리에서
   // 함께 적용: 코스 일수를 넘는 일자 서술 삭제, 출처 없는 금액 삭제, 1인칭 체험
   // 표현 삭제. 프롬프트 지시가 세 번 뚫린 뒤 결정론적 사후 필터로 전환.
-  const applyContentGates = (text) => {
-    let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
-    sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
-    sanitized = stripWrongDayMentions(sanitized, tripData);
-    sanitized = stripTimeOfDayMentions(sanitized, tripData);
-    sanitized = correctLegTransportMentions(sanitized, tripData);
-    sanitized = stripMismatchedDurationMentions(sanitized, tripData);
-    sanitized = stripUnsourcedMoney(sanitized);
-    sanitized = stripFirstPersonExperienceClaims(sanitized);
-    return sanitized;
-  };
+  const applyContentGates = (text) => applyContentGatesFor(text, tripData, keyword);
   const finalSections = reviewResult.sections.map((s) => ({
     ...s,
     body: applyContentGates(s.body),
@@ -1424,6 +1627,10 @@ async function enhanceBlogDraft(content) {
       sections:         finalSections,
       review_verdict:   reviewResult.verdict,
       review_issues:    reviewResult.issues,
+      // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2④): QA 반려 시 섹션별
+      // 재생성(regenerateFailedSections)이 pass3Body에 필요한 target_reader를
+      // 다시 만들지 않도록, 원래 Pass1에서 나온 값을 같이 저장해둔다.
+      target_reader:    intent.target_reader,
       faq:              finalFaqSections,
       affiliate_hooks:  buildAffiliateHooks(completedSections, intent.affiliate_category),
       json_ld:          buildJsonLd(outline.title || keyword, keyword, outline.slug || ''),

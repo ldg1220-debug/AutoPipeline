@@ -490,7 +490,17 @@ export async function runVisionQA(textQaData) {
 const BLOG_MIN_SECTION_CHARS = 350;   // 섹션당 최소 글자 수 (얕은 콘텐츠 방어는 사실 밀도 기준으로 이관)
 const BLOG_MIN_FAQ_CHARS     = 150;   // FAQ 답변 최소 글자 수 (Featured Snippet 최소 기준)
 const BLOG_MIN_SECTION_COUNT = 4;     // 최소 섹션 수
-const BLOG_MIN_TOTAL_CHARS   = 4000;  // 글 전체 최소 글자 수 (AdSense 콘텐츠 가치 판단 기준)
+// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2③): 게이트가 사실만 쓰게
+// 걸러둔 상태에서 4000자를 요구하면 다시 지어내는 것 말고는 채울 방법이
+// 없다("사실만 쓰게 해놓고 4000자를 채우라고 하면 다시 지어냅니다") — 3000으로
+// 낮춘다.
+const BLOG_MIN_TOTAL_CHARS   = 3000;  // 글 전체 최소 글자 수 (AdSense 콘텐츠 가치 판단 기준)
+// 2026-09-28(작업지시서 §2③): "N일차 일정" 섹션은 코드가 트레쥴 데이터로 직접
+// 만든 목록+해설이다(blog_content_enhancer.js buildDeterministicItineraryForDay) —
+// 장소명·구간이 정확하다는 게 핵심이지 글자 수가 아니다. 이 섹션은 글자수·
+// 수치밀도 규칙에서 면제한다(코드가 만든 걸 코드가 다시 검사해서 반려하는
+// 자기모순을 피함).
+const CODE_GENERATED_SECTION_PATTERN = /\d+\s*일차/;
 // 여행 코스 콘텐츠(트레쥴 연동) 대상 — 섹션당 최소 구체 수치 언급 개수.
 // "많은 사람들이 찾는 곳" 같은 막연한 서술만 있는 섹션은 탈락시킨다.
 // 평점(4.2), 리뷰수(7,845개), 거리(12.4km), 이동시간(8분) 등 숫자 형태로 카운트.
@@ -533,8 +543,9 @@ async function runBlogLLMQA(content) {
     `평가 항목:\n` +
     `1. seo_score (0~100): SEO 키워드가 제목·본문에 자연스럽게 포함됐는가.\n` +
     `2. readability_score (0~100): 독자가 처음 3초 안에 읽고 싶어지는 도입부인가.\n` +
-    `3. structure_score (0~100): H2/H3 구성이 검색 의도에 맞는가.\n` +
-    `4. issues (string[]): 발견된 문제점. 없으면 빈 배열.\n` +
+    `3. structure_score (0~100): 섹션 구성(각 [헤딩] 표시가 실제 H2/H3로 렌더됩니다 —\n` +
+    `   "## 헤딩" 같은 마크다운 기호가 안 보인다고 "H2/H3 태그 없음"으로 지적하지 마세요)이 검색 의도에 맞는가.\n` +
+    `4. issues (string[]): 발견된 문제점. "H2/H3 태그가 사용되지 않음" 같은 렌더링 관련 지적은 포함하지 마세요. 없으면 빈 배열.\n` +
     `5. suggestions (string[]): 개선 제안. 없으면 빈 배열.\n\n` +
     `JSON만 반환: {"seo_score":0,"readability_score":0,"structure_score":0,"issues":[],"suggestions":[]}`;
 
@@ -582,7 +593,9 @@ function validateBlogStructure(content) {
     }
   }
 
-  const shortSections = sections.filter((s) => (s.body ?? '').length < BLOG_MIN_SECTION_CHARS);
+  const shortSections = sections.filter(
+    (s) => !CODE_GENERATED_SECTION_PATTERN.test(s.heading ?? '') && (s.body ?? '').length < BLOG_MIN_SECTION_CHARS
+  );
   if (shortSections.length > 0) {
     issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${BLOG_MIN_SECTION_CHARS}자)`);
   }
@@ -590,6 +603,7 @@ function validateBlogStructure(content) {
   // 구체 수치 검사 — FAQ가 아닌 본문 섹션만 대상 (막연한 일반론 방어)
   const numericPattern = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
   const thinSections = sections.filter((s) => {
+    if (CODE_GENERATED_SECTION_PATTERN.test(s.heading ?? '')) return false;
     const matches = (s.body ?? '').match(numericPattern) ?? [];
     return matches.length < BLOG_MIN_NUMBERS_PER_SECTION;
   });
