@@ -1068,3 +1068,34 @@
   한다.
 - **관련 파일**: `src/agents/qa_editor.js`(runBlogLLMQA의 promptKeyword,
   validateBlogStructure의 allKws)
+
+### D-053 후속 3: 정정을 필드마다 따라다니지 않고 keyword 자체를 소스에서 정정
+- **결정**: 발행된 글("세부 5박 7일" → 실제 3일 코스)을 사용자가 직접 확인한
+  결과, title·meta_description·seo_keywords는 "세부 2박3일"로 정정됐지만
+  그 외 최소 4곳이 원본 "세부 5박 7일"을 그대로 쓰고 있었다 — 정보 카드
+  헤드라인("세부 5박 7일 핵심 지표"), 섹션 H2 헤딩("세부 5박 7일 여행
+  개요"), alt 텍스트, 관련 포스트 링크 등. 게다가 본문 자체가 3일치 스팟
+  (6곳)만 있는데도 "넷째 날", "다섯째 날"까지 지어내고, A-4 규칙(데이터에
+  없는 일반론 섹션 금지)이 진작에 막았어야 할 "추천 숙소 및 가격대"·"예산
+  및 비용 산정"·"이동 방법 및 교통 정보" 섹션이 독립 H2로 그대로 생성됨 —
+  한 글 안에서 일수 표현이 다섯 갈래로 흩어지는 사고였다.
+  D-053 이후 계속 "title은 고쳤는데 meta_description은 빠뜨렸다"→"거기도
+  고쳤는데 QA 프롬프트는 빠뜨렸다" 식으로 필드 하나씩 쫓아가며 고치는
+  패턴이 세 번 반복된 뒤, **근본적으로 접근을 바꿨다**: 개별 필드를 사후에
+  고치는 대신, `attachTripData()` 직후(Part 1.7 끝, `run-blog-pipeline.js`)
+  `content.keyword` 자체를 `trip_data.days` 기준으로 한 번만 정정한다.
+  이후 Pass1~3·QA·에셋 빌더·발행 등 keyword를 읽는 모든 단계가 시작부터
+  같은(이미 정정된) 값을 쓰게 되므로, 새로운 소비처가 생겨도 별도 패치가
+  필요 없다. title 등에 남아있던 개별 `sanitizeDaysAgainstTripData` 호출은
+  이제 LLM이 그래도 원본을 다시 만들어낼 경우를 막는 2차 안전망으로 남긴다.
+- **미해결로 남긴 것**: "3일치 데이터인데 5일차까지 지어내고, A-4가 금지한
+  숙소 가격·예산·교통 섹션을 만드는" 문제는 keyword 정정만으로는 안 풀린다
+  — 이건 LLM이 B-resort/B-city 아웃라인 지시(그리고 기존 A-4 금지 규칙)
+  자체를 안 지킨 것이다. 코드로 섹션 헤딩을 사후에 걸러내는 안전망
+  (`sanitizeOutlineForNoTripData`와 같은 패턴, 예산/숙소가격/교통정보
+  헤딩을 트레쥴 데이터 유무와 무관하게 항상 차단)은 이번 범위에서 만들지
+  않았다 — 원인이 keyword 정정과 무관한 별개 문제라 섞지 않기 위해서다.
+  다음 실행에서 재발하면 그때 정확히 겨냥해서 고친다.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
+  (sanitizeDaysAgainstTripData export), `scripts/run-blog-pipeline.js`
+  (Part 1.7 직후 content.keyword 정정)

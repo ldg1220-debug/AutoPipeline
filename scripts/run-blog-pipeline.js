@@ -7,7 +7,7 @@ import readline from 'readline';
 import axios from 'axios';
 import fs from 'fs';
 import { mineKeywords, generateTravelSeeds } from '../src/agents/keyword_miner.js';
-import { enhanceAllBlogDrafts, rewriteUnderperformers } from '../src/agents/blog_content_enhancer.js';
+import { enhanceAllBlogDrafts, rewriteUnderperformers, sanitizeDaysAgainstTripData } from '../src/agents/blog_content_enhancer.js';
 import { buildAllAssets } from '../src/agents/blog_asset_builder.js';
 import { monetizeAll, reloadCoupangLinks } from '../src/agents/monetizer.js';
 import { publishBlogPosts, editBlogPosts } from '../src/agents/blog_publisher.js';
@@ -932,6 +932,21 @@ async function main() {
     // C-2 계약: 스팟 3개 미만(=trip_data 없이 skip_reason만 있는 항목)은 글을 쓰지 않는다.
     // 단, 지역 매칭 자체가 안 된 키워드(여행 코스가 아닌 일반 키워드)는 trip_data 없이도 통과시킨다.
     contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+
+    // 2026-09-28 실측("세부 5박 7일" → 실제 코스는 3일뿐이라 재시도 성공): title·
+    // meta_description·seo_keywords에만 개별로 sanitizeDaysAgainstTripData를
+    // 적용했더니, 그 필드들을 안 거치는 다른 곳들(섹션 헤딩, QA 프롬프트의
+    // "키워드:" 줄, blog_asset_builder.js의 정보 카드·썸네일 헤드라인 등)이
+    // 전부 원본 content.keyword("세부 5박 7일")를 그대로 써서 한 글 안에서 값이
+    // 다섯 갈래로 흩어지는 사고가 났다(제목=2박3일, 정보카드=5박7일, 본문 섹션
+    // 제목=5박7일, 본문 서술은 3일치 스팟인데 5일차까지 지어냄...). 하위 호출부를
+    // 하나씩 패치하는 대신, 이 시점에 content.keyword 자체를 trip_data.days
+    // 기준으로 정정해서 그 뒤로 keyword를 읽는 모든 단계(Pass1~3, QA, 에셋 빌더,
+    // 발행)가 처음부터 같은 값을 쓰게 한다 — title 등에 남아있는 개별
+    // sanitizeDaysAgainstTripData 호출은 이제 2차 안전망으로만 남는다.
+    for (const c of contentData.contents) {
+      if (c.trip_data) c.keyword = sanitizeDaysAgainstTripData(c.keyword, c.trip_data, c.keyword);
+    }
     logger.info(`[blog:pipeline] Part 1.7 완료. 진행 대상: ${contentData.contents.length}개`);
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.7 Tradule Source 실패 (계속 진행, trip_data 없이): ${err.message}`);

@@ -376,7 +376,7 @@ function sanitizeOutlineTransport(outline, tripData) {
  * 발리/267). trip_data.days로부터 실제 일수 문구를 계산해 키워드에 적힌(더 큰)
  * 일수 문구를 텍스트에서 교체한다.
  */
-function sanitizeDaysAgainstTripData(text, tripData, keyword) {
+export function sanitizeDaysAgainstTripData(text, tripData, keyword) {
   if (!text || !tripData?.days) return text;
   const match = (keyword ?? '').match(/(\d+)\s*박\s*(\d+)\s*일/);
   if (!match) return text;
