@@ -327,6 +327,18 @@ function filterUnratedSpots(spots) {
   return spots.filter((spot) => typeof spot.rating === 'number');
 }
 
+// 2026-09-29(작업지시서 "휴양지 4일 이상은 잠시 발행을 막아주세요" §3-②): 트레쥴
+// 응답에 관광지가 아니라 여행사 사무실(GEM Travels·Travel Cebu·Explore Cebu Tours
+// & Travel·Cebu Daily Tours)이 스팟으로 섞여 나오는 게 실측 확인됨 — "6일차엔
+// Travel Cebu를 방문하세요"처럼 말이 안 되는 코스가 나온다. 트레쥴 쪽에 수정을
+// 요청해뒀지만(짝 지시서), 고쳐진 뒤에도 방어선으로 남긴다 — 미지원 지역 웹 검색
+// 폴백(searchRegionSpots)에도 같은 위험이 있으므로 여기서 한 번에 거른다.
+const TRAVEL_AGENCY_PATTERN = /\b(tours?|travels?|travel\s*agency)\b|여행사/i;
+
+function filterTravelAgencySpots(spots) {
+  return spots.filter((spot) => !TRAVEL_AGENCY_PATTERN.test(spot?.name ?? ''));
+}
+
 // 부모(국가/광역권) → 자식(구체 지역) 매핑 — 매칭 실패 시 대체 후보 제안용(§3).
 const parentToChildren = new Map();
 for (const r of [...REGIONS_SNAPSHOT.domestic, ...REGIONS_SNAPSHOT.overseas]) {
@@ -435,7 +447,7 @@ export async function attachTripData(keywordData) {
           // (더 정확하고, 좌표·거리·appUrl·지도까지 붙는다).
           const liveProbe = await fetchCourseBriefWithRetry(webRegion, webDays);
           if (liveProbe && Array.isArray(liveProbe.spots)) {
-            const liveCleanSpots = filterUnratedSpots(sanitizeSpots(liveProbe.spots));
+            const liveCleanSpots = filterTravelAgencySpots(filterUnratedSpots(sanitizeSpots(liveProbe.spots)));
             if (liveCleanSpots.length >= MIN_SPOTS && !hasInterDayCityJump(liveCleanSpots)) {
               logger.info(`[tradule_source] "${item.keyword}" → 스냅샷엔 없었지만 라이브로는 지원됨(지역: ${webRegion}) → 트레쥴 데이터로 진행`);
               updated.push({
@@ -460,7 +472,7 @@ export async function attachTripData(keywordData) {
           const webBrief = await searchRegionSpots(webRegion, webDays);
           if (webBrief) {
             rawResponses[item.keyword] = webBrief;
-            const webCleanSpots = filterUnratedSpots(webBrief.spots);
+            const webCleanSpots = filterTravelAgencySpots(filterUnratedSpots(webBrief.spots));
             if (webCleanSpots.length >= MIN_SPOTS) {
               logger.info(`[tradule_source] "${item.keyword}" → 트레쥴 미지원, 웹 검색으로 스팟 ${webCleanSpots.length}개 확보`);
               updated.push({
@@ -505,6 +517,21 @@ export async function attachTripData(keywordData) {
     }
 
     const startDays = resolveDays(region, item.keyword ?? '');
+    const isResortStyleRegion = regionStyle(region) === 'resort';
+
+    // 2026-09-29(작업지시서 "휴양지 4일 이상은 잠시 발행을 막아주세요" §3-①):
+    // 트레쥴 #275 배포 후 "세부 days=7"이 더 이상 422가 아니라 200(18곳)을 주지만,
+    // 그 18곳 중 다수가 여행사 사무실(Cebu Daily Tours·GEM Travels·Travel Cebu·
+    // Explore Cebu Tours & Travel)·스파로, "6일차엔 Travel Cebu를 방문하세요"
+    // 같은 말이 안 되는 코스가 나온다(실측 확인). 트레쥴 쪽 구성이 고쳐지기 전까지
+    // 휴양형 4일 이상 코스는 플래그로 보류한다 — 3일로 줄여서 발행하지 않고
+    // 스킵한다(D-055 원칙 유지). 트레쥴이 고치면 이 값을 true로 바꾼다.
+    const RESORT_LONG_STAY_ENABLED = false;
+    if (isResortStyleRegion && startDays >= 4 && !RESORT_LONG_STAY_ENABLED) {
+      logger.warn(`[tradule_source] "${item.keyword}" → 휴양형 장기 코스 보류 중(트레쥴 구성 개선 대기), 스킵`);
+      updated.push({ ...item, skip_reason: '휴양형 4일 이상 코스 보류 중 (트레쥴 구성 개선 대기)' });
+      continue;
+    }
 
     // 2026-09-22 재정정(작업지시서 "제 노이즈 필터가 경주를 죽였습니다" §4): MIN_SPOTS(6)가
     // 딱 그 경계에 걸리면(예: 경주 = 정확히 6곳) course-brief 응답이 호출마다 곳수가
@@ -517,15 +544,14 @@ export async function attachTripData(keywordData) {
     // 스팟이 부족해 422가 난다(데이터 커버리지 문제, 상한 문제 아님). 휴양지는
     // 일수를 줄여 쓰지 않고 원래 요청한 일수 그대로 시도만 하고, 부족하면 스킵한다
     // — 트레쥴 쪽 스팟이 늘어나면 다음 실행에서 그대로 살아난다.
-    const isResortStyle = regionStyle(region) === 'resort';
     let brief = null;
     let days = startDays;
     let cleanSpots = [];
     const attemptLog = [];
-    const minDayToTry = isResortStyle ? startDays : 1;
+    const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
-      const attemptSpots = Array.isArray(attempt?.spots) ? filterUnratedSpots(sanitizeSpots(attempt.spots)) : [];
+      const attemptSpots = Array.isArray(attempt?.spots) ? filterTravelAgencySpots(filterUnratedSpots(sanitizeSpots(attempt.spots))) : [];
       attemptLog.push(`${d}일=${attemptSpots.length}곳`);
       if (attemptSpots.length >= MIN_SPOTS) {
         brief = attempt;
@@ -543,7 +569,7 @@ export async function attachTripData(keywordData) {
     rawResponses[item.keyword] = brief;
 
     if (cleanSpots.length < MIN_SPOTS) {
-      const retryNote = isResortStyle
+      const retryNote = isResortStyleRegion
         ? `휴양지라 일수를 줄이지 않고 ${startDays}일 그대로 시도함 — 데이터 부족, 상한 문제 아님`
         : `일수를 줄여도 ${MIN_SPOTS}곳 미달`;
       logger.warn(

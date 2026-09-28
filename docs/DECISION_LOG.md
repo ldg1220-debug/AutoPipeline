@@ -1138,3 +1138,26 @@
   `scripts/run-blog-pipeline.js`(original_keyword 보존 + 정정 후 중복 스킵),
   `src/agents/blog_publisher.js`(savePublishResult가 original_keyword로
   'used' 마킹), `docs/work-orders/2026-09-28_fact-gates.md`
+
+### D-055 후속: 트레쥴 #275 배포로 "세부 7일"이 422 대신 여행사·스파로 채워짐
+- **결정**: D-055에서 "휴양지는 422면 스킵, 트레쥴이 고치면 살아난다"고
+  정리했는데, 이틀 만에 실제로 트레쥴 쪽이 배포(#275)해서 상황이 바뀌었다 —
+  다만 "고쳐진" 방향이 기대와 달랐다. `region=세부&days=7`이 이제 200과
+  18곳을 주지만, 그중 다수가 실제 관광 스팟이 아니라 **여행사 사무실**
+  (Cebu Daily Tours·GEM Travels·Travel Cebu·Explore Cebu Tours & Travel)과
+  스파였다 — 이대로면 "6일차엔 Travel Cebu를 방문하세요" 같은 말이 안 되는
+  코스가 그대로 발행될 뻔했다. 트레쥴 쪽엔 다시 수정을 요청해뒀고, 그게
+  반영되기 전까지 이 세션에서 두 가지로 막았다: (1) `RESORT_LONG_STAY_ENABLED
+  = false` 플래그로 resort 스타일 + 4일 이상 코스는 day-retry로 줄이지도
+  않고 곧바로 스킵(더 짧은 일수로 몰래 발행하지 않음, D-055 원칙 유지) —
+  트레쥴이 고치면 플래그만 true로 바꾸면 된다. (2) `filterTravelAgencySpots()`
+  — 여행사 이름 패턴에 매칭되는 스팟을 제외하는 상시 방어선을 스팟 정제
+  지점 3곳(일반 조회·라이브 프로브·웹 검색 폴백) 전부에 둬서, 플래그를
+  풀었을 때나 다른 지역에서 같은 유형의 노이즈가 섞여도 걸러지게 했다.
+- **버린 대안**: 여행사·스파 스팟을 그냥 "동선에 포함되지만 방문 추천은
+  안 하는 참고 정보"로 표기하는 방안 — 채택 안 함. C-2 원칙("응답값만
+  사용, 창작 금지")과 별개로, 이건 응답값 자체가 코스 스팟으로 부적절한
+  경우라 표기를 바꾸는 것보다 애초에 스팟 목록에서 빼는 게 맞다.
+- **관련 파일**: `src/agents/tradule_source.js`(RESORT_LONG_STAY_ENABLED
+  플래그, filterTravelAgencySpots 신규, 스팟 정제 지점 3곳에 배선),
+  `docs/work-orders/2026-09-29_hold-resort-long.md`
