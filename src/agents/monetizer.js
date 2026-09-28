@@ -395,6 +395,22 @@ function extractDayKm(entry) {
 }
 
 /**
+ * 2026-09-28 정정(작업지시서 "세부 글 해부" §2, 실측): dayTotals가 배열
+ * `[{day:1,distanceKm:7.2},{day:2,...},...]` 형태로 올 때 `dayTotals[String(day)]`
+ * (예: `dayTotals["1"]`)로 찾으면, 배열 인덱스 "1"은 **두 번째** 원소(day:2)를
+ * 가리켜 하루씩 밀리는 사고가 났다("1일차" 자리에 실제 2일차 값 표시, 실제
+ * 1일차 7.2km는 통째로 누락). day 필드를 직접 매칭해서 찾는다 — 객체로 오는
+ * 옛 스키마({"1":{...}})도 계속 지원.
+ */
+function findDayTotal(dayTotals, day) {
+  if (!dayTotals) return null;
+  if (Array.isArray(dayTotals)) {
+    return dayTotals.find((d) => d?.day === day || Number(d?.day) === day) ?? null;
+  }
+  return dayTotals[String(day)] ?? dayTotals[day] ?? null;
+}
+
+/**
  * 2026-09-22(작업지시서 "일본 여행 → 일본은 통과시키면 안 됩니다" §6): totalDistanceKm은
  * 트레쥴 API가 "일자 내 이동만" 합산한 값이다 — 이걸 "총 이동 72.6km"라고 쓰면 다일차
  * 코스에서 일자 간 이동(도시 간 이동 등)이 빠진 채 총량처럼 읽혀 오해를 부른다(같은
@@ -408,7 +424,7 @@ function formatDistancePhrase(tripData) {
 
   const dayNumbers = Array.from({ length: days }, (_, i) => i + 1);
   const dayKms = dayNumbers
-    .map((day) => extractDayKm(tripData?.dayTotals?.[String(day)] ?? tripData?.dayTotals?.[day] ?? null))
+    .map((day) => extractDayKm(findDayTotal(tripData?.dayTotals, day)))
     .filter((km) => typeof km === 'number');
 
   if (days <= 1 || dayKms.length < 2) {
@@ -449,7 +465,7 @@ function buildTimelineTable(tripData) {
 
   const blocks = dayNumbers.map((day) => {
     const daySpots = byDay.get(day);
-    const dayEntry = tripData.dayTotals?.[String(day)] ?? tripData.dayTotals?.[day] ?? null;
+    const dayEntry = findDayTotal(tripData.dayTotals, day);
     const dayKm = extractDayKm(dayEntry);
     const kmSuffix = dayKm
       ? ` (${kmLabel} ${dayKm}km)`

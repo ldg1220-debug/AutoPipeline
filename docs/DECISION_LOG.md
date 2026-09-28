@@ -1099,3 +1099,42 @@
 - **관련 파일**: `src/agents/blog_content_enhancer.js`
   (sanitizeDaysAgainstTripData export), `scripts/run-blog-pipeline.js`
   (Part 1.7 직후 content.keyword 정정)
+
+### D-055: "세부 5박 7일" 원문 해부 — 발행 전 사실 대조 게이트 5종 추가
+- **결정**: 삭제된 발행글 원문을 트레쥴 실측 데이터와 직접 대조한 결과, 이
+  세션이 여러 차례 "프롬프트 지시 → 뚫림 → 코드로 재차 강제"를 반복해온
+  패턴이 한 글 안에 전부 모여있었다: (1) `dayTotals` 배열을
+  `dayTotals[String(day)]`로 찾아 인덱스가 하루씩 밀리는 **진짜 코드 버그**
+  (1일차 자리에 2일차 값 표시, 실제 1일차 값은 누락) — 이건 프롬프트와
+  무관한 순수 로직 오류였다. (2) 3일치 데이터(스팟 6곳)인데 본문이 "넷째
+  날"·"다섯째 날"까지 지어냄. (3) A-4 규칙(예산·숙소가격 섹션 금지)이
+  실측에서 다시 뚫려 "추천 숙소 및 가격대"(1박 20만~30만 원 등)·"예산 및
+  비용 산정"(패키지 100만~150만 원 등) 섹션이 출처 없는 금액과 함께 그대로
+  나감. (4) channel_strategy.json의 avoid 항목("가보지 않은 곳을 다녀온
+  것처럼 쓰기")을 어기고 "이번에 다녀오면서…", "개인적으로… 느꼈다" 같은
+  1인칭 체험 서술이 나옴.
+  (1)은 `findDayTotal()`로 `day` 필드 직접 매칭하도록 정정(배열 인덱스
+  추측 대신). (2)(3)(4)는 "프롬프트를 더 세게 쓰는 방식은 이미 세 번
+  뚫렸다"는 지시서 판단에 동의해, 결정론적 사후 필터(문장 단위 삭제)로
+  전환 — `stripExceedingDayMentions()`, `sanitizeOutlineForbidden()`,
+  `stripUnsourcedMoney()`, `stripFirstPersonExperienceClaims()` 4종 신규.
+- **부분 착수**: 게이트②(일자별 프롬프트 완전 분할 생성)와 게이트⑥(본문
+  숫자를 trip_data 값과 정확히 대조)는 착수하지 않음 — 전자는 Pass3 본문
+  생성 구조 자체를 재설계해야 하고, 후자는 스팟명 매칭까지 필요해 이번
+  범위(사후 문장 필터)를 넘는 별도 작업으로 판단했다. 게이트①(사후 문장
+  삭제)이 같은 증상의 상당 부분을 완화하므로, 근본 해결 전까지의 안전망은
+  이미 있다.
+- **§8 keyword 정정의 부작용도 함께 반영**: `original_keyword` 보존(중복
+  발행 체크·`keywords` 테이블 'used' 마킹이 원본 기준으로 계속 동작하게),
+  정정된 키워드가 이미 발행된 포스트와 겹치면 스킵. 휴양지(resort)는
+  이제 day-retry로 일수를 줄이지 않고 원래 요청 일수만 시도 후 부족하면
+  스킵 — 트레쥴이 5~7일 요청 자체는 받아주므로(400 아님) 지금 겪는 422는
+  상한 문제가 아니라 데이터 커버리지 문제.
+- **관련 파일**: `src/agents/monetizer.js`·`scripts/write-kin-answer.js`
+  (findDayTotal 신규), `src/agents/blog_content_enhancer.js`
+  (sanitizeOutlineForbidden/stripUnsourcedMoney/
+  stripFirstPersonExperienceClaims/stripExceedingDayMentions 신규),
+  `src/agents/tradule_source.js`(resort 스타일 day-retry 건너뜀),
+  `scripts/run-blog-pipeline.js`(original_keyword 보존 + 정정 후 중복 스킵),
+  `src/agents/blog_publisher.js`(savePublishResult가 original_keyword로
+  'used' 마킹), `docs/work-orders/2026-09-28_fact-gates.md`

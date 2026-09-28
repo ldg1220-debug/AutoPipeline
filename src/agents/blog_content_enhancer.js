@@ -450,6 +450,77 @@ function sanitizeOutlineForNoTripData(outline, tripData) {
   return { ...outline, sections: sanitizedSections };
 }
 
+// 2026-09-28(작업지시서 "세부 글 해부: 발행 전 '사실 대조 게이트'를 코드로" §4 게이트③):
+// A-4 규칙("예산·숙소가격 같은 일반론 섹션 금지")이 프롬프트에만 있어서 실측
+// (maeilg.com/268 "세부 5박 7일")에서 "추천 숙소 및 가격대"·"예산 및 비용 산정"
+// 섹션이 통째로 생성되고, trip_data에 없는 가격("1박 20만~30만 원" 등)까지
+// 지어냈다. trip_data 유무와 무관하게(숙소·예산 데이터는 애초에 절대 없음)
+// 아웃라인 단계에서 이런 섹션 자체를 제거한다 — sanitizeOutlineForNoTripData와
+// 같은 방식.
+const FORBIDDEN_SECTION_PATTERN = /숙소|가격대|예산|비용\s*산정|경비/;
+
+function sanitizeOutlineForbidden(outline) {
+  const sections = (outline.sections ?? []).filter((s) => !FORBIDDEN_SECTION_PATTERN.test(s.heading ?? ''));
+  if (sections.length !== (outline.sections ?? []).length) {
+    const removed = (outline.sections ?? []).filter((s) => FORBIDDEN_SECTION_PATTERN.test(s.heading ?? ''));
+    logger.warn(`[blog_content_enhancer] 금지 섹션(숙소·예산 등) 감지 → 제거: ${removed.map((s) => `"${s.heading}"`).join(', ')}`);
+  }
+  return { ...outline, sections };
+}
+
+// 게이트⑤: channel_strategy.json의 avoid 목록("가보지 않은 곳을 다녀온 것처럼
+// 쓰기")을 프롬프트로만 지시했는데도 실측에서 "이번에 세부를 다녀오면서 발견한…",
+// "개인적으로… 느꼈다" 같은 1인칭 체험 서술이 나왔다. 문장 단위로 제거한다
+// (한 문장에 걸리면 그 문장만 삭제 — 문단 전체를 지우면 내용이 부자연스러워지므로).
+const FIRST_PERSON_EXPERIENCE_PATTERN = /다녀오면서|다녀왔|직접\s*가보니|가봤는데|개인적으로|.{0,10}느꼈다|여행하며\s*느낀|제가\s*묵었/;
+
+function stripFirstPersonExperienceClaims(text) {
+  if (!text) return text;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const kept = sentences.filter((s) => !FIRST_PERSON_EXPERIENCE_PATTERN.test(s));
+  if (kept.length !== sentences.length) {
+    logger.warn(`[blog_content_enhancer] 1인칭 체험 표현 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
+// 게이트④: trip_data 스팟에는 가격 필드가 없다 — 본문에 나오는 금액(원/달러/페소)은
+// 전부 출처가 없는 창작이다. 금액이 포함된 문장을 통째로 삭제한다.
+const MONEY_PATTERN = /\d[\d,]*\s*(천\s*|만\s*|억\s*)?원|₱\s*\d|\$\s*\d/;
+
+function stripUnsourcedMoney(text) {
+  if (!text) return text;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const kept = sentences.filter((s) => !MONEY_PATTERN.test(s));
+  if (kept.length !== sentences.length) {
+    logger.warn(`[blog_content_enhancer] 출처 없는 금액 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
+// 게이트①: "3일짜리 코스인데 넷째·다섯째 날까지 지어낸다"는 사고 방지. 일자 서수
+// 표현("첫|둘|셋|넷|다섯|여섯|일곱째 날", "N일차", "Day N")을 추출해 tripData.days를
+// 넘는 문장을 삭제한다.
+const KOREAN_ORDINAL_DAY = { 첫: 1, 둘: 2, 셋: 3, 넷: 4, 다섯: 5, 여섯: 6, 일곱: 7 };
+function stripExceedingDayMentions(text, maxDays) {
+  if (!text || !maxDays) return text;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const kept = sentences.filter((s) => {
+    const ordinalMatch = s.match(/(첫|둘|셋|넷|다섯|여섯|일곱)째\s*날/);
+    if (ordinalMatch && KOREAN_ORDINAL_DAY[ordinalMatch[1]] > maxDays) return false;
+    const numberedMatch = s.match(/(\d+)\s*일차|[Dd]ay\s*(\d+)/);
+    if (numberedMatch) {
+      const dayNum = Number(numberedMatch[1] ?? numberedMatch[2]);
+      if (dayNum > maxDays) return false;
+    }
+    return true;
+  });
+  if (kept.length !== sentences.length) {
+    logger.warn(`[blog_content_enhancer] 코스 일수(${maxDays}일) 초과하는 일자 서술 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
@@ -845,6 +916,7 @@ async function enhanceBlogDraft(content) {
   // 섹션 금지"를 지시해도 LLM이 여전히 "이동 방법 및 교통 정보" 섹션을 만드는 사고가
   // 재발함 — 코드로 한 번 더 강제한다(sanitizeTitleForTransport와 같은 패턴).
   outline = sanitizeOutlineForNoTripData(outline, tripData);
+  outline = sanitizeOutlineForbidden(outline);
 
   // H2/H3 섹션만 추출 (FAQ 제외)
   const bodySections = (outline.sections ?? []).filter(
@@ -888,13 +960,23 @@ async function enhanceBlogDraft(content) {
   // 문구는 그대로 두면 "제목은 맞는데 본문은 여전히 틀림"이 되므로 본문·FAQ에도
   // 동일하게 적용한다. 이동수단은 섹션 헤딩(sanitizeOutlineTransport)에서만
   // 걸러도 충분 — 본문 문장 하나하나까지 치환하면 문맥이 깨질 위험이 더 크다.
+  // 2026-09-28 게이트①④⑤(작업지시서 "세부 글 해부") — 일수 정정과 같은 자리에서
+  // 함께 적용: 코스 일수를 넘는 일자 서술 삭제, 출처 없는 금액 삭제, 1인칭 체험
+  // 표현 삭제. 프롬프트 지시가 세 번 뚫린 뒤 결정론적 사후 필터로 전환.
+  const applyContentGates = (text) => {
+    let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
+    sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
+    sanitized = stripUnsourcedMoney(sanitized);
+    sanitized = stripFirstPersonExperienceClaims(sanitized);
+    return sanitized;
+  };
   const finalSections = reviewResult.sections.map((s) => ({
     ...s,
-    body: sanitizeDaysAgainstTripData(s.body, tripData, keyword),
+    body: applyContentGates(s.body),
   }));
   const finalFaqSections = faqSections.map((f) => ({
     ...f,
-    a: sanitizeDaysAgainstTripData(f.a, tripData, keyword),
+    a: applyContentGates(f.a),
   }));
 
   const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);

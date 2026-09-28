@@ -944,9 +944,37 @@ async function main() {
     // 기준으로 정정해서 그 뒤로 keyword를 읽는 모든 단계(Pass1~3, QA, 에셋 빌더,
     // 발행)가 처음부터 같은 값을 쓰게 한다 — title 등에 남아있는 개별
     // sanitizeDaysAgainstTripData 호출은 이제 2차 안전망으로만 남는다.
+    // 2026-09-28(작업지시서 "세부 글 해부" §8): keyword를 정정하면 중복 발행
+    // 위험이 생긴다 — "세부 5박 7일"을 "세부 2박3일"로 줄였는데 이미 "세부
+    // 2박3일" 글이 있으면 같은 검색어를 두 글이 나눠 먹는다. ①원본 키워드는
+    // original_keyword에 보존(중복 발행 체크·키워드 소진 기록이 원본 기준으로
+    // 계속 동작해야 다음 실행에서 "세부 5박 7일"이 또 안 뽑힌다). ②정정된 값이
+    // 이미 발행된 포스트와 겹치면 이 키워드는 스킵한다(--force-keyword는
+    // Part 1.55의 중복 체크를 면제받지만, 이 사후 정정값은 사용자가 직접
+    // 요청한 게 아니라 시스템이 대신 골라준 값이므로 면제하지 않는다).
+    let dupCheckPublished = null;
     for (const c of contentData.contents) {
-      if (c.trip_data) c.keyword = sanitizeDaysAgainstTripData(c.keyword, c.trip_data, c.keyword);
+      if (!c.trip_data) continue;
+      const original = c.keyword;
+      const corrected = sanitizeDaysAgainstTripData(c.keyword, c.trip_data, c.keyword);
+      if (corrected === original) continue;
+      c.original_keyword = original;
+      c.keyword = corrected;
+
+      if (dupCheckPublished === null) {
+        dupCheckPublished = db
+          .prepare(`SELECT keyword FROM blog_posts WHERE status = 'published' AND published_at >= datetime('now', '-21 days')`)
+          .all()
+          .map((r) => r.keyword.replace(/[\s&]/g, '').toLowerCase());
+      }
+      const correctedNorm = corrected.replace(/[\s&]/g, '').toLowerCase();
+      const dupPub = dupCheckPublished.find((pk) => pk === correctedNorm || pk.includes(correctedNorm) || correctedNorm.includes(pk));
+      if (dupPub) {
+        logger.warn(`[blog:pipeline] "${original}" → "${corrected}"로 정정됐으나 이미 발행된 키워드와 중복 → 스킵`);
+        c.skip_reason = `일수 정정 후("${corrected}") 이미 발행된 포스트와 중복`;
+      }
     }
+    contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
     logger.info(`[blog:pipeline] Part 1.7 완료. 진행 대상: ${contentData.contents.length}개`);
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.7 Tradule Source 실패 (계속 진행, trip_data 없이): ${err.message}`);

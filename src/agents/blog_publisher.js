@@ -939,15 +939,18 @@ export async function editBlogPosts(rewrites) {
 }
 
 // ── DB 업데이트 ────────────────────────────────────────────────────────────
-function savePublishResult(keyword, title, slug, postUrl, youtubeUrl) {
+function savePublishResult(keyword, title, slug, postUrl, youtubeUrl, originalKeyword = null) {
   db.prepare(`
     INSERT INTO blog_posts (keyword, title, slug, platform, post_url, youtube_url, status, published_at)
     VALUES (@keyword, @title, @slug, 'tistory', @post_url, @youtube_url, 'published', datetime('now','localtime'))
   `).run({ keyword, title, slug: slug || keyword, post_url: postUrl, youtube_url: youtubeUrl || null });
 
-  // 해당 키워드를 'used'로 마킹 → blog:pipeline 재실행 시 중복 발행 방지
+  // 2026-09-28(작업지시서 "세부 글 해부" §8-①): keywords 테이블엔 원본으로 들어와
+  // 있으므로(예: "세부 5박 7일") 'used' 마킹도 원본으로 해야 그 행이 매칭돼 다음
+  // 실행에서 pending으로 다시 안 뽑힌다 — blog_posts.keyword(중복 체크용, 정정된
+  // 값)와 다른 값을 쓸 수 있어 파라미터를 분리했다.
   db.prepare(`UPDATE keywords SET status = 'used', used_at = datetime('now','localtime') WHERE keyword = ?`)
-    .run(keyword);
+    .run(originalKeyword ?? keyword);
 }
 
 export async function publishBlogPosts(contentData) {
@@ -1014,7 +1017,8 @@ export async function publishBlogPosts(contentData) {
           content.blog_draft?.title ?? content.keyword,
           content.blog_draft?.slug,
           postUrl,
-          content.youtube_url
+          content.youtube_url,
+          content.original_keyword
         );
         const naverDraftPath = await saveNaverDraft(content);
         updated.push({ ...content, blog_publish: { status: 'published', url: postUrl, naver_draft: naverDraftPath } });

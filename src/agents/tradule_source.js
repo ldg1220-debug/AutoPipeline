@@ -511,11 +511,19 @@ export async function attachTripData(keywordData) {
     // 달라져서 같은 키워드가 어떤 호출에선 통과하고 어떤 호출에선 스킵되는 문제가
     // 있었다. days를 하나씩 줄여 재시도한다 — 하루 줄이면 스팟이 그만큼의 날짜에
     // 재배정돼 하루당 밀도가 올라간다(§4 "재시도 쪽이 낫습니다").
+    // 2026-09-28 정정(작업지시서 "세부 글 해부" §8): 위 로직을 휴양지(resort)에도
+    // 그대로 적용하면 "세부 5박7일"이 조용히 "세부 2박3일"로 줄어버린다 — 실측
+    // 확인: 트레쥴은 세부 5~7일 요청 자체는 받아주지만(400 아님) 지금은 후보
+    // 스팟이 부족해 422가 난다(데이터 커버리지 문제, 상한 문제 아님). 휴양지는
+    // 일수를 줄여 쓰지 않고 원래 요청한 일수 그대로 시도만 하고, 부족하면 스킵한다
+    // — 트레쥴 쪽 스팟이 늘어나면 다음 실행에서 그대로 살아난다.
+    const isResortStyle = regionStyle(region) === 'resort';
     let brief = null;
     let days = startDays;
     let cleanSpots = [];
     const attemptLog = [];
-    for (let d = startDays; d >= 1; d -= 1) {
+    const minDayToTry = isResortStyle ? startDays : 1;
+    for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
       const attemptSpots = Array.isArray(attempt?.spots) ? filterUnratedSpots(sanitizeSpots(attempt.spots)) : [];
       attemptLog.push(`${d}일=${attemptSpots.length}곳`);
@@ -535,9 +543,12 @@ export async function attachTripData(keywordData) {
     rawResponses[item.keyword] = brief;
 
     if (cleanSpots.length < MIN_SPOTS) {
+      const retryNote = isResortStyle
+        ? `휴양지라 일수를 줄이지 않고 ${startDays}일 그대로 시도함 — 데이터 부족, 상한 문제 아님`
+        : `일수를 줄여도 ${MIN_SPOTS}곳 미달`;
       logger.warn(
-        `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, 일수를 줄여도 ` +
-        `${MIN_SPOTS}곳 미달 (시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
+        `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, ${retryNote} ` +
+        `(시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
       );
       updated.push({ ...item, skip_reason: `스팟 ${cleanSpots.length}개 (최소 ${MIN_SPOTS}개, 평점 있는 스팟 기준)` });
       continue;
