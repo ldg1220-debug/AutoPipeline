@@ -1357,3 +1357,30 @@
   잘림 정정), `src/agents/tradule_source.js`(RESORT_LONG_STAY_ENABLED→true,
   시도 로그에 필터 단계별 제외 수 추가), `src/data/regionProfiles.js`
   (경주 maxDays 2→3), `docs/work-orders/2026-09-28_draft3-diary-title-gyeongju.md`
+
+### D-060: maxDays 단위 버그는 "경주만" 이 아니라 비교식 자체가 틀렸다 — 지역별 값 대신 비교를 없앰
+- **결정**: D-059에서 경주만 `maxDays: 2→3`으로 고친 건 증상 완화였지
+  근본 수정이 아니었다 — 사용자가 여수·통영·순천·거제·속초를 직접 트레쥴에
+  물어 실측한 결과, 전부 `maxDays: 2`(REGION_PROFILES, "박" 단위 값)인데도
+  실제로는 3일 데이터가 충분했다(여수 10곳·통영 10곳·순천 10곳·거제 8곳·속초
+  6곳, 전부 기준 6곳 통과). "지역 값이 틀린 게 아니라 비교식(단위)이
+  틀렸다"는 지적을 그대로 받아들여, `resolveDays()`에서 `profile.maxDays`로
+  상한을 거는 코드 자체를 제거했다(§3①·② 중 ②, 사용자 권장안 채택) — 대신
+  이미 있던 `regionMaxDays()`(트레쥴 스타일 기반: city=5·resort=7·미분류=3)
+  클램프만 남겼다. `REGION_PROFILES.maxDays`는 `isValidCombo()`(키워드 시드
+  생성 단계의 "비현실적 조합" 사전 차단용, DAY_PATTERNS와 같은 "박" 단위
+  맥락)에서만 계속 쓰이므로 필드 자체는 남기되, "이 필드로 실제 요청 일수를
+  다시 클램프하지 말 것"을 주석으로 명시했다. D-059에서 임시로 올렸던
+  경주의 `maxDays: 3`은 더 이상 resolveDays에 영향을 주지 않으므로 다른
+  지역과 같은 관례(2)로 되돌렸다 — 지역별 예외를 남겨두면 나중에 또
+  "경주만 다르네, 왜?"라는 혼란을 만든다.
+- **버린 대안**: §3①(maxDays를 "박"으로 유지하고 비교 시 +1일로 환산)도
+  검토했으나, 사용자가 명시적으로 ②를 권장했고("로컬 상한은 트레쥴과
+  어긋날 때만 사고를 낸다"는 근거가 타당함) — 상한 판정 자체를 트레쥴에
+  위임하는 쪽이 이런 종류의 "로컬 사본이 실제 소스와 어긋나는" 사고 계열을
+  구조적으로 막는다(이 세션에서 반복된 "값이 여러 곳에 흩어져 있으면
+  한쪽만 고치고 끝난다" 패턴과 같은 교훈).
+- **관련 파일**: `src/agents/tradule_source.js`(resolveDays에서
+  profile.maxDays 클램프 제거), `src/data/regionProfiles.js`(경주 maxDays
+  2로 원복, 파일 헤더에 maxDays 용도 제한 명시),
+  `docs/work-orders/2026-09-28_maxdays-unit-all-regions.md`

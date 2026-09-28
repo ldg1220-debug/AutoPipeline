@@ -199,6 +199,16 @@ function extractDays(keyword) {
  * 2차 방어. REGION_PROFILES에 등록된 지역이면 extractDays() 결과가 최소 일정 미만일 때
  * (예: "오사카 당일치기" → days=1) 최소값으로 강제 조정하고 경고 로그를 남긴다.
  * 조용히 바꾸면 나중에 왜 다른 일정으로 나갔는지 추적이 안 되므로 반드시 로그를 남긴다.
+ *
+ * 2026-09-28(작업지시서 "maxDays 단위 버그는 경주만의 문제가 아닙니다" §3): 이전엔
+ * 여기서 profile.maxDays로도 상한을 걸었는데, REGION_PROFILES의 maxDays는 이 파일
+ * 밖 DAY_PATTERNS(키워드 시드 생성용, "2박3일 코스": {days:2}처럼 "박" 단위)와 같은
+ * 값을 재사용하고 있어 여기(실제 일수 비교)와 단위가 안 맞았다 — 경주만의 문제가
+ * 아니라 여수·통영·순천·거제·속초 전부 실측으로 3일 데이터가 충분한데도 2일로
+ * 깎였다(작업지시서 실측 표 참고). 값을 지역마다 고치는 대신, 상한 비교 자체를
+ * 없애고 트레쥴이 이미 하고 있는 판정(도시형 ≤5일·휴양형 ≤7일·스팟 부족 시 422)에
+ * 맡긴다 — 아래 regionMaxDays()의 스타일 기반 클램프가 그 역할을 한다. minDays
+ * (당일치기 차단 같은 "비현실적으로 짧은 조합" 방지)는 그대로 유지한다.
  */
 function resolveDays(region, keyword) {
   const raw = extractDays(keyword);
@@ -209,12 +219,9 @@ function resolveDays(region, keyword) {
   if (profile && raw < profile.minDays) {
     logger.warn(`[sanity] "${region} ${keyword}"(days=${raw})은 비현실적 → days=${profile.minDays}로 조정`);
     resolved = profile.minDays;
-  } else if (profile && raw > profile.maxDays) {
-    resolved = profile.maxDays;
   }
-  // 지역 스타일별 상한(city=5, resort=7, 미분류=3)에 최종 클램프 — REGION_PROFILES
-  // 값(최대 5)이 스타일 상한보다 클 수도, course-brief 실제 상한이 REGION_PROFILES
-  // 보다 클 수도(resort=7) 있어 항상 여기서 한 번 더 맞춘다.
+  // 지역 스타일별 상한(city=5, resort=7, 미분류=3)에 최종 클램프 — REGION_PROFILES의
+  // maxDays(단위가 다른 값)는 더 이상 여기서 쓰지 않는다.
   return Math.min(resolved, maxDays);
 }
 

@@ -13,6 +13,15 @@
  * 해외는 minDays >= 2가 하드 규칙이다 — 가장 가까운 해외(후쿠오카·오사카)도
  * 최소 2박3일부터 현실적인 여행 상품이다.
  *
+ * 2026-09-28(작업지시서 "maxDays 단위 버그는 경주만의 문제가 아닙니다"): maxDays는
+ * isValidCombo()(키워드 시드 생성 단계의 "비현실적 조합 차단"용, DAY_PATTERNS의
+ * "박" 단위와 같은 맥락)에서만 쓰고, tradule_source.js의 resolveDays()는 더 이상
+ * 이 필드로 실제 요청 일수를 클램프하지 않는다 — 실제 일수 상한은 트레쥴 자신의
+ * 판정(도시형 ≤5일·휴양형 ≤7일·스팟 부족 시 422)에 맡긴다(regionMaxDays() 참고).
+ * 실측 확인: 여수·통영·순천·거제·속초는 maxDays:2인데도 3일 데이터가 충분했다 —
+ * 값을 지역별로 올리는 대신 비교 자체를 없앴으므로, 이 필드를 실제 일수 상한으로
+ * 다시 쓰지 말 것.
+ *
  * 2026-09-18: tradule_source.js의 REGION_TREE가 트레쥴 공식 목록(198곳)으로 교체되면서
  * "서울"·"부산"·"제주"·"인천"·"나트랑"·"치앙마이" 같은 옛 이름이 더 이상 REGION_TREE에
  * 없다(트레쥴은 구 단위로 세분화 — 예: 강남/해운대/제주시 등). 아래 프로필의 해당 항목은
@@ -26,11 +35,7 @@ export const REGION_PROFILES = {
   '여수':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '통영':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '강릉':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
-  // 2026-09-28(작업지시서 "세부 초안 3차" §10): maxDays:2였던 값이 resolveDays()에서
-  // "실제 3일(2박3일)" 요청을 2일로 몰래 낮춰버려, days=3 실측이 200·10곳·평점 있는
-  // 스팟 7곳(기준 6곳 통과)인데도 그 시도 자체가 한 번도 안 나가고 스킵됐다(로그에
-  // "3일=" 시도가 없었던 이유). 실측 확인된 값으로 올린다.
-  '경주':   { scope: 'domestic-near', minDays: 0, maxDays: 3 },
+  '경주':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '속초':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '춘천':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '양양':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
