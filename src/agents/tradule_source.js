@@ -546,7 +546,12 @@ export async function attachTripData(keywordData) {
     // 같은 말이 안 되는 코스가 나온다(실측 확인). 트레쥴 쪽 구성이 고쳐지기 전까지
     // 휴양형 4일 이상 코스는 플래그로 보류한다 — 3일로 줄여서 발행하지 않고
     // 스킵한다(D-055 원칙 유지). 트레쥴이 고치면 이 값을 true로 바꾼다.
-    const RESORT_LONG_STAY_ENABLED = false;
+    // 2026-09-28(작업지시서 "세부 초안 3차" §11): 이 플래그를 막았던 조건(게이트⑥
+    // 구간 대조)이 확인됐다는 사용자 확인에 따라 켠다 — 단, 같은 지시서 §2·§3·§4
+    // (과거형 체험 서술·거짓 제목·본문 소요시간 불일치)는 일수와 무관하게 발행을
+    // 막는 별개 문제라 이번 커밋에서 같이 고쳤다(§2 Pass3 시제 규칙+게이트⑤ 확장,
+    // §3 제목 최솟값 정정, §4 stripMismatchedDurationMentions).
+    const RESORT_LONG_STAY_ENABLED = true;
     if (isResortStyleRegion && startDays >= 4 && !RESORT_LONG_STAY_ENABLED) {
       logger.warn(`[tradule_source] "${item.keyword}" → 휴양형 장기 코스 보류 중(트레쥴 구성 개선 대기), 스킵`);
       updated.push({ ...item, skip_reason: '휴양형 4일 이상 코스 보류 중 (트레쥴 구성 개선 대기)' });
@@ -571,8 +576,18 @@ export async function attachTripData(keywordData) {
     const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
-      const attemptSpots = Array.isArray(attempt?.spots) ? filterTravelAgencySpots(filterUnratedSpots(sanitizeSpots(attempt.spots))) : [];
-      attemptLog.push(`${d}일=${attemptSpots.length}곳`);
+      const rawCount = Array.isArray(attempt?.spots) ? attempt.spots.length : 0;
+      const sanitized = Array.isArray(attempt?.spots) ? sanitizeSpots(attempt.spots) : [];
+      const afterUnrated = filterUnratedSpots(sanitized);
+      const attemptSpots = filterTravelAgencySpots(afterUnrated);
+      // 2026-09-28(작업지시서 §10): "N일=M곳"만으로는 어느 필터가 몇 곳을 걸렀는지
+      // 알 수 없어 실제 요청이 나갔는지·왜 부족한지 추적이 안 됐다. 필터 단계별로
+      // 몇 곳이 빠졌는지 남긴다.
+      const unratedDropped = sanitized.length - afterUnrated.length;
+      const agencyDropped = afterUnrated.length - attemptSpots.length;
+      attemptLog.push(
+        `${d}일=${attemptSpots.length}곳(원본${rawCount}, 평점없음제외-${unratedDropped}, 여행사·공항제외-${agencyDropped})`
+      );
       if (attemptSpots.length >= MIN_SPOTS) {
         brief = attempt;
         days = d;

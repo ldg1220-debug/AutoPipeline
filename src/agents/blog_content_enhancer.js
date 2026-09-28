@@ -302,8 +302,16 @@ const TRANSPORT_MODE_WORDS = {
  * "있긴 있어서" 제목의 "대중교통과 도보로 즐기는"이 그대로 통과했다. 과반
  * 기준으로 바꾼다: 과반 모드만 허용, 과반이 없으면 이동수단 단어 자체를 전부 뺀다.
  */
+// 2026-09-28(작업지시서 "세부 초안 3차" §8): 각 날의 마지막 스팟은 다음 구간이
+// 없는데도 toNextMode 필드에 값(주로 "car")이 남아있는 경우가 있어(트레쥴 응답
+// 특성), 이 필드를 무조건 세면 실제로 없는 구간까지 과반 계산에 들어간다(세부
+// 실측: 구간 7개 중 대중교통 4·도보 2·차량 1인데 "과반: 없음"으로 나옴 — 날마다
+// 마지막 스팟의 유령 car가 더해져 4/8이 되어 과반 기준을 못 넘김). toNextMinutes가
+// 실제로 있는(=다음 스팟으로 이어지는 진짜 구간인) 것만 센다.
 function computeMajorityTransportMode(tripData) {
-  const modes = (tripData?.spots ?? []).map((s) => s.toNextMode).filter(Boolean);
+  const modes = (tripData?.spots ?? [])
+    .filter((s) => typeof s.toNextMinutes === 'number' && s.toNextMode)
+    .map((s) => s.toNextMode);
   if (modes.length === 0) return null;
   const counts = {};
   for (const m of modes) counts[m] = (counts[m] ?? 0) + 1;
@@ -504,11 +512,42 @@ function buildDeterministicItinerary(tripData) {
   return paragraphs.join('\n\n');
 }
 
+// 2026-09-28(작업지시서 "세부 초안 3차" §5): "N일차" 제목 섹션은 아웃라인이
+// 만들면 일수가 빠질 수 있어 코드가 직접 만든다 — 이 패턴으로 아웃라인이 만든
+// 일자 섹션을 걸러내고, 같은 날짜 수만큼 새로 생성해 채워 넣는다.
+const DAY_SECTION_PATTERN = /(\d+)\s*일차/;
+
+function buildDeterministicItineraryForDay(tripData, day) {
+  if (!tripData?.spots?.length) return '';
+  const byDay = groupSpotsByDay(tripData.spots);
+  const daySpots = byDay.get(day) ?? [];
+  if (!daySpots.length) return '';
+  const parts = daySpots.map((s, i) => {
+    const ratingPart = typeof s.rating === 'number'
+      ? ` (평점 ${s.rating}${typeof s.reviewCount === 'number' ? `, 리뷰 ${s.reviewCount.toLocaleString()}개` : ''})`
+      : '';
+    const next = daySpots[i + 1];
+    const nextPart = (next && typeof s.toNextMinutes === 'number')
+      ? ` → ${MODE_KR[s.toNextMode] ?? s.toNextMode ?? ''} 이동 ${s.toNextMinutes}분`
+      : '';
+    return `${s.name}${ratingPart}${nextPart}`;
+  });
+  return parts.join(' → ');
+}
+
 // 게이트⑤: channel_strategy.json의 avoid 목록("가보지 않은 곳을 다녀온 것처럼
 // 쓰기")을 프롬프트로만 지시했는데도 실측에서 "이번에 세부를 다녀오면서 발견한…",
 // "개인적으로… 느꼈다" 같은 1인칭 체험 서술이 나왔다. 문장 단위로 제거한다
 // (한 문장에 걸리면 그 문장만 삭제 — 문단 전체를 지우면 내용이 부자연스러워지므로).
-const FIRST_PERSON_EXPERIENCE_PATTERN = /다녀오면서|다녀왔|직접\s*가보니|가봤는데|개인적으로|.{0,10}느꼈다|여행하며\s*느낀|제가\s*묵었/;
+// 2026-09-28(작업지시서 "세부 초안 3차" §2): 이 패턴은 "다녀오면서·개인적으로"
+// 같은 명시적 체험 어휘만 잡아서, "산 페드로 요새 방문으로 시작했다"·"점심은
+// House of Lechon 에서 즐겼다" 같은 **과거형 체험 동사**(명시적 체험 어휘 없이
+// 과거형만으로 다녀온 것처럼 읽히는 문장)는 걸러지지 않았다 — 한 섹션 전체가
+// "다녀온 사람의 일기"가 되는 사고로 이어짐. 과거형 체험 동사를 추가한다.
+// "건설되었다·지어졌다·운영되었다"처럼 주어가 장소인 역사 서술은 이 패턴에 안
+// 걸리도록 동사를 사람의 행위로 한정했다(방문/시작/즐김/보냄/걸음/묵음/머무름/
+// 둘러봄/느낌/좋았음/맛있었음 — 전부 화자가 그 자리에 있어야 성립하는 동사).
+const FIRST_PERSON_EXPERIENCE_PATTERN = /다녀오면서|다녀왔|직접\s*가보니|가봤는데|개인적으로|.{0,10}느꼈다|여행하며\s*느낀|제가\s*묵었|방문했|방문으로\s*시작했|시작했다|즐겼다|즐길\s*수\s*있었|보냈다|먹었다|마셨다|걸었다|묵었다|머물렀다|둘러봤|느낄\s*수\s*있었|경험이었|경험했|휴식이\s*되었|좋았다|맛있었다/;
 
 function stripFirstPersonExperienceClaims(text) {
   if (!text) return text;
@@ -516,6 +555,41 @@ function stripFirstPersonExperienceClaims(text) {
   const kept = sentences.filter((s) => !FIRST_PERSON_EXPERIENCE_PATTERN.test(s));
   if (kept.length !== sentences.length) {
     logger.warn(`[blog_content_enhancer] 1인칭 체험 표현 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
+// 2026-09-28(작업지시서 §2③): 한 섹션에서 체험 서술 문장이 3개 이상 걸리면
+// 문장만 지우는 걸로는 섹션이 앙상해진다 — 섹션 전체가 "다녀온 사람의 일기"로
+// 쓰였다는 신호이므로 재생성이 필요하다는 걸 호출부에 알린다.
+function countFirstPersonExperienceSentences(text) {
+  if (!text) return 0;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  return sentences.filter((s) => FIRST_PERSON_EXPERIENCE_PATTERN.test(s)).length;
+}
+
+// 2026-09-28(작업지시서 "세부 초안 3차" §4): 정보카드는 trip_data로 직접
+// 계산한 이동 시간(예: 3.2시간)을 쓰는데, 본문 자유 서술은 그 값을 다시
+// "요약"하다 "약 10시간" 같은 값을 지어냈다(Pass 5가 "출처 없는 수치"로
+// 잡았지만 D-056 숫자 가드가 되돌림 — 가드는 유지하고 이 문제는 별도
+// 결정론 필터로 처리). 본문의 "N시간" 표현이 실제 구간 합(±0.5시간)과
+// 다르면 문장을 삭제한다.
+function stripMismatchedDurationMentions(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const totalMinutes = tripData.spots.reduce(
+    (sum, s) => sum + (typeof s.toNextMinutes === 'number' ? s.toNextMinutes : 0), 0
+  );
+  if (totalMinutes === 0) return text;
+  const actualHours = totalMinutes / 60;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const kept = sentences.filter((sentence) => {
+    const match = sentence.match(/(\d+(?:\.\d+)?)\s*시간/);
+    if (!match) return true;
+    const mentionedHours = Number(match[1]);
+    return Math.abs(mentionedHours - actualHours) <= 0.5;
+  });
+  if (kept.length !== sentences.length) {
+    logger.warn(`[blog_content_enhancer] 구간 합(${actualHours.toFixed(1)}시간)과 다른 소요시간 문장 ${sentences.length - kept.length}개 삭제`);
   }
   return kept.join(' ');
 }
@@ -642,6 +716,30 @@ function buildLegMinuteModeMap(tripData) {
   return map;
 }
 
+// 2026-09-28(작업지시서 "세부 초안 3차" §6): 이동수단 단어를 치환할 때 뒤에
+// 붙은 조사는 그대로 둬서 "차를 → 대중교통를" 같은 비문이 나왔다("차를"은 받침
+// 없는 "차"+"를"인데 "대중교통"은 받침이 있어 "을"이어야 한다). 치환 직후
+// 받침 유무에 맞는 조사로 다시 고친다.
+const PARTICLE_PAIRS = {
+  '를': { batchim: '을', noBatchim: '를' }, '을': { batchim: '을', noBatchim: '를' },
+  '가': { batchim: '이', noBatchim: '가' }, '이': { batchim: '이', noBatchim: '가' },
+  '는': { batchim: '은', noBatchim: '는' }, '은': { batchim: '은', noBatchim: '는' },
+  '와': { batchim: '과', noBatchim: '와' }, '과': { batchim: '과', noBatchim: '와' },
+};
+
+function hasBatchim(word) {
+  const last = word[word.length - 1];
+  const code = last.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return false;
+  return (code - 0xac00) % 28 !== 0;
+}
+
+function fixParticleAfterWord(text, word) {
+  const particleChars = Object.keys(PARTICLE_PAIRS).join('');
+  const re = new RegExp(`${word}([${particleChars}])`, 'g');
+  return text.replace(re, (_m, p) => word + (hasBatchim(word) ? PARTICLE_PAIRS[p].batchim : PARTICLE_PAIRS[p].noBatchim));
+}
+
 function correctLegTransportMentions(text, tripData) {
   const minuteModeMap = buildLegMinuteModeMap(tripData);
   if (!text || minuteModeMap.size === 0) return text;
@@ -660,6 +758,7 @@ function correctLegTransportMentions(text, tripData) {
     for (const [word, mode] of Object.entries(TRANSPORT_WORD_TO_MODE)) {
       if (mode === TRANSPORT_WORD_TO_MODE[foundWord]) corrected = corrected.split(word).join(correctWord);
     }
+    corrected = fixParticleAfterWord(corrected, correctWord);
     changedCount += 1;
     return corrected;
   });
@@ -706,11 +805,15 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     // 2026-09-28(작업지시서 "세부 초안 2차 대조" §7): "패키지 투어 vs 자유여행
     // 비교" 같은 제목은 가격 비교를 기대하게 만드는데, 가격은 게이트④가 이미
     // 막고 있는 데이터라 본문이 제목을 못 따라간다(삭제된 /268과 같은 각도).
+    // 2026-09-28(작업지시서 "세부 초안 3차" §3): "평점 N 이상으로 골랐다"는
+    // N이 최솟값이어야 사실이다(10곳 중 9곳이 N 이상이라는 뜻) — 이전 코드는
+    // 최댓값(Math.max)을 넣어 "평점 4.9 이상"이라 쓰고는 실제로 4.9 이상은
+    // 10곳 중 2곳뿐인 거짓 제목이 나왔다(실측: 세부 2박3일). 최솟값으로 바꾼다.
     const buildFallbackTitle = () => {
       const ratedSpots = tripData.spots.filter((s) => typeof s.rating === 'number');
-      const maxRating = ratedSpots.length ? Math.max(...ratedSpots.map((s) => s.rating)) : null;
-      return maxRating
-        ? `${keyword} 코스 — ${tripData.spots.length}곳, 평점 ${maxRating} 이상으로 고른 동선`
+      const minRating = ratedSpots.length ? Math.min(...ratedSpots.map((s) => s.rating)) : null;
+      return minRating != null
+        ? `${keyword} 코스 — ${tripData.spots.length}곳, 평점 ${minRating} 이상으로 고른 동선`
         : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선`;
     };
     if (tripData?.spots?.length && /\bvs\b|비교|패키지/i.test(outline.title)) {
@@ -1189,9 +1292,25 @@ async function enhanceBlogDraft(content) {
   outline = sanitizeOutlineForbidden(outline);
 
   // H2/H3 섹션만 추출 (FAQ 제외)
-  const bodySections = (outline.sections ?? []).filter(
+  let bodySections = (outline.sections ?? []).filter(
     (s) => !/FAQ/i.test(s.heading)
   );
+
+  // 2026-09-28(작업지시서 "세부 초안 3차" §5): 일자 섹션을 아웃라인(LLM)에
+  // 맡기면 일수가 빠지는 사고가 실측 확인됨("1일차 일정"·"2일차 일정"은
+  // 있는데 "3일차 일정"이 없음). 아웃라인이 만든 일자 섹션은 전부 버리고,
+  // tripData.days 개수만큼 코드가 직접 일자 섹션을 만든다(빠짐이 구조적으로
+  // 불가능하도록). 아웃라인의 다른 섹션(개요·맛집·이동방법 등)은 그대로 둔다.
+  if (tripData?.days && tripData?.spots?.length) {
+    const dayIndex = bodySections.findIndex((s) => DAY_SECTION_PATTERN.test(s.heading ?? ''));
+    const nonDaySections = bodySections.filter((s) => !DAY_SECTION_PATTERN.test(s.heading ?? ''));
+    const insertAt = dayIndex === -1 ? Math.min(1, nonDaySections.length) : dayIndex;
+    const daySections = [];
+    for (let d = 1; d <= tripData.days; d++) {
+      daySections.push({ level: 2, heading: `${d}일차 일정`, key_points: [], __deterministic_day: d });
+    }
+    bodySections = [...nonDaySections.slice(0, insertAt), ...daySections, ...nonDaySections.slice(insertAt)];
+  }
   // 게이트⑥-①(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §6): sanitizeOutlineForbidden는
   // outline.sections만 걸렀고 FAQ는 그대로 통과시켜서 "예산은 얼마인가요?" 질문에
   // 지어낸 달러·페소 금액으로 답변이 나왔다. FAQ 질문 단계에서도 같은 패턴으로
@@ -1214,11 +1333,26 @@ async function enhanceBlogDraft(content) {
     // (배정이 없으면 전체 trip_data를 그대로 넘겨 하위 호환 유지 — spot_indices 미지원
     // 아웃라인이거나 트레쥴 데이터 자체가 없는 경우).
     const sectionTripData = sliceTripDataForSection(tripData, section);
-    // 게이트②①: "시간대별 동선"류 섹션은 LLM에 자유 서술을 맡기지 않고 trip_data로
-    // 코드가 직접 문장을 만든다 — 다른 섹션·FAQ와 일정이 어긋날 여지 자체를 없앤다.
-    const body = isItineraryNarrationSection(section.heading) && tripData?.spots?.length
-      ? buildDeterministicItinerary(tripData)
-      : await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, sectionTripData);
+    let body;
+    if (section.__deterministic_day) {
+      // §5: 코드가 직접 만든 일자 섹션 — LLM을 거치지 않는다.
+      body = buildDeterministicItineraryForDay(tripData, section.__deterministic_day);
+    } else if (isItineraryNarrationSection(section.heading) && tripData?.spots?.length) {
+      // 게이트②①: "시간대별 동선"류 섹션은 LLM에 자유 서술을 맡기지 않고 trip_data로
+      // 코드가 직접 문장을 만든다 — 다른 섹션·FAQ와 일정이 어긋날 여지 자체를 없앤다.
+      body = buildDeterministicItinerary(tripData);
+    } else {
+      body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, sectionTripData);
+      // 2026-09-28(작업지시서 "세부 초안 3차" §2③): 과거형 체험 서술이 한 섹션에
+      // 3문장 이상 나오면 문장만 지우는 걸로는 앙상해진다 — 시제를 다시 강조해
+      // 한 번 재생성한다. 재생성해도 여전히 많으면(운) 그대로 받아 후속 게이트⑤가
+      // 문장 단위로 걸러낸다(완전 실패보다 낫다).
+      if (countFirstPersonExperienceSentences(body) >= 3) {
+        logger.warn(`[blog_content_enhancer] 섹션 [${section.heading}] 과거형 체험 서술 3개 이상 감지 → 재생성`);
+        const retryContext = `${outlineContext}\n[재작성 지시] 이전 시도가 "다녀왔다/즐겼다/방문했다"처럼 과거형 체험담으로 쓰였습니다. 반드시 현재형/권유형으로만 다시 쓰세요.`;
+        body = await pass3Body(keyword, section, intent.target_reader, retryContext, i === 0, sectionTripData);
+      }
+    }
     completedSections.push({ level: section.level, heading: section.heading, body });
   }
 
@@ -1253,6 +1387,7 @@ async function enhanceBlogDraft(content) {
     sanitized = stripWrongDayMentions(sanitized, tripData);
     sanitized = stripTimeOfDayMentions(sanitized, tripData);
     sanitized = correctLegTransportMentions(sanitized, tripData);
+    sanitized = stripMismatchedDurationMentions(sanitized, tripData);
     sanitized = stripUnsourcedMoney(sanitized);
     sanitized = stripFirstPersonExperienceClaims(sanitized);
     return sanitized;

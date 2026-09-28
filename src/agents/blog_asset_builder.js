@@ -99,13 +99,37 @@ function buildTravelPexelsQuery(content) {
 
 // 2026-09-28(작업지시서 §5③): Pexels 결과의 alt 설명/URL slug에 지역명 또는
 // 국가명이 전혀 없으면 그 사진은 버린다 — 검색어가 맞아도 결과가 엉뚱할 수 있다.
+// 지역 자체 도시명 외에, 실제 course-brief에 같이 등장하는 하위 지명(같은
+// 지역 안의 동네/섬)도 "이 지역 사진"으로 인정한다. 예: 세부 코스에
+// "막탄"(Mactan)이 포함되므로 Mactan 사진도 세부 지역 사진으로 본다.
+const REGION_CITY_ALIASES = {
+  '세부': ['Mactan'],
+};
+
+// 2026-09-28(작업지시서 "세부 초안 3차" §7): "Philippines"(국가명)만 있어도
+// 통과시켰더니, 마닐라 사진(alt에 "Philippines"가 섞여 있지만 도시는 마닐라)이
+// "세부" 섹션에 그대로 들어갔다(실측: historic-building-in-manila...). 도시
+// 단위 지역은 국가명만으로는 부족하고 그 지역의 도시명이 있어야 통과시킨다 —
+// 다른 도시명(Manila·Boracay 등)이 있으면 국가명이 같이 있어도 탈락.
 function photoMatchesRegion(photo, region) {
   if (!region) return true;
   const en = REGION_EN_NAMES[region];
   if (!en) return true;
-  const terms = [en, REGION_COUNTRY[region]].filter(Boolean).map((t) => t.toLowerCase());
   const haystack = `${photo.alt ?? ''} ${photo.url ?? ''}`.toLowerCase();
-  return terms.some((t) => haystack.includes(t.toLowerCase()) || haystack.includes(t.toLowerCase().replace(/\s+/g, '-')));
+  const norm = (t) => t.toLowerCase();
+  const includesTerm = (t) => haystack.includes(norm(t)) || haystack.includes(norm(t).replace(/\s+/g, '-'));
+
+  const ownCityTerms = [en, ...(REGION_CITY_ALIASES[region] ?? [])];
+  if (ownCityTerms.some(includesTerm)) return true;
+
+  const otherCityTerms = Object.entries(REGION_EN_NAMES)
+    .filter(([r]) => r !== region)
+    .map(([, name]) => name);
+  if (otherCityTerms.some(includesTerm)) return false;
+
+  // 자기 지역 도시명도, 다른 지역 도시명도 없으면(국가명만 있거나 아무 지명도
+  // 없으면) 도시를 특정할 수 없으므로 탈락시킨다(도시 단위 지역 기준).
+  return false;
 }
 
 // ── 전역 Pexels ID 추적 (포스트 간 이미지 중복 방지) ─────────────────────────
@@ -370,6 +394,13 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
  * 합계는 3.2시간). trip_data가 있으면 LLM을 거치지 않고 코드로 직접 계산한다
  * — 재추출 자체가 필요 없어지므로 이런 왜곡이 구조적으로 생길 수 없다.
  */
+function truncateAtWordBoundary(text, maxLen) {
+  if (!text || text.length <= maxLen) return text;
+  const cut = text.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
 function buildStatsFromTripData(tripData) {
   if (!tripData?.spots?.length) return null;
   const totalMinutes = tripData.spots.reduce(
@@ -386,7 +417,9 @@ function buildStatsFromTripData(tripData) {
   }
   if (timeLabel) stats.push({ value: timeLabel, label: '이동 시간' });
   stats.push({ value: `${tripData.spots.length}곳`, label: '방문 장소' });
-  if (topSpot) stats.push({ value: `★${topSpot.rating}`, label: topSpot.name.slice(0, 10) });
+  // 2026-09-28(작업지시서 "세부 초안 3차" §9): slice(0,10)이 단어 중간을
+  // 잘라 "Sage Healt"처럼 잘린 라벨이 나왔다 — 단어 경계에서 자른다.
+  if (topSpot) stats.push({ value: `★${topSpot.rating}`, label: truncateAtWordBoundary(topSpot.name, 12) });
   return stats.slice(0, 4);
 }
 

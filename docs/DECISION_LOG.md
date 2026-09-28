@@ -1297,3 +1297,63 @@
   신규 — alt/url에 지역·국가명 없는 사진 제외, fetchSectionImages가
   trip_data.imageUrl을 1순위 섹션 이미지로 사용),
   `docs/work-orders/2026-09-28_draft2-legs-infocard-photos.md`
+
+### D-059: "다녀온 것처럼" 쓰라는 프롬프트 지시 자체가 원인 — 시제 규칙 신설 + 일자 섹션 코드 생성 + 경주 상한 단위 불일치
+- **결정**: 게이트⑥(구간 대조) 확인 후 3차 대조에서, 이번엔 "한 섹션 전체가
+  다녀온 사람의 일기"로 쓰인 걸 발견했다("산 페드로 요새 방문으로 시작했다",
+  "House of Lechon 에서 즐겼다" 등 과거형 체험 서술). 원인은 `blog_pass3_body.md`
+  1~2행 자체가 "실제로 이 코스를 다녀온 사람처럼 … 작성하세요"라고 명시적으로
+  지시하고 있었다는 것 — 게이트⑤(1인칭 체험 표현 삭제)는 "다녀오면서·개인적으로"
+  같은 명시적 체험 어휘만 잡아서 과거형 동사만으로 체험담이 된 문장은 통과시켰다.
+  프롬프트에 "현재형/권유형만, 과거형 체험 서술 금지"를 명시하고, 게이트⑤ 패턴에
+  과거형 체험 동사(방문했/시작했/즐겼/보냈/먹었/마셨/걸었/묵었/머물렀/둘러봤/
+  느꼈/경험이었/좋았다/맛있었다 등, 주어가 장소인 역사 서술은 제외)를 추가했다.
+  한 섹션에서 3문장 이상 걸리면 시제를 재강조해 한 번 재생성한다(§2③).
+  같은 라운드에서 확인된 두 개의 독립적인 결정론 버그: (1) 제목 "평점 N 이상으로
+  골랐다"가 `Math.max`(최댓값)를 쓰고 있어서 "평점 4.9 이상"이라 써놓고 실제
+  4.9 이상은 10곳 중 2곳뿐인 거짓 제목이 나왔다 — `Math.min`으로 정정.
+  (2) 이동수단 과반 계산(`computeMajorityTransportMode`)이 날마다 마지막 스팟의
+  유령 `toNextMode`(다음 구간이 없는데도 필드 값이 남아있음)까지 세고 있어서
+  실제로는 대중교통이 과반(4/7)인데 "과반: 없음"으로 오판했다 —
+  `toNextMinutes`가 실제로 있는 구간만 세도록 정정.
+  일자 섹션("N일차 일정")은 D-057의 "시간대별 동선" 처리와 달리 여전히
+  아웃라인(LLM)이 만들고 있었고, 실측에서 "3일차 일정" 섹션이 통째로
+  빠졌다(1·2일차만 있음) — 아웃라인이 만든 일자 섹션을 전부 버리고
+  `tripData.days` 개수만큼 코드가 직접 생성하도록 D-057과 같은 원칙을
+  일자 섹션에도 적용했다(`buildDeterministicItineraryForDay`).
+  이동수단 단어를 코드로 치환하면서(D-058) 뒤에 붙은 조사를 안 바꿔서
+  "차를 → 대중교통를" 같은 비문이 나온 것도 확인 — 받침 유무 기반 조사
+  치환(`fixParticleAfterWord`)을 추가했다.
+  사진 지역 필터(D-058 `photoMatchesRegion`)가 국가명(Philippines)만 있어도
+  통과시켜서 마닐라 사진이 세부 섹션에 들어간 것도 확인 — 도시 단위 지역은
+  자기 도시명이 있어야 통과, 다른 도시명이 있으면 국가명이 같이 있어도
+  탈락하도록 강화했다.
+  **경주 "2박3일" 실측 스킵의 원인은 캐시가 아니라 단위 불일치였다** —
+  `regionProfiles.js`의 `경주: maxDays: 2`는 이 파일의 다른 용도(키워드 시드
+  단계의 `DAY_PATTERNS`, "2박3일 코스": {days:2}처럼 **박(밤) 수** 기준)로
+  정의된 값인데, `resolveDays()`가 `extractDays()`가 돌려주는 **실제 일수**
+  (2박3일→3)와 그대로 비교해 3을 2로 몰래 낮췄다 — 그래서 트레쥴에 3일
+  요청 자체가 한 번도 안 나갔다(로그에 "3일=" 시도가 없었던 이유). 실측
+  확인된 값(3일→10곳·평점 있는 스팟 7곳)으로 올렸다. AutoPipeline 쪽에는
+  course-brief 결과를 저장하는 캐시가 없음을 코드로 확인(grep 결과 없음) —
+  16:51/17:04 로그가 같았던 건 트레쥴 쪽 CDN 캐시로 추정.
+  마지막으로, 사용자가 게이트⑥ 확인을 조건으로 승인한 `RESORT_LONG_STAY_ENABLED`를
+  `true`로 켰다 — 단, 승인 시 "§2·§3·§4가 고쳐지기 전엔 발행 금지"라는 전제가
+  있었으므로 같은 커밋에서 그 셋을 먼저 고친 뒤에 켰다.
+- **버린 대안**: 경주 외 다른 `domestic-near` 지역들(maxDays:2인 전주·여수·
+  통영 등)도 같은 단위 불일치가 있을 수 있지만, 이번 지시서가 실측으로
+  검증을 요청한 건 경주뿐이라 다른 지역 값은 건드리지 않았다 — 추측으로
+  바꾸면 검증 안 된 값이 된다. 재발 확인되면 지역별로 실측 후 개별 조정.
+- **관련 파일**: `prompts/blog_pass3_body.md`(시제 규칙 신설, A-5 어투 설명
+  수정, 메뉴명 창작 금지 추가), `src/agents/blog_content_enhancer.js`
+  (FIRST_PERSON_EXPERIENCE_PATTERN 과거형 동사 확장,
+  countFirstPersonExperienceSentences·섹션 재생성 로직, buildFallbackTitle
+  Math.min 정정, computeMajorityTransportMode toNextMinutes 필터,
+  DAY_SECTION_PATTERN·buildDeterministicItineraryForDay 신규 — 일자 섹션
+  코드 생성, fixParticleAfterWord·PARTICLE_PAIRS 신규,
+  stripMismatchedDurationMentions 신규 — applyContentGates에 연결),
+  `src/agents/blog_asset_builder.js`(photoMatchesRegion 도시명 우선 강화,
+  REGION_CITY_ALIASES 신규, truncateAtWordBoundary 신규 — info_stats 라벨
+  잘림 정정), `src/agents/tradule_source.js`(RESORT_LONG_STAY_ENABLED→true,
+  시도 로그에 필터 단계별 제외 수 추가), `src/data/regionProfiles.js`
+  (경주 maxDays 2→3), `docs/work-orders/2026-09-28_draft3-diary-title-gyeongju.md`

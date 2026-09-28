@@ -26,7 +26,11 @@ export const REGION_PROFILES = {
   '여수':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '통영':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '강릉':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
-  '경주':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
+  // 2026-09-28(작업지시서 "세부 초안 3차" §10): maxDays:2였던 값이 resolveDays()에서
+  // "실제 3일(2박3일)" 요청을 2일로 몰래 낮춰버려, days=3 실측이 200·10곳·평점 있는
+  // 스팟 7곳(기준 6곳 통과)인데도 그 시도 자체가 한 번도 안 나가고 스킵됐다(로그에
+  // "3일=" 시도가 없었던 이유). 실측 확인된 값으로 올린다.
+  '경주':   { scope: 'domestic-near', minDays: 0, maxDays: 3 },
   '속초':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '춘천':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
   '양양':   { scope: 'domestic-near', minDays: 0, maxDays: 2 },
