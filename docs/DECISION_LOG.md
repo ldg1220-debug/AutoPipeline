@@ -1043,3 +1043,28 @@
   다른 필드가 더 있는가"를 먼저 전부 grep해서 확인해야 한다.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`(pass2Outline에서
   meta_description도 정정, blog_draft.seo_keywords 기본값 정정)
+
+### D-053 후속 2: QA 프롬프트 자체가 원본 키워드를 그대로 넣어 자기 모순을 만듦
+- **결정**: 앞선 후속 수정(meta_description·seo_keywords 정정) 후에도 "세부
+  5박 7일" 재실행에서 QA가 "제목과 메타 설명이 '세부 2박3일'을 강조하고
+  있으나, 본문은 '세부 5박 7일'로 시작하여 혼란을 줌"으로 계속 반려됨을
+  확인. 근본 원인을 추적한 결과 `qa_editor.js`의 `runBlogLLMQA()` 프롬프트가
+  `content.keyword`(원본, "세부 5박 7일")를 "키워드:" 줄에 그대로 넣고
+  있었다 — title·meta_description·seo_keywords는 이미 "세부 2박3일"로
+  정정됐는데, 같은 프롬프트 안에 "키워드: 세부 5박 7일"과 "제목: 세부
+  2박3일…"이 나란히 보이니 LLM이 그 자체를 불일치로 판단(또는 그 불일치를
+  설명하려고 본문이 "5박 7일로 시작한다"고 추정해 서술)한 것 — **QA가
+  검수하는 대상 자체(프롬프트)가 이미 내부 모순을 갖고 있었다.** 이미
+  정정된 `draft.seo_keywords`를 "키워드" 컨텍스트로 재사용해 프롬프트 내부를
+  일관되게 했다. 같은 파일의 `validateBlogStructure()`도 정정된
+  `seo_keywords`와 원본 raw 키워드를 합쳐서 검사하고 있어 "SEO 키워드
+  확인 필요: [세부 5박 7일]"이 소프트 경고로 계속 남는 것도 함께 정리 —
+  `seo_keywords`가 있으면(항상 기본값 있음) 그것만 검사하도록 정정.
+- **교훈**: 이번이 같은 계열 실수의 네 번째다(D-051/D-054/D-053 후속들과
+  같은 패턴). 이번엔 "값을 참조하는 필드"가 아니라 **"검수자가 보는 프롬프트
+  자체"**가 정정 안 된 원본을 베끼고 있었다는 점이 새로웠다 — 콘텐츠
+  필드(title/meta/seo_keywords/body/faq)뿐 아니라, 그 콘텐츠를 검수하는
+  프롬프트에 주입되는 컨텍스트 값들도 같은 원본-파생 관계의 일부로 취급해야
+  한다.
+- **관련 파일**: `src/agents/qa_editor.js`(runBlogLLMQA의 promptKeyword,
+  validateBlogStructure의 allKws)

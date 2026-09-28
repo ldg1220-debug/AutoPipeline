@@ -509,9 +509,18 @@ async function runBlogLLMQA(content) {
     .map((s) => `[${s.heading}] ${(s.body ?? '').trim()}`)
     .join('\n\n');
 
+  // 2026-09-28 실측("세부 5박 7일" → 실제 코스는 3일뿐이라 title·meta_description·
+  // seo_keywords는 "세부 2박3일"로 정정됐는데(D-053 후속), 여기 프롬프트는 원본
+  // content.keyword("세부 5박 7일")를 그대로 넣고 있었다 — LLM이 "키워드: 세부
+  // 5박 7일" vs "제목: 세부 2박3일..."을 같은 프롬프트 안에서 동시에 보고 "본문이
+  // 제목과 일치하지 않는다"로 반려하는 사고가 재발함(D-051/D-054/D-053 후속과
+  // 같은 계열 — 값을 고친 곳과 그 값을 베끼는 다른 곳이 분리돼 있었음). 이미
+  // 정정된 seo_keywords를 "키워드" 컨텍스트로 재사용해 프롬프트 내부 자체가
+  // 일관되게 한다.
+  const promptKeyword = (draft.seo_keywords ?? []).join(' ') || content.keyword;
   const prompt =
     `당신은 한국 여행 블로그 SEO 전문가입니다. 아래 블로그 포스트 초안(섹션 전문)을 검수하고 JSON으로만 응답하세요.\n\n` +
-    `키워드: ${content.keyword}\n` +
+    `키워드: ${promptKeyword}\n` +
     `제목: ${draft.title ?? ''}\n` +
     `메타 설명: ${draft.meta_description ?? ''}\n` +
     `SEO 키워드: ${(draft.seo_keywords ?? []).join(', ')}\n` +
@@ -624,9 +633,14 @@ function validateBlogStructure(content) {
   // 2026-09-22 정정: '&'만 나눴더니 "도쿄, 테마파크 투어, 2박 3일" 같은 콤마 구분
   // force-keyword가 한 덩어리로 남아, 아래 토큰 검사에서 "도쿄,"·"투어," 처럼
   // 콤마가 붙은 토큰이 생겨 실제 본문에 있는 키워드도 "확인 필요"로 잘못 걸렸다.
+  // 2026-09-28 실측("세부 5박 7일" → 실제 코스는 3일뿐이라 seo_keywords가 "세부
+  // 2박3일"로 정정됐는데도, 원본 raw 키워드를 같이 검사 대상에 넣고 있어서 "SEO
+  // 키워드 확인 필요: [세부 5박 7일]"이 계속 떴다). seo_keywords가 있으면(항상
+  // 기본값이 있음) 그게 정정된 최신값이므로 그것만 검사한다 — raw 키워드는
+  // seo_keywords 자체가 비어있는 예외 상황의 폴백으로만 쓴다.
   const primaryKw = splitKeywordPhrases(content.keyword ?? '');
-  const seoKeywords = draft.seo_keywords ?? primaryKw;
-  const allKws = [...new Set([...seoKeywords, ...primaryKw])];
+  const seoKeywords = draft.seo_keywords?.length ? draft.seo_keywords : primaryKw;
+  const allKws = [...new Set(seoKeywords)];
   const missingSeo = allKws.filter((kw) => {
     // 공백이 있는 키워드는 각 토큰이 body에 포함되는지 확인
     const tokens = kw.trim().split(/\s+/).filter((t) => t.length > 1);
