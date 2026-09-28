@@ -329,7 +329,12 @@ function hasInterDayCityJump(spots) {
 // 없거나 리뷰가 적은 게 정상이다(누가 "운영"하는 장소가 아니므로). 이런 자연
 // 명소는 평점이 없어도 유지한다 — 다만 프롬프트에 평점이 안 넘어가므로 본문에서
 // 평점 숫자를 인용할 일도 없다(지어낼 데이터 자체가 없음).
-const NATURAL_LANDMARK_PATTERN = /해변|beach|island|섬|폭포|waterfall|공원|park/i;
+// 2026-09-28 확장(작업지시서 "세부 초안 2차 대조" §6): "수바-배즈바스 퍼블릭
+// 비치"가 여전히 빠지는 게 실측 확인됨 — "비치"(한글 음역, "해변"이 아님)가
+// 패턴에 없었다. "산"·"호수" 같은 한 글자짜리 일반 단어는 다른 지명(부산 등)에
+// 흔히 섞여 오탐 위험이 커서 넣지 않는다 — 지시서가 예로 든 것 중 구체적으로
+// 확인된 것만 추가.
+const NATURAL_LANDMARK_PATTERN = /해변|비치|beach|island|섬|폭포|falls?|공원|park/i;
 
 function filterUnratedSpots(spots) {
   return spots.filter((spot) => {

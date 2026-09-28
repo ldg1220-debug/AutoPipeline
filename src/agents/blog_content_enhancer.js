@@ -608,6 +608,67 @@ function stripTimeOfDayMentions(text, tripData) {
   return kept.join(' ');
 }
 
+// 2026-09-28(작업지시서 "세부 초안 2차 대조" §3 게이트⑥): Pass 5가 구간
+// 이동수단 오류(예: "Cabana→스파인 차량 29분"인데 실제로는 대중교통 29분)를
+// 정확히 잡아 고쳤지만, 그 교정이 "숫자 근거 2개를 지웠다"는 이유로 코드
+// 가드(D-056)에 의해 통째로 버려졌다("reverted_number_loss") — 맞는 교정도
+// 숫자가 줄면 무효가 되는 게 가드의 한계였다. "구간 교정은 LLM이 아니라
+// 코드로" 하라는 지시대로, trip_data의 각 구간(분→수단)이 유일하게 결정되면
+// 문장 속 수단 단어를 코드로 직접 치환한다 — Pass 5·가드 어느 쪽도 필요 없다.
+const TRANSPORT_WORD_TO_MODE = {
+  '도보': 'walk', '걸어서': 'walk', '뚜벅이': 'walk',
+  '대중교통': 'transit', '버스': 'bus', '지하철': 'transit', '전철': 'transit',
+  '차량': 'car', '차로': 'car', '차를': 'car', '드라이브': 'car', '렌터카': 'car',
+  '기차': 'train', '열차': 'train',
+};
+
+/** 분(N) → 그 분을 갖는 구간의 실제 이동수단. 같은 분 값이 서로 다른 수단으로 두 번
+ *  이상 나오면(모호) 그 값은 교정 대상에서 제외 — 잘못 고칠 위험을 피한다. */
+function buildLegMinuteModeMap(tripData) {
+  const map = new Map();
+  const byDay = groupSpotsByDay(tripData?.spots ?? []);
+  for (const daySpots of byDay.values()) {
+    daySpots.forEach((s, i) => {
+      if (daySpots[i + 1] && typeof s.toNextMinutes === 'number' && s.toNextMode) {
+        const minutes = s.toNextMinutes;
+        if (map.has(minutes) && map.get(minutes) !== s.toNextMode) {
+          map.set(minutes, null);
+        } else if (!map.has(minutes)) {
+          map.set(minutes, s.toNextMode);
+        }
+      }
+    });
+  }
+  return map;
+}
+
+function correctLegTransportMentions(text, tripData) {
+  const minuteModeMap = buildLegMinuteModeMap(tripData);
+  if (!text || minuteModeMap.size === 0) return text;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  let changedCount = 0;
+  const result = sentences.map((sentence) => {
+    const minuteMatch = sentence.match(/(\d+)\s*분/);
+    if (!minuteMatch) return sentence;
+    const minutes = Number(minuteMatch[1]);
+    const correctMode = minuteModeMap.get(minutes);
+    if (!correctMode) return sentence; // 구간 값이 아니거나(다른 숫자) 모호한 값 — 그대로 둠
+    const foundWord = Object.keys(TRANSPORT_WORD_TO_MODE).find((w) => sentence.includes(w));
+    if (!foundWord || TRANSPORT_WORD_TO_MODE[foundWord] === correctMode) return sentence;
+    const correctWord = MODE_KR[correctMode] ?? correctMode;
+    let corrected = sentence;
+    for (const [word, mode] of Object.entries(TRANSPORT_WORD_TO_MODE)) {
+      if (mode === TRANSPORT_WORD_TO_MODE[foundWord]) corrected = corrected.split(word).join(correctWord);
+    }
+    changedCount += 1;
+    return corrected;
+  });
+  if (changedCount > 0) {
+    logger.warn(`[blog_content_enhancer] 구간 이동수단 오류 ${changedCount}건 코드로 치환`);
+  }
+  return result.join(' ');
+}
+
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
@@ -642,16 +703,23 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
     outline.title = sanitizeTitleForBannedWords(outline.title);
     outline.title = sanitizeDaysAgainstTripData(outline.title, tripData, keyword);
-    // 2026-09-29(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §7): 이동수단·
-    // 금지어를 걷어내고 나니 "세부 2박3일 코스 — 일정"처럼 빈약한 제목이 남는
-    // 사고가 실측 확인됨("지우기만 하면 제목이 빈약해진다"). 걷어낸 뒤 결과가
-    // 너무 짧으면(키워드+열 글자 미만) trip_data 수치로 다시 채운다.
-    if (tripData?.spots?.length && outline.title.length < keyword.length + 10) {
+    // 2026-09-28(작업지시서 "세부 초안 2차 대조" §7): "패키지 투어 vs 자유여행
+    // 비교" 같은 제목은 가격 비교를 기대하게 만드는데, 가격은 게이트④가 이미
+    // 막고 있는 데이터라 본문이 제목을 못 따라간다(삭제된 /268과 같은 각도).
+    const buildFallbackTitle = () => {
       const ratedSpots = tripData.spots.filter((s) => typeof s.rating === 'number');
       const maxRating = ratedSpots.length ? Math.max(...ratedSpots.map((s) => s.rating)) : null;
-      outline.title = maxRating
+      return maxRating
         ? `${keyword} 코스 — ${tripData.spots.length}곳, 평점 ${maxRating} 이상으로 고른 동선`
         : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선`;
+    };
+    if (tripData?.spots?.length && /\bvs\b|비교|패키지/i.test(outline.title)) {
+      logger.warn(`[blog_content_enhancer] 제목에 비교/패키지 표현 감지 → 재작성: "${outline.title}"`);
+      outline.title = buildFallbackTitle();
+    } else if (tripData?.spots?.length && outline.title.length < keyword.length + 10) {
+      // 이동수단·금지어를 걷어내고 나니 "세부 2박3일 코스 — 일정"처럼 빈약한
+      // 제목이 남는 사고가 실측 확인됨("지우기만 하면 제목이 빈약해진다").
+      outline.title = buildFallbackTitle();
     }
   }
   // 2026-09-27 실측("세부 5박7일" → 실제 코스는 3일로 재시도돼 title은 "2박3일"로
@@ -1184,6 +1252,7 @@ async function enhanceBlogDraft(content) {
     sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
     sanitized = stripWrongDayMentions(sanitized, tripData);
     sanitized = stripTimeOfDayMentions(sanitized, tripData);
+    sanitized = correctLegTransportMentions(sanitized, tripData);
     sanitized = stripUnsourcedMoney(sanitized);
     sanitized = stripFirstPersonExperienceClaims(sanitized);
     return sanitized;

@@ -1249,3 +1249,51 @@
   구간 쌍 표기로 재작성, FAQ 게이트③ 적용, MONEY_PATTERN 통화 단위 확장,
   제목 빈약 시 재작성), `src/agents/tradule_source.js`(filterUnratedSpots에
   자연 명소 예외), `docs/work-orders/2026-09-29_approved-draft-audit.md`
+
+### D-058: 구간 교정은 Pass5+가드가 아니라 코드로 — 정보카드·사진도 trip_data 직결
+- **결정**: APPROVED 초안 2차 대조(§3)에서, Pass 5가 구간 이동수단 오류
+  (예: Cabana→세부 스파인을 "차량 29분"이라 쓴 걸 "대중교통 29분"으로)를
+  **정확히** 잡았는데도, D-056의 `countFactNumbers` 가드가 그 교정 과정에서
+  숫자 근거가 2개 줄었다는 이유만으로 교정 전체를 폐기했다
+  (`review_verdict: "reverted_number_loss"`). 가드 자체는 유지하되(다른
+  라운드에서 실제로 숫자를 지우는 사고를 막고 있음), 구간 수단 교정은
+  Pass5+가드 경로를 아예 타지 않도록 **코드로 결정론적으로** 처리하는
+  `correctLegTransportMentions()`를 추가했다 — trip_data의 분(minute)→
+  수단(mode) 맵을 만들어 문장 속 "N분"을 찾아 수단 단어만 치환한다(분이
+  모호하게 여러 수단과 겹치면 치환하지 않음, 안전 우선).
+  같은 원인(LLM이 trip_data를 다시 "요약"하다 왜곡)으로 정보카드가
+  실제 구간 합(3.2시간)과 다른 "6시간"을 쓰고 있던 것도 확인 —
+  `buildStatsFromTripData()`로 info_stats를 LLM 재추출 없이 trip_data에서
+  직접 계산하도록 바꿨다(이동 시간=Σ toNextMinutes, 거리=totalDistanceKm,
+  장소 수=spots.length, 최고 평점 스팟).
+  사진도 같은 계열 문제였다 — travel 카테고리 Pexels 검색어가 지역명 없이
+  "travel destination scenery landscape"로 폴백해 세부 글에 튀르키예·
+  스위스 사진이 들어갔다(REGION_EN_NAMES에 "세부"가 없었음). 지역명을
+  추가하는 것만으로는 등록 안 된 다른 해외 지역에서 같은 사고가 재발할
+  것이므로, 매핑이 없으면 **null**을 반환해 그 섹션은 사진 없이 발행하도록
+  구조를 바꿨다(엉뚱한 나라 사진보다 무사진이 낫다는 작업지시서 판단을
+  코드 레벨 기본값으로 채택). 지역이 매핑돼 있어도 Pexels 결과의
+  alt/url에 지역·국가명이 없으면 그 사진은 버리는 `photoMatchesRegion()`
+  필터를 추가했고, travel 카테고리 섹션 이미지의 1순위는 트레쥴 코스 지도
+  (`trip_data.imageUrl`)로 — Pexels 검색 자체가 필요 없는, 실제 그 코스의
+  진짜 사진이기 때문.
+- **버린 대안**: (a) Pass5 프롬프트에 "구간 수단은 절대 건드리지 말고
+  가드도 통과시켜라" 같은 예외 지시를 추가하는 방식 — 이미 D-056에서
+  "프롬프트 지시만으로는 부족하다"는 걸 반복 확인했으므로 채택 안 함.
+  (b) REGION_EN_NAMES에 "세부"만 추가하고 폴백 쿼리는 그대로 두는 방식 —
+  다른 미등록 해외 지역(트레쥴 지역이 150개 이상)에서 즉시 재발할 것이
+  뻔해서, 미등록 지역은 아예 사진을 건너뛰는 쪽을 선택.
+- **의도적으로 다르게 한 것**: §6(자연 명소 패턴 보강)에서 작업지시서가
+  제안한 "산"·"호수"는 추가하지 않았다 — 두 글자 모두 흔한 지명의
+  부분 문자열로 잘못 매칭될 위험이 높다고 판단(예: "산" 은 "부산"에도
+  포함). "비치"만 추가.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
+  (correctLegTransportMentions/buildLegMinuteModeMap/TRANSPORT_WORD_TO_MODE
+  신규, applyContentGates에 연결, NATURAL_LANDMARK_PATTERN에 "비치" 추가,
+  제목 vs/비교/패키지 금지), `src/agents/blog_asset_builder.js`
+  (buildStatsFromTripData 신규 — info_stats를 trip_data에서 직접 계산,
+  REGION_EN_NAMES에 세부/코타키나발루/우붓/발리/시드니 추가, REGION_COUNTRY
+  신규, buildTravelPexelsQuery가 미매핑 지역에 null 반환, photoMatchesRegion
+  신규 — alt/url에 지역·국가명 없는 사진 제외, fetchSectionImages가
+  trip_data.imageUrl을 1순위 섹션 이미지로 사용),
+  `docs/work-orders/2026-09-28_draft2-legs-infocard-photos.md`

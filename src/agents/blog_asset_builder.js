@@ -57,28 +57,55 @@ const REGION_EN_NAMES = {
   '속초': 'Sokcho', '춘천': 'Chuncheon', '양양': 'Yangyang', '대구': 'Daegu',
   '인천': 'Incheon', '수원': 'Suwon', '군산': 'Gunsan', '목포': 'Mokpo',
   '거제': 'Geoje', '남해': 'Namhae', '담양': 'Damyang',
-  // 해외 — OVERSEAS_REGIONS(tradule_source.js)와 동기화. 괌·홍콩·싱가포르·세부는
-  // 실제 course-brief 응답으로 검증되지 않아 제외(2026-09-14 리뷰).
+  // 해외 — OVERSEAS_REGIONS(tradule_source.js)와 동기화.
   '후쿠오카': 'Fukuoka', '오사카': 'Osaka', '도쿄': 'Tokyo', '삿포로': 'Sapporo',
   '나고야': 'Nagoya', '오키나와': 'Okinawa', '방콕': 'Bangkok', '다낭': 'Da Nang',
   '나트랑': 'Nha Trang', '치앙마이': 'Chiang Mai', '타이베이': 'Taipei', '상하이': 'Shanghai',
+  // 2026-09-28(작업지시서 "세부 초안 2차 대조" §5): "세부"가 이 맵에 없어
+  // buildTravelPexelsQuery()가 지역 없는 일반 쿼리로 폴백했고, Pexels가 그 쿼리를
+  // 튀르키예 카파도키아·스위스 알프스 사진에 매칭해 세부 글에 넣는 사고가 났다.
+  '세부': 'Cebu', '코타키나발루': 'Kota Kinabalu', '우붓': 'Ubud', '발리': 'Bali',
+  '시드니': 'Sydney',
+};
+
+// REGION_EN_NAMES 해외 지역의 국가명(영문) — Pexels 검색어에 국가명을 넣어야
+// "지역명만으로는 다른 나라 사진과 헷갈릴 수 있는" 지역(세부↔필리핀 등)에서도
+// 정확한 사진을 찾는다. 매핑 없는 지역은 지역 영문명만 사용.
+const REGION_COUNTRY = {
+  '세부': 'Philippines', '코타키나발루': 'Malaysia', '우붓': 'Indonesia', '발리': 'Indonesia',
+  '시드니': 'Australia', '방콕': 'Thailand', '치앙마이': 'Thailand', '다낭': 'Vietnam',
+  '나트랑': 'Vietnam', '타이베이': 'Taiwan', '상하이': 'China',
+  '후쿠오카': 'Japan', '오사카': 'Japan', '도쿄': 'Japan', '삿포로': 'Japan',
+  '나고야': 'Japan', '오키나와': 'Japan',
 };
 
 /**
  * travel 카테고리 전용 Pexels 쿼리 생성. trip_data.region(또는 키워드에서 추출한 지역명)이
- * REGION_EN_NAMES에 있으면 그 지역 영문명으로, 없으면(지역 매칭 실패 키워드 — 예:
- * "신혼 여행지 추천"처럼 특정 지역이 없는 리스티클) 지역을 특정하지 않는 일반 여행
- * 사진으로 폴백한다. 원본 한글 키워드를 그대로 영문 쿼리에 섞지 않는다 — Pexels는
- * 한글 토큰을 무시하고 남은 영단어(예: "korea")만으로 매칭해 엉뚱한 사진을 반환하기 쉽다.
+ * REGION_EN_NAMES에 있으면 그 지역 영문명(+국가명)으로 쿼리를 만든다. 없으면(지역 매칭
+ * 실패 키워드 — 예: "신혼 여행지 추천"처럼 특정 지역이 없는 리스티클, 또는 아직
+ * REGION_EN_NAMES에 등록되지 않은 신규 해외 지역) null을 반환한다 — 지역 없는 일반
+ * 쿼리로 폴백하면 엉뚱한 나라 사진이 나올 수 있으므로(2026-09-28 작업지시서 §5 실측:
+ * "세부" 글에 튀르키예·스위스 사진), 지역을 특정할 수 없으면 사진을 아예 건너뛴다.
  */
 function buildTravelPexelsQuery(content) {
   const region = content?.trip_data?.region ?? extractRegion(content?.keyword ?? '');
   const en = region ? REGION_EN_NAMES[region] : null;
-  if (en) {
-    const overseas = isOverseasRegion(region);
-    return `${en} travel landmarks${overseas ? '' : ' korea'}`;
-  }
-  return 'travel destination scenery landscape';
+  if (!en) return null;
+  const overseas = isOverseasRegion(region);
+  const country = REGION_COUNTRY[region];
+  if (overseas && country) return `${en} ${country} travel landmarks`;
+  return `${en} travel landmarks${overseas ? '' : ' korea'}`;
+}
+
+// 2026-09-28(작업지시서 §5③): Pexels 결과의 alt 설명/URL slug에 지역명 또는
+// 국가명이 전혀 없으면 그 사진은 버린다 — 검색어가 맞아도 결과가 엉뚱할 수 있다.
+function photoMatchesRegion(photo, region) {
+  if (!region) return true;
+  const en = REGION_EN_NAMES[region];
+  if (!en) return true;
+  const terms = [en, REGION_COUNTRY[region]].filter(Boolean).map((t) => t.toLowerCase());
+  const haystack = `${photo.alt ?? ''} ${photo.url ?? ''}`.toLowerCase();
+  return terms.some((t) => haystack.includes(t.toLowerCase()) || haystack.includes(t.toLowerCase().replace(/\s+/g, '-')));
 }
 
 // ── 전역 Pexels ID 추적 (포스트 간 이미지 중복 방지) ─────────────────────────
@@ -182,16 +209,21 @@ async function fetchPexelsImages(keyword, category, count, destDir, content = nu
   const apiKey = config.pexels.apiKey;
   if (!apiKey) return [];
 
+  const region = content?.trip_data?.region ?? (content?.keyword ? extractRegion(content.keyword) : null);
   const query = category === 'travel'
     ? buildTravelPexelsQuery(content ?? { keyword, category })
     : (PEXELS_QUERY[category] ?? `${keyword} korea`);
+  // 2026-09-28(작업지시서 §5④): travel 카테고리에서 지역을 특정할 수 없으면(query===null)
+  // 엉뚱한 나라 사진을 받느니 사진 없이 발행한다.
+  if (query === null) return [];
   const res = await axios.get('https://api.pexels.com/v1/search', {
     params: { query, per_page: count + 5, orientation: 'landscape', page: Math.floor(Math.random() * 4) + 1 },
     headers: { Authorization: apiKey },
     timeout: 10000,
   });
 
-  const photos = res.data.photos ?? [];
+  const allPhotos = res.data.photos ?? [];
+  const photos = category === 'travel' ? allPhotos.filter((p) => photoMatchesRegion(p, region)) : allPhotos;
   const paths = [];
   for (let i = 0; i < Math.min(photos.length, count); i++) {
     const photo = photos[i];
@@ -249,16 +281,45 @@ function buildSectionQuery(keyword, sectionHeading, category, content = null) {
  */
 async function fetchSectionImages(sections, keyword, category, destDir, sharedGlobalIds = null, content = null) {
   const apiKey = config.pexels.apiKey;
-  if (!apiKey || !sections?.length) return [];
+  if (!sections?.length) return [];
 
   const paths = [];
   const count = Math.min(sections.length, 3);
   // sharedGlobalIds가 있으면 포스트 간 공유 Set 사용 (없으면 로컬 Set)
   const usedIds = sharedGlobalIds ?? new Set();
+  const region = content?.trip_data?.region ?? (keyword ? extractRegion(keyword) : null);
 
-  for (let i = 0; i < count; i++) {
+  // 2026-09-28(작업지시서 §5①): travel 글은 트레쥴 코스 지도(course-brief의 imageUrl)를
+  // 1순위로 — Pexels 검색 없이도 실제 그 코스의 진짜 사진이다.
+  let startIndex = 0;
+  if (category === 'travel' && content?.trip_data?.imageUrl) {
+    try {
+      const mapDestPath = path.join(destDir, 'section_map_raw.jpg');
+      const mapResizedPath = path.join(destDir, 'img_1.jpg');
+      await downloadImage(content.trip_data.imageUrl, mapDestPath);
+      await sharp(mapDestPath).resize(730, 490, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(mapResizedPath);
+      await fs.unlink(mapDestPath).catch(() => {});
+      paths.push({
+        path:            mapResizedPath,
+        image_url:       content.trip_data.imageUrl,
+        section_heading: sections[0]?.heading,
+        section_index:   0,
+        source:          'tradule_map',
+      });
+      startIndex = 1;
+      logger.info(`[blog_asset_builder] Section img [0] ← 트레쥴 코스 지도`);
+    } catch (err) {
+      logger.warn(`[blog_asset_builder] 트레쥴 코스 지도 다운로드 실패: ${err.message}`);
+    }
+  }
+
+  if (!apiKey) return paths;
+
+  for (let i = startIndex; i < count; i++) {
     const section = sections[i];
     const query = buildSectionQuery(keyword, section.heading ?? '', category, content);
+    // 2026-09-28(작업지시서 §5④): 지역을 특정할 수 없으면 이 섹션은 사진 없이 둔다.
+    if (query === null) continue;
     try {
       await throttle(300);
       // per_page를 10으로 늘려서 중복 회피 여지 확보
@@ -268,9 +329,10 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
         timeout: 10000,
       });
 
-      const photos = res.data.photos ?? [];
+      const allPhotos = res.data.photos ?? [];
+      const regionFiltered = category === 'travel' ? allPhotos.filter((p) => photoMatchesRegion(p, region)) : allPhotos;
       // 이미 사용된 ID는 건너뜀
-      const photo = photos.find((p) => !usedIds.has(p.id));
+      const photo = regionFiltered.find((p) => !usedIds.has(p.id));
       if (!photo) continue;
       usedIds.add(photo.id);
 
@@ -300,6 +362,33 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
 }
 
 // ── ③ 인포그래픽 카드 (Playwright 스크린샷) ──────────────────────────────
+
+/**
+ * 2026-09-28(작업지시서 "세부 초안 2차 대조" §4): extractKeyStats()가 LLM
+ * 생성 본문 텍스트에서 "인상적인 수치"를 다시 추출하다 보니, 본문에 남아있던
+ * "약 6시간" 같은 부정확한 서술을 그대로 정보카드에 박아 넣었다(실제 구간
+ * 합계는 3.2시간). trip_data가 있으면 LLM을 거치지 않고 코드로 직접 계산한다
+ * — 재추출 자체가 필요 없어지므로 이런 왜곡이 구조적으로 생길 수 없다.
+ */
+function buildStatsFromTripData(tripData) {
+  if (!tripData?.spots?.length) return null;
+  const totalMinutes = tripData.spots.reduce(
+    (sum, s) => sum + (typeof s.toNextMinutes === 'number' ? s.toNextMinutes : 0), 0
+  );
+  const hours = totalMinutes / 60;
+  const timeLabel = totalMinutes === 0 ? null : (hours < 1 ? `${totalMinutes}분` : `${hours.toFixed(1)}시간`);
+  const ratedSpots = tripData.spots.filter((s) => typeof s.rating === 'number');
+  const topSpot = ratedSpots.length ? ratedSpots.reduce((a, b) => (b.rating > a.rating ? b : a)) : null;
+
+  const stats = [];
+  if (typeof tripData.totalDistanceKm === 'number') {
+    stats.push({ value: `${tripData.totalDistanceKm}km`, label: '총 이동 거리' });
+  }
+  if (timeLabel) stats.push({ value: timeLabel, label: '이동 시간' });
+  stats.push({ value: `${tripData.spots.length}곳`, label: '방문 장소' });
+  if (topSpot) stats.push({ value: `★${topSpot.rating}`, label: topSpot.name.slice(0, 10) });
+  return stats.slice(0, 4);
+}
 
 /**
  * GPT-4o-mini로 블로그 본문에서 핵심 수치·팩트 3~4개를 추출한다.
@@ -662,7 +751,7 @@ async function buildAssets(content, sharedGlobalIds = null) {
   if (config.openai.apiKey) {
     try {
       await throttle(500);
-      const stats = await extractKeyStats(content);
+      const stats = buildStatsFromTripData(content.trip_data) ?? await extractKeyStats(content);
       if (stats.length > 0) {
         const cardPath = path.join(assetDir, 'info_card.jpg');
         result.info_card  = await generateInfoCard(stats, content.keyword, content.category, cardPath);
