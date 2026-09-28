@@ -1161,3 +1161,14 @@
 - **관련 파일**: `src/agents/tradule_source.js`(RESORT_LONG_STAY_ENABLED
   플래그, filterTravelAgencySpots 신규, 스팟 정제 지점 3곳에 배선),
   `docs/work-orders/2026-09-29_hold-resort-long.md`
+
+### D-055 후속2: 4일 이상 보류 플래그로 못 막는 3일 코스에도 공항이 섞임
+- **결정**: 트레쥴 #276 배포 후 실측 — `RESORT_LONG_STAY_ENABLED=false`는
+  4일 이상만 막으므로 "세부 2박3일"(3일, 보류 대상 아님)은 여전히 지금
+  발행 가능한데, 그 3일 코스 둘째 날 방문지로 "막탄 세부 국제공항"이
+  스팟으로 섞여 나왔다 — 여행사 필터와 같은 계열의 문제(관광지가 아닌
+  시설이 course-brief 스팟에 섞임). 기존 `TRAVEL_AGENCY_PATTERN`에
+  공항·터미널 패턴(`공항|airport|터미널|terminal`)을 추가해 같은 필터·같은
+  적용 지점 3곳으로 함께 걸렀다.
+- **관련 파일**: `src/agents/tradule_source.js`(TRAVEL_AGENCY_PATTERN에
+  공항·터미널 패턴 추가), `docs/work-orders/2026-09-29_airport-filter.md`

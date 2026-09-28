@@ -327,13 +327,17 @@ function filterUnratedSpots(spots) {
   return spots.filter((spot) => typeof spot.rating === 'number');
 }
 
-// 2026-09-29(작업지시서 "휴양지 4일 이상은 잠시 발행을 막아주세요" §3-②): 트레쥴
-// 응답에 관광지가 아니라 여행사 사무실(GEM Travels·Travel Cebu·Explore Cebu Tours
-// & Travel·Cebu Daily Tours)이 스팟으로 섞여 나오는 게 실측 확인됨 — "6일차엔
-// Travel Cebu를 방문하세요"처럼 말이 안 되는 코스가 나온다. 트레쥴 쪽에 수정을
-// 요청해뒀지만(짝 지시서), 고쳐진 뒤에도 방어선으로 남긴다 — 미지원 지역 웹 검색
-// 폴백(searchRegionSpots)에도 같은 위험이 있으므로 여기서 한 번에 거른다.
-const TRAVEL_AGENCY_PATTERN = /\b(tours?|travels?|travel\s*agency)\b|여행사/i;
+// 2026-09-29(작업지시서 "휴양지 4일 이상은 잠시 발행을 막아주세요" §3-②, 이어서
+// "방어 필터에 공항 추가"): 트레쥴 응답에 관광지가 아니라 여행사 사무실(GEM
+// Travels·Travel Cebu·Explore Cebu Tours & Travel·Cebu Daily Tours)과 교통
+// 시설(막탄 세부 국제공항 등 공항·터미널)이 스팟으로 섞여 나오는 게 실측
+// 확인됨 — RESORT_LONG_STAY_ENABLED=false는 4일 이상만 막으므로, 지금도
+// 발행되는 "세부 2박3일" 3일 코스에도 둘째 날 방문지로 공항이 그대로 들어간다.
+// "6일차엔 Travel Cebu를 방문하세요"·"둘째 날은 막탄 세부 국제공항"처럼 말이
+// 안 되는 코스를 막는다. 트레쥴 쪽에 수정을 요청해뒀지만(짝 지시서), 고쳐진
+// 뒤에도 방어선으로 남긴다 — 미지원 지역 웹 검색 폴백(searchRegionSpots)에도
+// 같은 위험이 있으므로 여기서 한 번에 거른다.
+const TRAVEL_AGENCY_PATTERN = /\b(tours?|travels?|travel\s*agency)\b|여행사|공항|airport|터미널|terminal/i;
 
 function filterTravelAgencySpots(spots) {
   return spots.filter((spot) => !TRAVEL_AGENCY_PATTERN.test(spot?.name ?? ''));
