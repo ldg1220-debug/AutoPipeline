@@ -542,6 +542,15 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
   }) + benchmarkCtx;
   await throttle(2000);
   let outline = await callGPT4oMini(prompt);
+  // 2026-09-29(작업지시서 "검수가 트레쥴 숫자를 지웁니다" §5-①): 아웃라인 섹션
+  // 제목 문자열에 "## " 같은 마크다운 헤딩 기호가 그대로 붙어 나와("## 세부 2박3일
+  // 여행 코스 개요"), 렌더링하면 제목 글자로 찍히고 QA도 "섹션 글자 수 미달"·
+  // "H2/H3 구성 불명확"으로 오판했다(실측 확인). 파싱 직후 코드로 걷어낸다.
+  const stripHeadingMarks = (s) => (s ?? '').replace(/^#+\s*/, '').trim();
+  if (outline?.title) outline.title = stripHeadingMarks(outline.title);
+  if (Array.isArray(outline?.sections)) {
+    outline.sections = outline.sections.map((s) => ({ ...s, heading: stripHeadingMarks(s.heading) }));
+  }
   if (outline?.title) {
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
     outline.title = sanitizeTitleForBannedWords(outline.title);
@@ -553,6 +562,13 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
   // 안에서 서로 다른 일수를 주장하는 내부 모순이 생긴다 — 같이 정정한다.
   if (outline?.meta_description) {
     outline.meta_description = sanitizeDaysAgainstTripData(outline.meta_description, tripData, keyword);
+  }
+  // 2026-09-29(§5-②): meta_description을 LLM에 맡기면 키워드 표기가 본문과
+  // 미묘하게 달라져("세부 2박 3일" vs "세부 2박3일") QA의 키워드 포함 검사가
+  // 계속 실패했다. trip_data가 있으면 코드로 결정론적으로 만든다 — 키워드가
+  // 앞에 그대로 들어가므로 항상 일치한다.
+  if (tripData?.spots?.length && outline) {
+    outline.meta_description = `${keyword} — 실제 코스 ${tripData.spots.length}곳, 평점·리뷰수·이동시간까지 정리했습니다.`;
   }
   outline = sanitizeOutlineTransport(outline, tripData);
   return outline;
@@ -619,12 +635,44 @@ async function pass3Faq(keyword, faqItem, targetReader) {
 }
 
 // ── Pass 4: 팩트체크 — 허구 인용 제거 ──────────────────────────────────────
-async function pass4FactCheck(keyword, sections) {
+// 2026-09-29(작업지시서 "검수(Pass 5)가 트레쥴 숫자를 지웁니다" §2): Pass4/5는
+// trip_data를 전혀 모른 채 "검증 불가한 수치"를 일반 표현으로 지워왔다 —
+// 평점·리뷰수·이동시간·거리는 트레쥴이 준 실제 값인데도 "검증 불가"로 오판해
+// "평점이 높은 곳" 식으로 바꿔버리는 사고가 실측 확인됨(9월 초 하노이 글과
+// 같은 "숫자 없는 글" 퇴행). Pass4/5 프롬프트에 trip_data 스팟 목록(평점·
+// 리뷰수·구간 이동시간)과 일자별 거리를 넣어 "이 값과 일치하는 숫자는 수정
+// 금지"를 명시한다.
+function buildTripDataFactsBlock(tripData) {
+  if (!tripData?.spots?.length) return '';
+  const spotLines = tripData.spots.map((s) => {
+    const parts = [s.name];
+    if (typeof s.rating === 'number') parts.push(`평점 ${s.rating}`);
+    if (typeof s.reviewCount === 'number') parts.push(`리뷰 ${s.reviewCount.toLocaleString()}개`);
+    if (typeof s.toNextMinutes === 'number') parts.push(`다음 장소까지 ${s.toNextMinutes}분`);
+    return `- ${parts.join(', ')}`;
+  }).join('\n');
+  return (
+    `\n\n【⚠️ 아래는 트레쥴 API가 실제로 준 값입니다 — "검증 불가"로 판단해 지우거나 ` +
+    `일반 표현으로 바꾸지 마세요. 이 값과 일치하는 숫자(평점·리뷰수·이동시간·거리)는 ` +
+    `그대로 유지할 것】\n${spotLines}`
+  );
+}
+
+// Pass4/5 전후로 본문에서 숫자 근거(★평점·리뷰수·N분·N km)가 몇 개 남아있는지 센다 —
+// 검수 후 개수가 줄었으면 검수가 트레쥴 숫자를 지운 것으로 보고 결과를 버린다.
+const FACT_NUMBER_PATTERN = /★?\s*\d\.\d\s*점?|리뷰\s*[\d,]+\s*개?|\d+\s*분|\d+(\.\d+)?\s*km/g;
+function countFactNumbers(sections) {
+  return sections.reduce((sum, s) => sum + ((s.body ?? '').match(FACT_NUMBER_PATTERN)?.length ?? 0), 0);
+}
+
+async function pass4FactCheck(keyword, sections, tripData = null) {
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
+  const tripFactsBlock = buildTripDataFactsBlock(tripData);
 
   const prompt =
-    `아래 블로그 본문에서 허구·검증 불가 인용, 시제 오류, 경제 수치 오류를 수정하세요.\n\n` +
+    `아래 블로그 본문에서 허구·검증 불가 인용, 시제 오류, 경제 수치 오류를 수정하세요.\n` +
+    `${tripFactsBlock}\n\n` +
     `오늘 날짜: ${today} (AI 학습 데이터는 2023~2024년 기준 — 지금은 2026년임)\n\n` +
     `【⚠️ 경제 수치 기준값 — 반드시 이 범위로 교정】\n` +
     `- 달러/원(USD/KRW) 환율: 2024년 하반기~2025년 1,300원 중반, 2026년 현재 1,400~1,500원대\n` +
@@ -672,6 +720,14 @@ async function pass4FactCheck(keyword, sections) {
       result = await callGPT4oMini(prompt);
     }
     if (Array.isArray(result?.sections) && result.sections.length === sections.length) {
+      // §2②(코드 가드): 프롬프트 지시만으로는 또 뚫릴 수 있으므로, 검수 전후로
+      // 숫자 근거 개수를 세어 줄었으면 검수 결과를 버리고 원본을 쓴다.
+      const before = countFactNumbers(sections);
+      const after  = countFactNumbers(result.sections);
+      if (after < before) {
+        logger.warn(`[blog_content_enhancer] Pass 4가 숫자 근거를 지움(${before}→${after}) → Pass 4 이전 본문 사용`);
+        return sections;
+      }
       return result.sections;
     }
   } catch (err) {
@@ -683,24 +739,28 @@ async function pass4FactCheck(keyword, sections) {
 // ── Pass 5: Claude 독립 검수 ──────────────────────────────────────────────
 // GPT가 작성한 글을 다른 모델(Claude)이 교차 검증한다.
 // 같은 모델의 자기 검증 한계를 극복하기 위한 별도 에이전트.
-async function pass5GeminiReview(keyword, sections, today) {
+async function pass5GeminiReview(keyword, sections, today, tripData = null) {
   if (!config.gemini?.apiKey) {
     logger.warn('[blog_content_enhancer] GEMINI_API_KEY 없음 — Pass 5 건너뜀');
     return { sections, issues: [], verdict: 'skipped' };
   }
 
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
+  const tripFactsBlock = buildTripDataFactsBlock(tripData);
 
   const prompt =
-    `당신은 한국 경제·생활 블로그의 팩트체크 전문 편집자입니다.\n` +
-    `아래 블로그 본문은 GPT-4o가 자동 작성했습니다. 당신의 역할은 독립적으로 검수하는 것입니다.\n\n` +
+    `당신은 한국 여행 블로그의 팩트체크 전문 편집자입니다.\n` +
+    `아래 블로그 본문은 GPT-4o가 자동 작성했습니다. 당신의 역할은 독립적으로 검수하는 것입니다.\n` +
+    `${tripFactsBlock}\n\n` +
     `오늘 날짜: ${today}\n` +
     `키워드: ${keyword}\n\n` +
     `【검수 기준】\n` +
     `1. 경제 수치 오류: 달러/원 환율 1,400원 이상이 정상 (1,100~1,250원 등 낮은 수치 = 오류)\n` +
     `2. 연도·시제 오류: 2023~2024년 수치를 "현재" "올해"로 표현\n` +
     `3. 법·제도 오류: 암호화폐 과세는 2025년 시행 (2023년 시행이라 쓰면 오류)\n` +
-    `4. 검증 불가 수치: "○○%가 ~~한다"처럼 출처 없는 구체적 통계\n` +
+    `4. 검증 불가 수치: "○○%가 ~~한다"처럼 출처 없는 구체적 통계. **단, 위 트레쥴 실측\n` +
+    `   목록과 일치하는 평점·리뷰수·이동시간은 검증 불가가 아니라 실제 데이터입니다 —\n` +
+    `   지우거나 "평점이 높은 곳" 같은 일반 표현으로 바꾸지 마세요.**\n` +
     `5. 허구 제품명/브랜드명: 실존 여부 불명확한 구체적 제품 (단, "트레쥴"/"트레쥴 앱"은 이\n` +
     `   블로그가 실제로 제휴하는 여행 코스 앱입니다 — 허구로 판단하지 말고 그대로 두세요)\n` +
     `6. 논리 모순: 앞뒤 내용이 충돌하는 주장\n` +
@@ -751,6 +811,15 @@ async function pass5GeminiReview(keyword, sections, today) {
         logger.warn(`[blog_content_enhancer] Pass 5 이슈 발견 (${result.verdict}, ${model}): ${result.issues_found.join(' | ')}`);
       } else {
         logger.info(`[blog_content_enhancer] Pass 5 검수 완료 (${result.verdict}, ${model}): ${keyword}`);
+      }
+
+      // §2②(코드 가드): 프롬프트에 trip_data를 줘도 또 지울 수 있으므로, 검수 전후
+      // 숫자 근거 개수를 세어 줄었으면 검수 결과를 버리고 Pass 4 결과(검수 전 본문)를 쓴다.
+      const before = countFactNumbers(sections);
+      const after  = countFactNumbers(result.sections);
+      if (after < before) {
+        logger.warn(`[blog_content_enhancer] Pass 5(${model})가 숫자 근거를 지움(${before}→${after}) → Pass 5 이전 본문 사용`);
+        return { sections, issues: result.issues_found ?? [], verdict: 'reverted_number_loss' };
       }
 
       return {
@@ -950,12 +1019,15 @@ async function enhanceBlogDraft(content) {
 
   // Pass 4: 허구 인용 제거 (책 제목·저자·기사명 등) — GPT 자기 검증
   logger.info(`[blog_content_enhancer] Pass 4 (fact-check): ${keyword}`);
-  const checkedSections = await pass4FactCheck(keyword, completedSections);
+  const checkedSections = await pass4FactCheck(keyword, completedSections, tripData);
 
-  // Pass 5: Claude 교차 검수 — 다른 모델로 독립 팩트체크
+  // Pass 5: Gemini 교차 검수 — 다른 모델로 독립 팩트체크
+  // 2026-09-29 정정: 로그 라벨이 "Claude review"였는데 실제로는 gemini-2.5-flash가
+  // 돈다 — 진단할 때 헷갈린다는 지적(작업지시서 "검수가 트레쥴 숫자를 지웁니다" §2
+  // 참고)으로 라벨을 실제 모델명으로 바꿨다.
   const today5 = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-  logger.info(`[blog_content_enhancer] Pass 5 (Claude review): ${keyword}`);
-  const reviewResult = await pass5GeminiReview(keyword, checkedSections, today5);
+  logger.info(`[blog_content_enhancer] Pass 5 (Gemini review): ${keyword}`);
+  const reviewResult = await pass5GeminiReview(keyword, checkedSections, today5, tripData);
   // §2: 제목만 고치고 본문(각 섹션 body·FAQ 답변)에 남은 "5박 7일" 같은 틀린 일수
   // 문구는 그대로 두면 "제목은 맞는데 본문은 여전히 틀림"이 되므로 본문·FAQ에도
   // 동일하게 적용한다. 이동수단은 섹션 헤딩(sanitizeOutlineTransport)에서만

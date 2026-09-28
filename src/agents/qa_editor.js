@@ -482,7 +482,12 @@ export async function runVisionQA(textQaData) {
 // ─────────────────────────────────────────────────────────────
 // ③ 블로그 본문 QA — blog_content_enhancer 완료 후 실행
 // ─────────────────────────────────────────────────────────────
-const BLOG_MIN_SECTION_CHARS = 600;   // 섹션당 최소 글자 수 (700~1200자 목표, 600자 미만 탈락 — AdSense 얕은 콘텐츠 방어)
+// 2026-09-29 정정(작업지시서 "검수가 트레쥴 숫자를 지웁니다" §4): 게이트④(출처
+// 없는 금액 문장 삭제)가 지어낸 문장을 지우면 섹션이 짧아지는데, 600자 기준은
+// 그 둘이 서로 싸우게 만들었다("지어낸 문장을 지우면 짧다고 반려 → 다시 지어내서
+// 채움"의 반복). 길이 기준을 350으로 낮추고, 대신 BLOG_MIN_NUMBERS_PER_SECTION
+// (사실 밀도)로 콘텐츠 가치를 판정한다 — "짧아도 사실이 밀도 있게 있으면 통과".
+const BLOG_MIN_SECTION_CHARS = 350;   // 섹션당 최소 글자 수 (얕은 콘텐츠 방어는 사실 밀도 기준으로 이관)
 const BLOG_MIN_FAQ_CHARS     = 150;   // FAQ 답변 최소 글자 수 (Featured Snippet 최소 기준)
 const BLOG_MIN_SECTION_COUNT = 4;     // 최소 섹션 수
 const BLOG_MIN_TOTAL_CHARS   = 4000;  // 글 전체 최소 글자 수 (AdSense 콘텐츠 가치 판단 기준)
@@ -642,13 +647,15 @@ function validateBlogStructure(content) {
   const seoKeywords = draft.seo_keywords?.length ? draft.seo_keywords : primaryKw;
   const allKws = [...new Set(seoKeywords)];
   const missingSeo = allKws.filter((kw) => {
-    // 공백이 있는 키워드는 각 토큰이 body에 포함되는지 확인
+    // 공백 제거 후 전체 구(句)가 본문에 그대로 있으면 통과 — "세부 2박3일"(키워드)과
+    // "세부 2박 3일"(본문, 띄어쓰기만 다름) 같은 경우를 여기서 먼저 잡는다
+    // (2026-09-29 정정, 작업지시서 "검수가 트레쥴 숫자를 지웁니다" §5-②).
+    if (bodyNorm.includes(kw.replace(/\s+/g, ''))) return false;
+    // 그래도 안 잡히면 토큰 단위로 완화 검사 — "테마파크 투어"처럼 본문에서 두
+    // 단어가 붙어있지 않고 따로따로 나오는 경우까지 구제한다.
     const tokens = kw.trim().split(/\s+/).filter((t) => t.length > 1);
-    if (tokens.length > 1) {
-      return tokens.some((t) => !bodyText.includes(t));
-    }
-    // 단일 토큰은 공백 제거 후 포함 여부 확인
-    return kw.length > 1 && !bodyNorm.includes(kw.replace(/\s+/g, ''));
+    if (tokens.length > 1) return tokens.some((t) => !bodyText.includes(t));
+    return kw.length > 1;
   });
   // SEO 키워드 누락은 소프트 경고로만 기록 — hardFail 대상에서 제외
   // (실제 품질은 LLM seoScore < 50 기준으로 판단)
