@@ -468,6 +468,42 @@ function sanitizeOutlineForbidden(outline) {
   return { ...outline, sections };
 }
 
+// 2026-09-29(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조했습니다. 게이트② 지금
+// 하세요" §3): "시간대별 동선"·"일자별 일정" 섹션을 LLM 자유 서술에 맡기면, 같은
+// 글 안에서 동선 타임라인 표(monetizer가 trip_data로 만드는 결정론적 정답)와
+// 다르게 쓰고, 심지어 두 섹션(동선 계획·장소별 상세)이 서로도 다르게 쓰는 사고가
+// 실측 확인됐다(3일 코스에 일정이 네 갈래로 갈림). "섹션을 통째로 재설계"하는
+// 대신 이 섹션 유형만 LLM 호출 자체를 건너뛰고 trip_data로 코드가 직접 문장을
+// 만든다 — 날조가 아예 불가능한 유일한 방법.
+const ITINERARY_NARRATION_PATTERN = /시간대별\s*동선|일자별\s*(상세\s*)?일정|동선\s*계획|일정\s*계획/;
+
+function isItineraryNarrationSection(heading) {
+  return ITINERARY_NARRATION_PATTERN.test(heading ?? '');
+}
+
+function buildDeterministicItinerary(tripData) {
+  if (!tripData?.spots?.length) return '';
+  const byDay = groupSpotsByDay(tripData.spots);
+  const dayNumbers = [...byDay.keys()].sort((a, b) => a - b);
+
+  const paragraphs = dayNumbers.map((day) => {
+    const daySpots = byDay.get(day);
+    const parts = daySpots.map((s, i) => {
+      const ratingPart = typeof s.rating === 'number'
+        ? ` (평점 ${s.rating}${typeof s.reviewCount === 'number' ? `, 리뷰 ${s.reviewCount.toLocaleString()}개` : ''})`
+        : '';
+      const next = daySpots[i + 1];
+      const nextPart = (next && typeof s.toNextMinutes === 'number')
+        // "도보로"/"차량으로" 조사(로/으로) 분기를 피하려고 "OO 이동 N분" 고정 형태로 쓴다.
+        ? ` → ${MODE_KR[s.toNextMode] ?? s.toNextMode ?? ''} 이동 ${s.toNextMinutes}분`
+        : '';
+      return `${s.name}${ratingPart}${nextPart}`;
+    });
+    return `<strong>${day}일차</strong> — ${parts.join(' → ')}`;
+  });
+  return paragraphs.join('\n\n');
+}
+
 // 게이트⑤: channel_strategy.json의 avoid 목록("가보지 않은 곳을 다녀온 것처럼
 // 쓰기")을 프롬프트로만 지시했는데도 실측에서 "이번에 세부를 다녀오면서 발견한…",
 // "개인적으로… 느꼈다" 같은 1인칭 체험 서술이 나왔다. 문장 단위로 제거한다
@@ -486,7 +522,11 @@ function stripFirstPersonExperienceClaims(text) {
 
 // 게이트④: trip_data 스팟에는 가격 필드가 없다 — 본문에 나오는 금액(원/달러/페소)은
 // 전부 출처가 없는 창작이다. 금액이 포함된 문장을 통째로 삭제한다.
-const MONEY_PATTERN = /\d[\d,]*\s*(천\s*|만\s*|억\s*)?원|₱\s*\d|\$\s*\d/;
+// 2026-09-29 확장(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §6-②): 원화·
+// 페소·달러 기호만 잡고 "달러"·"페소"(단위 글자, 기호 없이)·바트/엔/위안은
+// 못 잡아서 FAQ의 "항공 100~150달러", "대중교통 7~10페소" 같은 문장이 그대로
+// 남았다. 통화 단위 글자를 추가한다.
+const MONEY_PATTERN = /\d[\d,]*\s*(천\s*|만\s*|억\s*)?원|₱\s*\d|\$\s*\d|\d[\d,]*\s*(달러|페소|바트|엔|위안)/;
 
 function stripUnsourcedMoney(text) {
   if (!text) return text;
@@ -517,6 +557,53 @@ function stripExceedingDayMentions(text, maxDays) {
   });
   if (kept.length !== sentences.length) {
     logger.warn(`[blog_content_enhancer] 코스 일수(${maxDays}일) 초과하는 일자 서술 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
+/**
+ * 게이트②③: "N일차/첫째 날" + 스팟명이 함께 나오는 문장이 그 스팟의 실제
+ * 일차(tripData.spots[].day)와 다르면 삭제한다 — "장소별 상세 정보"·FAQ처럼
+ * 자유 서술이 남는 섹션에서 도교 사원(3일차)을 1일차로, Cabana(2일차)를
+ * 1일차로 잘못 쓰는 사고를 막는다(실측: 섹션 2곳 + FAQ에서 반복 확인).
+ */
+function buildSpotDayMap(tripData) {
+  const map = new Map();
+  for (const s of tripData?.spots ?? []) {
+    if (s.name) map.set(s.name, s.day ?? 1);
+  }
+  return map;
+}
+
+function stripWrongDayMentions(text, tripData) {
+  const spotDayMap = buildSpotDayMap(tripData);
+  if (!text || spotDayMap.size === 0) return text;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const kept = sentences.filter((sentence) => {
+    const numberedMatch = sentence.match(/(\d+)\s*일차/);
+    const ordinalMatch = sentence.match(/(첫|둘|셋|넷|다섯|여섯|일곱)째\s*날/);
+    if (!numberedMatch && !ordinalMatch) return true;
+    const mentionedDay = numberedMatch ? Number(numberedMatch[1]) : KOREAN_ORDINAL_DAY[ordinalMatch[1]];
+    for (const [spotName, actualDay] of spotDayMap) {
+      if (sentence.includes(spotName) && actualDay !== mentionedDay) return false;
+    }
+    return true;
+  });
+  if (kept.length !== sentences.length) {
+    logger.warn(`[blog_content_enhancer] 스팟-일차 불일치 문장 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
+  }
+  return kept.join(' ');
+}
+
+// 게이트②④: "오전 9시"·"오후 3시"·"저녁 7시" 같은 시각 표현은 trip_data에 없다
+// (있는 건 구간 이동 "분"뿐) — LLM이 지어낸 시각이 섞이면 안 되므로 문장째 삭제.
+const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}/;
+function stripTimeOfDayMentions(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const kept = sentences.filter((s) => !TIME_OF_DAY_PATTERN.test(s));
+  if (kept.length !== sentences.length) {
+    logger.warn(`[blog_content_enhancer] 데이터에 없는 시각 표현 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
   }
   return kept.join(' ');
 }
@@ -555,6 +642,17 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
     outline.title = sanitizeTitleForBannedWords(outline.title);
     outline.title = sanitizeDaysAgainstTripData(outline.title, tripData, keyword);
+    // 2026-09-29(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §7): 이동수단·
+    // 금지어를 걷어내고 나니 "세부 2박3일 코스 — 일정"처럼 빈약한 제목이 남는
+    // 사고가 실측 확인됨("지우기만 하면 제목이 빈약해진다"). 걷어낸 뒤 결과가
+    // 너무 짧으면(키워드+열 글자 미만) trip_data 수치로 다시 채운다.
+    if (tripData?.spots?.length && outline.title.length < keyword.length + 10) {
+      const ratedSpots = tripData.spots.filter((s) => typeof s.rating === 'number');
+      const maxRating = ratedSpots.length ? Math.max(...ratedSpots.map((s) => s.rating)) : null;
+      outline.title = maxRating
+        ? `${keyword} 코스 — ${tripData.spots.length}곳, 평점 ${maxRating} 이상으로 고른 동선`
+        : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선`;
+    }
   }
   // 2026-09-27 실측("세부 5박7일" → 실제 코스는 3일로 재시도돼 title은 "2박3일"로
   // 정정됐지만 meta_description은 그대로 남아 QA가 "본문 내용이 제목·메타 설명과
@@ -642,19 +740,54 @@ async function pass3Faq(keyword, faqItem, targetReader) {
 // 같은 "숫자 없는 글" 퇴행). Pass4/5 프롬프트에 trip_data 스팟 목록(평점·
 // 리뷰수·구간 이동시간)과 일자별 거리를 넣어 "이 값과 일치하는 숫자는 수정
 // 금지"를 명시한다.
+const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+
+/** tripData.spots를 day→order 순으로 그룹화한다. 여러 곳에서 재사용. */
+function groupSpotsByDay(spots) {
+  const byDay = new Map();
+  for (const s of spots ?? []) {
+    const day = s.day ?? 1;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(s);
+  }
+  for (const list of byDay.values()) list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return byDay;
+}
+
+// 2026-09-29 정정(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §4): 기존엔
+// "다음 장소까지 N분"이라고만 써서, 바로 뒤에 다른 스팟이 이어질 때 LLM이 그
+// N분을 "여기까지 오는 데 걸린 시간"으로 잘못 읽는 사고가 실측 확인됨(산
+// 페드로→Sage Spa 구간이 35분인데 본문은 "도보로 18분"이라고 써서 바로 다음
+// 구간 값을 앞으로 당겨 씀). "출발지 → 도착지 : 수단 N분" 형태로 구간을 명시적
+// 쌍으로 표기해 방향 혼동 자체를 없앤다.
 function buildTripDataFactsBlock(tripData) {
   if (!tripData?.spots?.length) return '';
-  const spotLines = tripData.spots.map((s) => {
-    const parts = [s.name];
-    if (typeof s.rating === 'number') parts.push(`평점 ${s.rating}`);
-    if (typeof s.reviewCount === 'number') parts.push(`리뷰 ${s.reviewCount.toLocaleString()}개`);
-    if (typeof s.toNextMinutes === 'number') parts.push(`다음 장소까지 ${s.toNextMinutes}분`);
-    return `- ${parts.join(', ')}`;
-  }).join('\n');
+  const byDay = groupSpotsByDay(tripData.spots);
+  const dayNumbers = [...byDay.keys()].sort((a, b) => a - b);
+
+  const lines = dayNumbers.flatMap((day) => {
+    const daySpots = byDay.get(day);
+    const dayLines = [`[${day}일차]`];
+    daySpots.forEach((s, i) => {
+      const parts = [s.name];
+      if (typeof s.rating === 'number') parts.push(`평점 ${s.rating}`);
+      if (typeof s.reviewCount === 'number') parts.push(`리뷰 ${s.reviewCount.toLocaleString()}개`);
+      dayLines.push(`- ${parts.join(', ')}`);
+      const next = daySpots[i + 1];
+      if (next && typeof s.toNextMinutes === 'number') {
+        const mode = MODE_KR[s.toNextMode] ?? s.toNextMode ?? '이동';
+        dayLines.push(`  → ${s.name} → ${next.name} : ${mode} ${s.toNextMinutes}분`);
+      }
+    });
+    return dayLines;
+  });
+
   return (
-    `\n\n【⚠️ 아래는 트레쥴 API가 실제로 준 값입니다 — "검증 불가"로 판단해 지우거나 ` +
-    `일반 표현으로 바꾸지 마세요. 이 값과 일치하는 숫자(평점·리뷰수·이동시간·거리)는 ` +
-    `그대로 유지할 것】\n${spotLines}`
+    `\n\n【⚠️ 아래는 트레쥴 API가 실제로 준 값입니다(일차별 순서·구간 쌍 그대로) — ` +
+    `"검증 불가"로 판단해 지우거나 일반 표현으로 바꾸지 마세요. 이 값과 일치하는 ` +
+    `숫자(평점·리뷰수·이동시간·거리)와 일차 배정은 그대로 유지할 것 — 구간은 반드시 ` +
+    `"출발지 → 도착지" 순서 그대로만 쓰고, N분을 다른 구간에 옮겨 쓰지 마세요】\n` +
+    lines.join('\n')
   );
 }
 
@@ -991,7 +1124,14 @@ async function enhanceBlogDraft(content) {
   const bodySections = (outline.sections ?? []).filter(
     (s) => !/FAQ/i.test(s.heading)
   );
-  const faqItems = outline.faq ?? [];
+  // 게이트⑥-①(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §6): sanitizeOutlineForbidden는
+  // outline.sections만 걸렀고 FAQ는 그대로 통과시켜서 "예산은 얼마인가요?" 질문에
+  // 지어낸 달러·페소 금액으로 답변이 나왔다. FAQ 질문 단계에서도 같은 패턴으로
+  // 걸러 애초에 생성 자체를 안 하게 한다(API 호출도 아낌).
+  const faqItems = (outline.faq ?? []).filter((f) => !FORBIDDEN_SECTION_PATTERN.test(f.q ?? ''));
+  if (faqItems.length !== (outline.faq ?? []).length) {
+    logger.warn(`[blog_content_enhancer] FAQ 중 예산·숙소 관련 질문 제거: ${(outline.faq ?? []).length - faqItems.length}개`);
+  }
 
   logger.info(`[blog_content_enhancer] Pass 3 (body × ${bodySections.length}): ${keyword}`);
   const outlineContext = `제목: ${outline.title}, 섹션: ${bodySections.map((s) => s.heading).join(' / ')}` +
@@ -1006,7 +1146,11 @@ async function enhanceBlogDraft(content) {
     // (배정이 없으면 전체 trip_data를 그대로 넘겨 하위 호환 유지 — spot_indices 미지원
     // 아웃라인이거나 트레쥴 데이터 자체가 없는 경우).
     const sectionTripData = sliceTripDataForSection(tripData, section);
-    const body = await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, sectionTripData);
+    // 게이트②①: "시간대별 동선"류 섹션은 LLM에 자유 서술을 맡기지 않고 trip_data로
+    // 코드가 직접 문장을 만든다 — 다른 섹션·FAQ와 일정이 어긋날 여지 자체를 없앤다.
+    const body = isItineraryNarrationSection(section.heading) && tripData?.spots?.length
+      ? buildDeterministicItinerary(tripData)
+      : await pass3Body(keyword, section, intent.target_reader, outlineContext, i === 0, sectionTripData);
     completedSections.push({ level: section.level, heading: section.heading, body });
   }
 
@@ -1038,6 +1182,8 @@ async function enhanceBlogDraft(content) {
   const applyContentGates = (text) => {
     let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
     sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
+    sanitized = stripWrongDayMentions(sanitized, tripData);
+    sanitized = stripTimeOfDayMentions(sanitized, tripData);
     sanitized = stripUnsourcedMoney(sanitized);
     sanitized = stripFirstPersonExperienceClaims(sanitized);
     return sanitized;

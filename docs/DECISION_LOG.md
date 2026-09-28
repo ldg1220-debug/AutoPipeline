@@ -1212,3 +1212,40 @@
   Pass5 로그 라벨·페르소나 정정), `src/agents/qa_editor.js`(SEO 키워드
   정규화 비교, BLOG_MIN_SECTION_CHARS 600→350),
   `docs/work-orders/2026-09-29_pass5-numbers-and-itinerary.md`
+
+### D-057: APPROVED 초안도 trip_data와 한 줄씩 대조하면 발행 불가 수준이었음
+- **결정**: D-056까지의 게이트로 QA가 APPROVED를 준 "세부 2박3일" 초안을
+  실제 트레쥴 응답과 문장 단위로 대조한 결과, "QA 통과"와 "사실과 일치"가
+  전혀 다른 기준임이 다시 확인됐다 — 같은 글 안에서 일정이 **네 갈래**로
+  갈렸다(동선 타임라인 표=정답, "시간대별 동선" 섹션, "장소별 상세 정보"
+  섹션, FAQ가 전부 서로 다르게 씀 — 도교 사원을 3일차 대신 1일차로, Cabana를
+  2일차 대신 1일차로). 이건 D-055/D-056에서 미뤄뒀던 "게이트②"(일정을
+  LLM 자유 서술에 맡기지 않기)가 실제로 발목을 잡은 사례 — QA는 글이
+  매끄러운지만 보지 trip_data와 일치하는지는 보지 않는다는 걸 재확인했다.
+  "섹션 전체를 일자 단위로 재설계"하는 대신, "시간대별 동선"류 섹션 자체를
+  LLM 호출에서 완전히 빼고 trip_data로 **코드가 직접** 문장을 생성하도록
+  했다(`buildDeterministicItinerary()`) — 날조가 구조적으로 불가능한
+  유일한 방법이라고 판단. 나머지 섹션·FAQ에 남는 자유 서술은
+  `stripWrongDayMentions()`(스팟-일차 불일치 문장 삭제)로 2차 방어했다.
+- **부수 발견**: `buildTripDataFactsBlock()`(D-056에서 추가)의 "다음
+  장소까지 N분" 표기가 방향이 모호해서, LLM이 그 N분을 "여기까지 오는
+  시간"으로 잘못 읽어 구간이 한 칸씩 밀리는 사고가 확인됨(산 페드로→Sage
+  Spa 35분인데 본문은 "도보 18분"이라 써서 바로 다음 구간 값을 앞으로
+  당겨 씀) — "출발지 → 도착지 : 수단 N분" 명시적 쌍 표기로 정정. 해변처럼
+  평점이 원래 없는 자연 명소가 "평점 없음 제외" 규칙에 걸려 통째로 빠지는
+  것도 확인 — 자연 명소 예외를 추가했다(트레쥴이 휴양형에 해변 최소 1곳을
+  보장하기 시작한 것과 맞물린 문제). FAQ는 게이트③④⑤ 적용 대상에서
+  빠져 있어서(outline.sections만 걸렀음) 예산 질문에 지어낸 달러·페소
+  금액이 그대로 남아있던 것도 확인 — FAQ 질문 단계에도 같은 필터를 적용.
+- **버린 것(이번 라운드)**: §6③(문장 삭제 후 지시어로 시작하는 문단 삭제)·
+  §6④(이동수단 게이트가 제목만 바꾸고 본문은 안 바꾸는 문제 — 본문 재생성
+  필요)·§6⑤(음식점 설명에서 지어낸 요리 서술 방지)는 착수하지 않음 —
+  이미 이번 라운드에서 다룬 항목이 많아 범위를 제한했고, 특히 ④⑤는 추가
+  LLM 재생성이 필요해 비용·복잡도가 한 단계 더 크다. 재발 확인되면 다음
+  라운드에서 진행.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
+  (buildDeterministicItinerary/isItineraryNarrationSection/
+  stripWrongDayMentions/stripTimeOfDayMentions 신규, buildTripDataFactsBlock
+  구간 쌍 표기로 재작성, FAQ 게이트③ 적용, MONEY_PATTERN 통화 단위 확장,
+  제목 빈약 시 재작성), `src/agents/tradule_source.js`(filterUnratedSpots에
+  자연 명소 예외), `docs/work-orders/2026-09-29_approved-draft-audit.md`

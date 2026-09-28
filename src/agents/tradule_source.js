@@ -323,8 +323,19 @@ function hasInterDayCityJump(spots) {
  * 평점이었다. 규칙을 이 하나로 통일 — sanitizeSpots() 이후(리뷰 수 부족으로 null
  * 처리된 것 포함) rating이 null인 스팟을 그냥 목록에서 제외한다.
  */
+// 2026-09-29(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조했습니다" §5): 트레쥴이
+// 휴양형에 해변을 최소 1곳 보장하도록 고쳤는데(#278), "평점 없는 스팟 제외"가
+// 그 해변을 다시 빼버렸다 — 공용 해변·섬·폭포·공원 같은 자연 명소는 원래 평점이
+// 없거나 리뷰가 적은 게 정상이다(누가 "운영"하는 장소가 아니므로). 이런 자연
+// 명소는 평점이 없어도 유지한다 — 다만 프롬프트에 평점이 안 넘어가므로 본문에서
+// 평점 숫자를 인용할 일도 없다(지어낼 데이터 자체가 없음).
+const NATURAL_LANDMARK_PATTERN = /해변|beach|island|섬|폭포|waterfall|공원|park/i;
+
 function filterUnratedSpots(spots) {
-  return spots.filter((spot) => typeof spot.rating === 'number');
+  return spots.filter((spot) => {
+    if (typeof spot.rating === 'number') return true;
+    return NATURAL_LANDMARK_PATTERN.test(`${spot?.name ?? ''} ${spot?.category ?? ''}`);
+  });
 }
 
 // 2026-09-29(작업지시서 "휴양지 4일 이상은 잠시 발행을 막아주세요" §3-②, 이어서
