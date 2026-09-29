@@ -403,7 +403,8 @@ function truncateAtWordBoundary(text, maxLen) {
   if (!text || text.length <= maxLen) return text;
   const cut = text.slice(0, maxLen);
   const lastSpace = cut.lastIndexOf(' ');
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim();
+  // 단어 경계에서 자른 뒤 끝에 남은 관사·전치사("House of"의 of)는 떼어낸다.
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim().replace(/\s+(of|the|and|&|in)$/i, '').trim();
 }
 
 function buildStatsFromTripData(tripData) {
@@ -424,7 +425,7 @@ function buildStatsFromTripData(tripData) {
   stats.push({ value: `${tripData.spots.length}곳`, label: '방문 장소' });
   // 2026-09-28(작업지시서 "세부 초안 3차" §9): slice(0,10)이 단어 중간을
   // 잘라 "Sage Healt"처럼 잘린 라벨이 나왔다 — 단어 경계에서 자른다.
-  if (topSpot) stats.push({ value: `★${topSpot.rating}`, label: truncateAtWordBoundary(topSpot.name, 12) });
+  if (topSpot) stats.push({ value: `★${topSpot.rating}`, label: truncateAtWordBoundary(topSpot.name, 10) });
   return stats.slice(0, 4);
 }
 

@@ -1574,3 +1574,9 @@
   "역사적 명소" 서술은 trip_data에 근거가 없어 규칙화하지 못함.
 - **관련 파일**: `src/utils/dayCard.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`,
   `docs/work-orders/2026-09-29_cebu7-boat-legs.md`
+
+### D-071: 정보카드 최고 평점 라벨 10자 제한
+- **결정**: 정보카드 셀프 리뷰가 "label 'Sage Health' 10자 초과"로 FAIL — `buildStatsFromTripData`의 라벨
+  자르기를 12자로 잡은 게 카드 규칙(10자)과 어긋난 것. 10자 단어 경계로 낮추고 끝에 남는
+  관사·전치사("House of"의 of)는 제거. 영문 긴 이름은 "Sage"처럼 짧아지는 한계는 남는다.
+- **관련 파일**: `src/agents/blog_asset_builder.js`
