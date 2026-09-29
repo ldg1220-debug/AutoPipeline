@@ -1713,9 +1713,12 @@ async function enhanceBlogDraft(content) {
     // "일별 상세 일정"처럼 새 이름으로 빠져나간다 → "일차·일별·일자·동선·일정" 단어가
     // 들어간 섹션은 전부 제거(일자 카드가 그 내용을 이미 담는다).
     const DAY_RELATED_HEADING = /일차|일별|일자|동선|일정/;
+    // 2026-09-29(실측: "…일정 개요" 같은 제목의 개요 섹션까지 지워 본문이 782자 한 섹션만 남음):
+    // 개요/소개 섹션은 일자 카드와 겹치지 않는 도입부이므로 제거 대상에서 제외한다.
+    const isOverview = (h) => /개요|소개|한눈에/.test(h ?? '');
     const nonDaySections = bodySections.filter(
-      (s) => !DAY_SECTION_PATTERN.test(s.heading ?? '') && !ITINERARY_NARRATION_PATTERN.test(s.heading ?? '') &&
-        !DAY_RELATED_HEADING.test(s.heading ?? '')
+      (s) => !DAY_SECTION_PATTERN.test(s.heading ?? '') &&
+        (isOverview(s.heading) || (!ITINERARY_NARRATION_PATTERN.test(s.heading ?? '') && !DAY_RELATED_HEADING.test(s.heading ?? '')))
     );
     const removedCount = bodySections.length - nonDaySections.length
       - bodySections.filter((s) => DAY_SECTION_PATTERN.test(s.heading ?? '')).length;
