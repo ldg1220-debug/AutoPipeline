@@ -362,6 +362,15 @@ function filterUnratedSpots(spots) {
 // 같은 위험이 있으므로 여기서 한 번에 거른다.
 const TRAVEL_AGENCY_PATTERN = /\b(tours?|travels?|travel\s*agency)\b|여행사|공항|airport|터미널|terminal/i;
 
+// 2026-09-29(작업지시서 "tonextmode-null" 선행 §2): 지역 이름 그 자체가 스팟으로 내려오는 경우("세부 섬" —
+// 세부 지역에 "세부 섬"이라는 실제 방문지가 아닌 지역 대표 항목)를 뺀다. 이름이 지역명 또는 지역명+섬/시와
+// 정확히 같을 때만(경주 황리단길처럼 지역명이 부분 포함된 실제 명소는 D-050에서 이미 유지하기로 함).
+function filterRegionSelfSpots(spots, region) {
+  if (!region) return spots;
+  const selfNames = new Set([region, `${region} 섬`, `${region}섬`, `${region}시`]);
+  return spots.filter((spot) => !selfNames.has((spot?.name ?? '').trim()));
+}
+
 function filterTravelAgencySpots(spots) {
   return spots.filter((spot) => !TRAVEL_AGENCY_PATTERN.test(spot?.name ?? ''));
 }
@@ -597,7 +606,7 @@ export async function attachTripData(keywordData) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
       const rawCount = Array.isArray(attempt?.spots) ? attempt.spots.length : 0;
       const sanitized = Array.isArray(attempt?.spots) ? sanitizeSpots(attempt.spots) : [];
-      const agencyFiltered = filterTravelAgencySpots(sanitized);
+      const agencyFiltered = filterRegionSelfSpots(filterTravelAgencySpots(sanitized), region);
       const ratedSpots = filterUnratedSpots(agencyFiltered);
       const agencyDropped = sanitized.length - agencyFiltered.length;
       attemptLog.push(

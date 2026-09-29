@@ -672,10 +672,14 @@ function stripUnverifiedModeMinutes(text, tripData) {
 // 문장을 지우지 않고 해당 구절만 제거해 문장을 유지한다.
 function removeBannedPhrases(text) {
   if (!text) return text;
-  const out = text
-    .replace(/경제적(으로|인|이며|이고)?\s*/g, '')
-    .replace(/역사적(인)?\s*(가치|명소)/g, '$2');
-  if (out !== text) logger.warn('[blog_content_enhancer] 금지 구절("경제적"·"역사적 가치/명소") 제거');
+  // "경제적…"은 구절만 제거(문장 유지). "역사적 가치/명소"는 지운 자리에 "세부의 가치를 느낄 수 있는 곳",
+  // "가치와 함께 많은 방문객…"처럼 비문이 남는 게 실측 확인돼(2026-09-29 "가치 잔재") 문장째 삭제한다.
+  let out = text.replace(/경제적(으로|인|이며|이고)?\s*/g, '');
+  const r = rewriteSentences(out, (sentence) => (
+    /역사적(인)?\s*(가치|명소)|가치(를|와|가)\s*(느낄|함께)/.test(sentence) ? null : sentence
+  ));
+  out = r.text;
+  if (out !== text) logger.warn('[blog_content_enhancer] 금지 구절("경제적"·"역사적 가치/명소"·"가치를 느낄") 제거');
   return out;
 }
 

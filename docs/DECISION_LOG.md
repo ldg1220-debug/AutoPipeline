@@ -1655,3 +1655,18 @@
 - **미조치**: 개요 "대중교통을 이용해 비용을 절감할 수 있는 장점"(가격 각도), The Pig and Palm "영국 셰프" 등 근거
   없는 서술은 남음.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`
+
+### D-080: 트레쥴 v21(toNextMode null) 대응 · 지역 자체 스팟 · "가치" 잔재 · 섬은 해변이 아님
+- **결정**: (1) v21에서 각 날 마지막 스팟 `toNextMode`가 `"car"` 대신 `null`. 코드 전수 점검(grep) —
+  구간 계산은 이미 `toNextMinutes` 숫자 + `toNextMode` truthy를 함께 요구해 영향 없었고, 수단 라벨 세 곳
+  (일차 포인트·수단별 합계·카드 평문)은 `null`이 "null"/"undefined 분"으로 샐 수 있어 `modeLabel()`로
+  통일(null → "이동"). 마지막 스팟 null fixture로 카드·포인트·평문 확인 — null/undefined 문자열 없음.
+  (2) "세부 섬"처럼 지역 이름 자체(지역명, 지역명+섬/시)인 스팟은 경로에서 제외(`filterRegionSelfSpots`) —
+  이름이 정확히 같을 때만이라 "경주 황리단길"류 실제 명소는 유지. (3) "역사적 가치/명소"를 구절만 지우면
+  "세부의 가치를 느낄 수 있는 곳"·"가치와 함께 많은 방문객…" 비문이 남아(실측) 그 표현이 든 문장은 삭제로
+  변경(D-077의 구절 제거 방침을 이 표현에 한해 번복; "경제적"은 구절 제거 유지). (4) 섬 이름 스팟은 종류를
+  "해변"이 아닌 "섬"으로 분류 → 코드 FAQ "해변은 어디가 포함…"에 섬이 들어가지 않음.
+- **미확인**: 선행 지시서(`AUTOPIPELINE_2026-09-29_세부섬_269보류.md`)는 전달받지 못했다 — 이 지시서에 요약된
+  §2(지역 자체 스팟)·§3("가치" 잔재)·§4(FAQ 해변/섬)를 위 (2)(3)(4)로 처리. 선행 지시서에 다른 항목이 있으면 별도 전달 필요.
+- **관련 파일**: `src/utils/dayCard.js`, `src/agents/tradule_source.js`, `src/agents/blog_content_enhancer.js`,
+  `docs/work-orders/2026-09-29_tonextmode-null.md`
