@@ -8,7 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
-import { inferSpotKind } from '../utils/dayCard.js';
+import { inferSpotKind, isBoatLeg, isIslandName } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -508,7 +508,9 @@ function buildDeterministicItinerary(tripData) {
     const parts = daySpots.map((s, i) => {
       const ratingPart = formatRatingPart(s);
       const next = daySpots[i + 1];
-      const nextPart = (next && typeof s.toNextMinutes === 'number')
+      const nextPart = (next && isBoatLeg(s, next))
+        ? ' → 배편 (시간 미확인)'
+        : (next && typeof s.toNextMinutes === 'number')
         // "도보로"/"차량으로" 조사(로/으로) 분기를 피하려고 "OO 이동 N분" 고정 형태로 쓴다.
         ? ` → ${MODE_KR[s.toNextMode] ?? s.toNextMode ?? ''} 이동 ${s.toNextMinutes}분`
         : '';
@@ -543,7 +545,9 @@ function buildDeterministicItineraryForDay(tripData, day) {
   const parts = daySpots.map((s, i) => {
     const ratingPart = formatRatingPart(s);
     const next = daySpots[i + 1];
-    const nextPart = (next && typeof s.toNextMinutes === 'number')
+    const nextPart = (next && isBoatLeg(s, next))
+      ? ' → 배편 (시간 미확인)'
+      : (next && typeof s.toNextMinutes === 'number')
       ? ` → ${MODE_KR[s.toNextMode] ?? s.toNextMode ?? ''} 이동 ${s.toNextMinutes}분`
       : '';
     return `${s.name}${ratingPart}${nextPart}`;
@@ -738,7 +742,7 @@ function buildLegMinuteModeMap(tripData) {
   const byDay = groupSpotsByDay(tripData?.spots ?? []);
   for (const daySpots of byDay.values()) {
     daySpots.forEach((s, i) => {
-      if (daySpots[i + 1] && typeof s.toNextMinutes === 'number' && s.toNextMode) {
+      if (daySpots[i + 1] && typeof s.toNextMinutes === 'number' && s.toNextMode && !isBoatLeg(s, daySpots[i + 1])) {
         const minutes = s.toNextMinutes;
         if (map.has(minutes) && map.get(minutes) !== s.toNextMode) {
           map.set(minutes, null);
@@ -792,7 +796,7 @@ function buildLegPairMap(tripData) {
   for (const daySpots of byDay.values()) {
     daySpots.forEach((s, i) => {
       const next = daySpots[i + 1];
-      if (next && typeof s.toNextMinutes === 'number' && s.toNextMode) {
+      if (next && typeof s.toNextMinutes === 'number' && s.toNextMode && !isBoatLeg(s, next)) {
         map.set(`${s.name}→${next.name}`, { mode: s.toNextMode, minutes: s.toNextMinutes });
       }
     });
@@ -920,7 +924,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
       // 리뷰 수 상위 두 곳을 코스 진행 순서(일차·순서)로 배열해 "A부터 B까지"가 자연스럽게 읽히게 한다.
       const pair = famous.slice(0, 2).sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
       return famous.length >= 2
-        ? `${keyword} 코스 — ${tripData.spots.length}곳, ${pair[0].name}부터 ${pair[1].name}까지${km}`
+        ? `${keyword} 코스 — ${tripData.spots.length}곳, ${pair[0].name}·${pair[1].name} 포함${km}`
         : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선${km}`;
     };
     if (tripData?.spots?.length && /\bvs\b|비교|패키지/i.test(outline.title)) {
@@ -1067,7 +1071,9 @@ function buildTripDataFactsBlock(tripData) {
       if (typeof s.reviewCount === 'number') parts.push(`리뷰 ${s.reviewCount.toLocaleString()}개`);
       dayLines.push(`- ${parts.join(', ')}`);
       const next = daySpots[i + 1];
-      if (next && typeof s.toNextMinutes === 'number') {
+      if (next && isBoatLeg(s, next)) {
+        dayLines.push(`  → ${s.name} → ${next.name} : 배편 (시간 미확인 — 차·도보로 쓰지 말 것)`);
+      } else if (next && typeof s.toNextMinutes === 'number') {
         const mode = MODE_KR[s.toNextMode] ?? s.toNextMode ?? '이동';
         dayLines.push(`  → ${s.name} → ${next.name} : ${mode} ${s.toNextMinutes}분`);
       }
@@ -1388,6 +1394,19 @@ function buildCodeFaqs(tripData, keyword) {
   return faqs;
 }
 
+// 2026-09-29(작업지시서 "배 구간 처리" §2②): 섬 이름과 육상 이동수단·시간이 한 문장에 있으면 삭제
+// ("Caohagan Island 까지 차로 이동하며 약 42분" — 카오하간 섬은 배로만 간다).
+function stripIslandLandTransport(text, tripData) {
+  const islands = (tripData?.spots ?? []).map((sp) => sp.name).filter((n) => isIslandName(n));
+  if (!text || !islands.length) return text;
+  const r = rewriteSentences(text, (sentence) => {
+    if (!islands.some((n) => sentence.includes(n))) return sentence;
+    return /차량|차로|차를|도보|대중교통|버스|지하철/.test(sentence) && /\d+\s*분|접근|이동/.test(sentence) ? null : sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 섬 구간에 육상 이동수단 서술 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
 // 2026-09-29(작업지시서 §5④): "대중교통을 이용할 경우 약 3.6시간"은 구간 수단이 섞여 있어
 // 틀린 표현이다(3.6시간은 수단 무관 구간 합계) → "이동 합계 약 3.6시간"으로 바꾼다.
 const MODE_TOTAL_TIME_PATTERN = /(대중교통|차량|도보|버스|지하철)(을|를)?\s*이용(할|하는)?\s*(경우|시)\s*(약\s*\d+(?:\.\d+)?\s*시간)/g;
@@ -1400,6 +1419,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
   sanitized = stripWrongDayMentions(sanitized, tripData);
   sanitized = stripTimeOfDayMentions(sanitized, tripData);
+  sanitized = stripIslandLandTransport(sanitized, tripData);
   sanitized = correctOrStripLegMentions(sanitized, tripData);
   sanitized = correctLegTransportMentions(sanitized, tripData);
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);

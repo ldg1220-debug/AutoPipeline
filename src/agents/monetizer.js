@@ -11,7 +11,7 @@ import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../u
 import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 import { isOverseasRegion, extractRegion } from './tradule_source.js';
 import { splitKeywordPhrases } from './blog_content_enhancer.js';
-import { buildDayPoints, buildDaySubtitle, inferSpotKind, dayLegMinutes } from '../utils/dayCard.js';
+import { buildDayPoints, buildDaySubtitle, inferSpotKind, dayLegMinutes, isBoatLeg } from '../utils/dayCard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -675,7 +675,7 @@ function buildDayCardHtml(tripData, day, narrativeHtml) {
   const straightLine = isStraightLineDistance(tripData);
   const rows = daySpots.map((sp, idx) => {
     const isLast = idx === daySpots.length - 1;
-    const next = isLast ? '—' : formatToNext(sp, straightLine);
+    const next = isLast ? '—' : (isBoatLeg(sp, daySpots[idx + 1]) ? '배편 (시간 미확인)' : formatToNext(sp, straightLine));
     return `<tr><td>${idx + 1}</td><td>${sp.name}</td><td>${inferSpotKind(sp) ?? '—'}</td><td>${typeof sp.rating === 'number' ? formatRating(sp, tripData.ratingSource) : '평점 정보 없음'}</td><td>${next}</td></tr>`;
   }).join('\n');
   const points = buildDayPoints(tripData, day);

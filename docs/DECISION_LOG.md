@@ -1560,3 +1560,17 @@
   다시 써서 사실 기반 답을 지어낸 답으로 바꿀 수 있었다. 코드 FAQ에 `generated:'code'`를 표시해
   QA 길이 규칙과 재작성에서 제외.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/qa_editor.js`
+
+### D-070: 섬 구간은 배 — 트레쥴이 car로 줘도 육상 이동으로 쓰지 않는다 (방어선)
+- **결정**: 트레쥴이 Caohagan Island 구간을 `car`(42분·19분)로 줘서 글에 "섬까지 차로 42분"이 그대로
+  나갔다(섬은 배로만 감). 트레쥴 수정(짝 지시서)과 별개로 방어선을 둔다: 출발·도착 중 하나가
+  섬(이름에 island/isla/섬)이거나 mode가 boat이면 "배 구간"으로 보고 (1) 카드 표 "다음 이동"·코드
+  목록은 "배편 (시간 미확인)", (2) 포인트는 "섬은 배로 이동합니다. 배편 시간은 현지에서 확인하세요.",
+  (3) 그 구간 분·수단은 일자 이동 합계·구간 대조표(분→수단, 스팟쌍)·LLM 사실 블록에서 제외,
+  (4) 본문에서 섬 이름 + 육상 이동수단 + (분|접근|이동)이 함께 있는 문장은 삭제.
+  제목은 "A부터 B까지"를 "A·B 포함"으로 바꿔 본문이 제목 문구를 코스 순서로 오해하지 않게 했다.
+- **미처리(참고)**: FAQ "이동 합계 N시간"·정보카드 총 이동 시간·`stripMismatchedDuration`의 구간 합은
+  트레쥴 totalDistance/분 그대로(배 구간 분 포함) — 트레쥴이 배 시간을 주기 전까지 유지. 레아신전
+  "역사적 명소" 서술은 trip_data에 근거가 없어 규칙화하지 못함.
+- **관련 파일**: `src/utils/dayCard.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`,
+  `docs/work-orders/2026-09-29_cebu7-boat-legs.md`

@@ -14,8 +14,19 @@ export function groupByDay(spots) {
   return byDay;
 }
 
+// 2026-09-29(작업지시서 "배 구간 처리"): 트레쥴이 섬 구간을 car로 주지만 카오하간 섬 같은 곳은 배로만
+// 간다. 출발·도착 중 하나가 섬이거나 mode가 boat이면 "배 구간"으로 보고 육상 이동시간·수단으로 쓰지 않는다.
+export function isIslandName(name) {
+  return /island|\bisla\b|섬/i.test(name ?? '');
+}
+
+export function isBoatLeg(spot, next) {
+  return spot?.toNextMode === 'boat' || isIslandName(spot?.name) || isIslandName(next?.name);
+}
+
 export function dayLegMinutes(daySpots) {
-  return daySpots.slice(0, -1).reduce((sum, s) => sum + (typeof s.toNextMinutes === 'number' ? s.toNextMinutes : 0), 0);
+  return daySpots.slice(0, -1).reduce(
+    (sum, s, i) => sum + (typeof s.toNextMinutes === 'number' && !isBoatLeg(s, daySpots[i + 1]) ? s.toNextMinutes : 0), 0);
 }
 
 // 트레쥴 category가 기타/음식점/숙소 수준이라 이름으로 성격을 추정한다(§4).
@@ -51,10 +62,12 @@ export function buildDaySubtitle(daySpots) {
 export function buildDayPoints(tripData, day) {
   const byDay = groupByDay(tripData.spots);
   const daySpots = byDay.get(day) ?? [];
-  const legs = daySpots.slice(0, -1).filter((sp) => typeof sp.toNextMinutes === 'number');
+  const hasBoat = daySpots.slice(0, -1).some((sp, i) => isBoatLeg(sp, daySpots[i + 1]));
+  const legs = daySpots.slice(0, -1).filter((sp, i) => typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, daySpots[i + 1]));
   const total = dayLegMinutes(daySpots);
   const totals = [...byDay.values()].map(dayLegMinutes);
   const points = [];
+  if (hasBoat) points.push('섬은 배로 이동합니다. 배편 시간은 현지에서 확인하세요.');
   if (byDay.size > 1 && total > 0 && total === Math.max(...totals) && totals.filter((t) => t === total).length === 1) {
     const carMin = legs.filter((l) => l.toNextMode === 'car').reduce((sum, l) => sum + l.toNextMinutes, 0);
     points.push(`이동이 가장 많은 날입니다(총 ${total}분).${carMin > 0 ? ` 차량 구간이 ${carMin}분 포함돼 있습니다.` : ''}`);
@@ -87,7 +100,7 @@ export function dayCardPlainText(tripData, day) {
   const daySpots = groupByDay(tripData?.spots).get(day) ?? [];
   if (!daySpots.length) return '';
   const rows = daySpots.map((sp, i) =>
-    `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? `${MODE_KR[sp.toNextMode] ?? ''} ${sp.toNextMinutes ?? ''}분` : '—'}`
+    `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : `${MODE_KR[sp.toNextMode] ?? ''} ${sp.toNextMinutes ?? ''}분`) : '—'}`
   );
   return [buildDaySubtitle(daySpots), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }
