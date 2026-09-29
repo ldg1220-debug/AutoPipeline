@@ -1000,39 +1000,6 @@ async function pass3Body(keyword, section, targetReader, outlineContext, isFirst
   return callGPT4o(prompt, false);
 }
 
-// 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2①): 일자 섹션이 코드가 만든
-// "장소 → 장소" 목록뿐이라 QA의 섹션당 최소 글자수(350자)·구체 수치 규칙에
-// 매번 걸렸다(9/29 지시서 §3②가 원래 요구한 "목록 + 해설 2~4문장"에서 해설이
-// 빠져 있었음). 그날 스팟만 넘겨 짧은 해설을 LLM으로 따로 생성하고, 코드가
-// 만든 목록 뒤에 붙인다 — 해설은 그날 스팟 이외를 언급할 수 없어 다른
-// 섹션·다른 날과 어긋날 여지가 없다.
-async function pass3DayNarrative(keyword, day, daySpots, targetReader) {
-  const spotList = daySpots.map((s) => {
-    const rating = typeof s.rating === 'number' ? `평점 ${s.rating}` : '평점 정보 없음';
-    return `${s.name}(분류: ${s.category ?? '기타'}, ${rating})`;
-  }).join(', ');
-  const prompt = (
-    `"${keyword}" 코스의 ${day}일차 해설을 2~4문장(200~350자)으로 쓰세요.\n` +
-    `독자: ${targetReader}\n` +
-    `이날 방문하는 곳(이 목록에 있는 곳만 언급하세요 — 다른 날짜·다른 스팟은 절대 언급 금지): ${spotList}\n` +
-    `규칙:\n` +
-    `- 현재형/권유형만 쓰세요("~한다", "~하면 좋다"). "~했다", "~즐겼다", "~다녀왔다" 같은 ` +
-    `과거형 체험 서술은 절대 쓰지 마세요(실제로 다녀온 것처럼 쓰지 말 것).\n` +
-    `- 평점은 위 목록에 있는 값만 그대로 인용하세요. "평점 정보 없음"인 곳은 평점을 언급하지 마세요.\n` +
-    `- 구체적인 메뉴명·요금·영업시간을 지어내지 마세요.\n` +
-    `- 장소의 성격은 이름과 분류에서 알 수 있는 범위만 쓰세요. 분류가 "기타"이거나 이름만으로 성격을 알 수 없으면 ` +
-    `그곳에서 하는 활동·분위기·요리 종류를 서술하지 말고 이름·평점·이동만 언급하세요("자연 속 휴식", "다양한 현지 요리" 같은 추측 금지). ` +
-    `분류가 "음식점"이어도 요리 종류·인기 메뉴는 쓰지 마세요.\n` +
-    `- "평점 정보 없음"인 곳은 "평점 정보 없음, 방문 전 확인 권장" 한 줄 이상 소개하지 마세요.\n` +
-    `- 형용사 대신 숫자로 쓰세요("높은 만족도를 자랑" 금지 → "★4.6, 리뷰 N개"). 한 문장에 한 가지 정보만.\n` +
-    `- 이날 표에 이미 있는 내용(평점·이동시간·이동수단)은 다시 쓰지 마세요. "자랑한다·안성맞춤·만끽·추천한다" 같은 상투어 금지.\n` +
-    `- 마지막 문단·"핵심:" 요약 반복 금지.\n` +
-    `해설 텍스트만 반환하세요(목록 다시 쓰지 말 것):`
-  );
-  await throttle(1500);
-  return callGPT4o(prompt, false);
-}
-
 async function pass3Faq(keyword, faqItem, targetReader) {
   const prompt = `다음 FAQ 항목의 답변을 150~250자로 작성하세요. 독자가 이 질문에서 실제로 알고 싶어하는 핵심을 구체적 수치나 단계로 설명하세요.\n키워드: ${keyword}, 독자: ${targetReader}\n질문: ${faqItem.q}\n힌트: ${faqItem.a_hint}\n답변 텍스트만 반환:`;
   await throttle(1000);
@@ -1363,6 +1330,13 @@ function capCliches(bodies) {
   return out;
 }
 
+// 2026-09-29(작업지시서 §5④): "대중교통을 이용할 경우 약 3.6시간"은 구간 수단이 섞여 있어
+// 틀린 표현이다(3.6시간은 수단 무관 구간 합계) → "이동 합계 약 3.6시간"으로 바꾼다.
+const MODE_TOTAL_TIME_PATTERN = /(대중교통|차량|도보|버스|지하철)(을|를)?\s*이용(할|하는)?\s*(경우|시)\s*(약\s*\d+(?:\.\d+)?\s*시간)/g;
+function neutralizeModeTotalTime(text) {
+  return text ? text.replace(MODE_TOTAL_TIME_PATTERN, '이동 합계 $5') : text;
+}
+
 function applyContentGatesFor(text, tripData, keyword) {
   let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
   sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
@@ -1371,6 +1345,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = correctOrStripLegMentions(sanitized, tripData);
   sanitized = correctLegTransportMentions(sanitized, tripData);
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);
+  sanitized = neutralizeModeTotalTime(sanitized);
   sanitized = stripUnsourcedMoney(sanitized);
   sanitized = stripFirstPersonExperienceClaims(sanitized);
   return sanitized;
@@ -1399,13 +1374,7 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
     const dayMatch = (section.heading ?? '').match(DAY_SECTION_PATTERN);
     let newBody;
     if (dayMatch && tripData?.spots?.length) {
-      const day = Number(dayMatch[1]);
-      const list = buildDeterministicItineraryForDay(tripData, day);
-      const daySpots = byDay.get(day) ?? [];
-      let narrative = daySpots.length ? await pass3DayNarrative(keyword, day, daySpots, targetReader) : '';
-      narrative = stripFirstPersonExperienceClaims(narrative);
-      narrative = stripWrongDayMentions(narrative, tripData);
-      newBody = narrative ? `${list}\n\n${narrative}` : list;
+      newBody = buildDeterministicItineraryForDay(tripData, Number(dayMatch[1]));
     } else {
       const sectionTripData = sliceTripDataForSection(tripData, section);
       newBody = await pass3Body(keyword, section, targetReader, outlineContext, false, sectionTripData);
@@ -1610,21 +1579,10 @@ async function enhanceBlogDraft(content) {
     const sectionTripData = sliceTripDataForSection(tripData, section);
     let body;
     if (section.__deterministic_day) {
-      // §5: 코드가 직접 만든 목록(장소→장소, 절대 틀리지 않음) + 그날 스팟만
-      // 넘긴 짧은 해설(§2①, QA의 섹션당 최소 글자수를 채우기 위함). 목록은
-      // LLM을 거치지 않고, 해설만 좁게 생성해 뒤에 붙인다.
-      const day = section.__deterministic_day;
-      const list = buildDeterministicItineraryForDay(tripData, day);
-      const byDay = groupSpotsByDay(tripData.spots);
-      const daySpots = byDay.get(day) ?? [];
-      let narrative = daySpots.length
-        ? await pass3DayNarrative(keyword, day, daySpots, intent.target_reader)
-        : '';
-      // 목록과 같은 게이트를 해설에도 적용 — 과거형 체험·다른 날 스팟 언급이
-      // 새어 나올 수 있으므로(LLM 산출물이라 프롬프트만으로는 완전하지 않음).
-      narrative = stripFirstPersonExperienceClaims(narrative);
-      narrative = stripWrongDayMentions(narrative, tripData);
-      body = narrative ? `${list}\n\n${narrative}` : list;
+      // 2026-09-29(작업지시서 "일자 카드 다듬기" §3): 일자 카드(지도·부제·표·포인트)가 정보를
+      // 다 담으므로 LLM 해설은 뺀다 — 표를 다시 읽어주는 문장뿐이었고 상투어 게이트가 지우면
+      // "이 음식점은…" 같은 주어 없는 파편이 남았다. 본문에는 코드 목록만 둔다.
+      body = buildDeterministicItineraryForDay(tripData, section.__deterministic_day);
     } else if (isItineraryNarrationSection(section.heading) && tripData?.spots?.length) {
       // 게이트②①: "시간대별 동선"류 섹션은 LLM에 자유 서술을 맡기지 않고 trip_data로
       // 코드가 직접 문장을 만든다 — 다른 섹션·FAQ와 일정이 어긋날 여지 자체를 없앤다.

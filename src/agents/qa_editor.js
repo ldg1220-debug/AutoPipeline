@@ -7,6 +7,7 @@ import logger from '../utils/logger.js';
 import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import { splitKeywordPhrases } from './blog_content_enhancer.js';
+import { dayCardPlainText } from '../utils/dayCard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -639,8 +640,14 @@ function validateBlogStructure(content) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
   }
 
+  // 2026-09-29(작업지시서 "일자 카드 다듬기" §3): 일자 카드의 부제·표·포인트는 body가 아니라
+  // 렌더 단계에서 붙으므로 글자수에 따로 더한다(LLM 해설을 뺀 뒤 총량이 줄어드는 걸 보정).
+  const cardChars = sections.reduce((sum, s) => {
+    const m = (s.heading ?? '').match(/(\d+)\s*일차/);
+    return m && content.trip_data?.spots?.length ? sum + dayCardPlainText(content.trip_data, Number(m[1])).length : sum;
+  }, 0);
   const totalChars = sections.reduce((sum, s) => sum + (s.body ?? '').length, 0)
-    + faq.reduce((sum, f) => sum + (f.a ?? '').length, 0);
+    + faq.reduce((sum, f) => sum + (f.a ?? '').length, 0) + cardChars;
   if (totalChars < BLOG_MIN_TOTAL_CHARS) {
     issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${BLOG_MIN_TOTAL_CHARS}자 — AdSense 콘텐츠 가치 기준)`);
   }
