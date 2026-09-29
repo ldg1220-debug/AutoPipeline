@@ -1513,3 +1513,11 @@
 - **관련 파일**: `src/agents/monetizer.js`, `src/agents/blog_asset_builder.js`,
   `src/agents/blog_content_enhancer.js`, `prompts/blog_pass3_body.md`,
   `docs/work-orders/2026-09-29_day-cards-images-tone.md`
+
+### D-066: --force-keyword에 옵션이 섞이면 발행 전에 중단 (실사고 /270)
+- **결정**: `--force-keyword "세부 5박7일"--draft-only`(닫는 따옴표 뒤 공백 없음)를 Windows cmd가
+  한 인자로 합쳐 키워드가 "세부 5박7일--draft-only"가 됐고, `--draft-only`는 적용되지 않아
+  제목·슬러그·SEO 키워드가 오염된 글이 실발행됐다(maeilg.com/270, /269와 중복). 키워드 값에
+  `--옵션`이 보이면 파이프라인 시작 전에 안내 메시지와 함께 종료한다(하이픈 들어간 지명
+  "오사카-교토"는 통과). 이미 발행된 /270은 코드로 내릴 수 없어 사용자 조치 필요.
+- **관련 파일**: `scripts/run-blog-pipeline.js`
