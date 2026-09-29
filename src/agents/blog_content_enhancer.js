@@ -1526,6 +1526,18 @@ function dropOrphanParagraphs(text, tripData = null) {
     }
     return out.join(' ');
   }).filter((p) => p.trim());
+  // 2026-09-29(초안: 맛집 섹션 중간의 "세련된 인테리어와 함께 다양한 음료를 즐길 수 있어…" — 어느 가게인지 없음):
+  // 스팟 소개형 섹션(문단 4개 이상)에서 첫·마지막(도입·맺음)이 아닌 중간 문단이 스팟 이름도 숫자도 없으면
+  // 이름 문단이 지워진 파편이므로 삭제.
+  if (spotNames.length && paragraphs.length >= 4) {
+    for (let i = paragraphs.length - 2; i >= 1; i--) {
+      const para = paragraphs[i];
+      if (!hasSpot(para) && !/\d/.test(para) && !/^\s*([-*·]|\d+\.|<)/.test(para)) {
+        removed += 1;
+        paragraphs.splice(i, 1);
+      }
+    }
+  }
   if (removed) logger.warn(`[blog_content_enhancer] 주어 없는 파편 ${removed}개 삭제`);
   return paragraphs.join('\n\n');
 }
