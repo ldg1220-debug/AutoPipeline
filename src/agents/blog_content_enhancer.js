@@ -421,7 +421,8 @@ function sanitizeTitleForBannedWords(title) {
     if (!sanitized.includes(word)) continue;
     sanitized = sanitized
       // "완벽 코스", "완벽한 가이드"처럼 뒤에 붙는 조사·수식을 함께 지운다
-      .replace(new RegExp(`${word}(한|적인)?\\s*`, 'g'), '')
+      // 2026-09-29(로그: "저렴하게 즐기는" → "하게 즐기는" 조각): 금지어가 든 어절 전체를 지운다
+      .replace(new RegExp(`\\S*${word}\\S*\\s*`, 'g'), '')
       .replace(/\s{2,}/g, ' ')
       .replace(/^[,:\s]+|[,:\s]+$/g, '')
       .trim();
