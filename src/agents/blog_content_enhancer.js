@@ -1096,11 +1096,20 @@ function buildTripDataFactsBlock(tripData) {
     return dayLines;
   });
 
+  // 2026-09-29(실행 로그 4건 연속: Pass 5가 "총 이동거리 N km는 트레쥴 API에 제공되지 않는
+  // 검증 불가 수치"라며 삭제): 총 거리·총 이동시간이 이 블록에 없어서 검수자가 실제 값을
+  // 모르는 수치로 오판했다. 트레쥴이 준 totalDistanceKm와 구간 합계를 명시한다.
+  const totalMin = tripData.spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
+  const totalLine =
+    (typeof tripData.totalDistanceKm === 'number' ? `총 이동 거리: ${tripData.totalDistanceKm}km (트레쥴 제공 값)\n` : '') +
+    (totalMin > 0 ? `구간 이동시간 합계: ${totalMin}분 (${(totalMin / 60).toFixed(1)}시간, 구간 값의 합)\n` : '');
+
   return (
     `\n\n【⚠️ 아래는 트레쥴 API가 실제로 준 값입니다(일차별 순서·구간 쌍 그대로) — ` +
     `"검증 불가"로 판단해 지우거나 일반 표현으로 바꾸지 마세요. 이 값과 일치하는 ` +
     `숫자(평점·리뷰수·이동시간·거리)와 일차 배정은 그대로 유지할 것 — 구간은 반드시 ` +
     `"출발지 → 도착지" 순서 그대로만 쓰고, N분을 다른 구간에 옮겨 쓰지 마세요】\n` +
+    totalLine +
     lines.join('\n')
   );
 }

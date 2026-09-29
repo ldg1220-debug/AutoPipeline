@@ -1484,3 +1484,11 @@
   활동·요리 종류 서술 금지로 처리.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`,
   `docs/work-orders/2026-09-29_approved-drafts-finishing.md`
+
+### D-064: Pass 4/5 사실 블록에 총 이동 거리·구간 합계 추가
+- **결정**: 실행 로그에서 Pass 5가 "총 이동거리 N km는 트레쥴 API에 제공되지 않는 검증
+  불가 수치"라며 실제 값(36.5·53.1·60.1km)을 지운 게 4건 연속 확인됨. 사실 블록
+  (`buildTripDataFactsBlock`)에 스팟·구간만 있고 `totalDistanceKm`과 구간 합계가 없어서였다
+  (D-056과 같은 "검수자에게 근거를 안 줬다" 계열). 총 거리와 구간 합계(분·시간)를 블록에 추가.
+  숫자 개수 가드가 매번 되돌려 피해는 없었지만 Pass 5의 다른 교정까지 같이 버려지고 있었다.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
