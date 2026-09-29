@@ -670,37 +670,120 @@ const SECTION_LABELS = ['① 핵심 정보', '② 자세히 보기', '③ 심층
  * @param {Array}  seoKeywords   - 하이라이트할 키워드 목록
  * @param {string} catColor      - 카테고리 색상 hex
  */
-function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb') {
+// 2026-09-29(작업지시서 "사실은 맞췄습니다. 이제 읽히는 글로" §4): 일자 섹션을
+// "카드"로 — 부제(분류 구성·이동 합계) + 표(순서·장소·종류·평점·다음 이동) +
+// 데이터에서 나온 "포인트" 문장 + (있으면) LLM 해설. 숫자가 있고 글마다 달라 AI 티가 안 난다.
+const DAY_HEADING_PATTERN = /(\d+)\s*일차/;
+
+function dayLegMinutes(daySpots) {
+  return daySpots.slice(0, -1).reduce((sum, s) => sum + (typeof s.toNextMinutes === 'number' ? s.toNextMinutes : 0), 0);
+}
+
+function buildDayPoints(tripData, day) {
+  const byDay = new Map();
+  for (const sp of tripData.spots ?? []) {
+    const d = sp.day ?? 1;
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(sp);
+  }
+  for (const list of byDay.values()) list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const daySpots = byDay.get(day) ?? [];
+  const legs = daySpots.slice(0, -1).filter((sp) => typeof sp.toNextMinutes === 'number');
+  const total = dayLegMinutes(daySpots);
+  const points = [];
+  const totals = [...byDay.values()].map(dayLegMinutes);
+  if (byDay.size > 1 && total > 0 && total === Math.max(...totals) && totals.filter((t) => t === total).length === 1) {
+    const carMin = legs.filter((l) => l.toNextMode === 'car').reduce((sum, l) => sum + l.toNextMinutes, 0);
+    points.push(`이동이 가장 많은 날입니다(총 ${total}분).${carMin > 0 ? ` 차량 구간이 ${carMin}분 포함돼 있습니다.` : ''}`);
+  } else if (legs.length === 1) {
+    points.push(`이동은 한 번(${MODE_KR[legs[0].toNextMode] ?? '이동'} ${legs[0].toNextMinutes}분)뿐이라 여유 있는 날입니다.`);
+  } else if (legs.length > 1 && legs.every((l) => l.toNextMode === 'walk')) {
+    points.push(`하루 종일 걸어서 이동하는 날입니다(총 ${total}분).`);
+  }
+  if (daySpots.filter((sp) => sp.category === '음식점').length >= 2) {
+    points.push('식사 장소가 2곳 이상 포함돼 있어 이 동선 안에서 해결할 수 있습니다.');
+  }
+  const unrated = daySpots.filter((sp) => typeof sp.rating !== 'number');
+  if (unrated.length > 0) {
+    points.push(`${unrated.map((sp) => sp.name).join('·')}은(는) 평점 정보가 없어 방문 전 현장 상황 확인을 권합니다.`);
+  }
+  return points;
+}
+
+function buildDayCardHtml(tripData, day, narrativeHtml, seoKeywords) {
+  const daySpots = (tripData.spots ?? []).filter((sp) => (sp.day ?? 1) === day).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  if (daySpots.length === 0) return '';
+  const cats = new Map();
+  for (const sp of daySpots) cats.set(sp.category ?? '기타', (cats.get(sp.category ?? '기타') ?? 0) + 1);
+  const total = dayLegMinutes(daySpots);
+  const subtitle = `${[...cats].map(([c, n]) => `${c} ${n}곳`).join(' · ')}${total > 0 ? ` (이동 ${total}분)` : ''}`;
+  const straightLine = isStraightLineDistance(tripData);
+  const rows = daySpots.map((sp, idx) => {
+    const isLast = idx === daySpots.length - 1;
+    const next = isLast ? '—' : formatToNext(sp, straightLine);
+    return `<tr><td>${idx + 1}</td><td>${sp.name}</td><td>${sp.category ?? '기타'}</td><td>${typeof sp.rating === 'number' ? formatRating(sp, tripData.ratingSource) : '평점 정보 없음'}</td><td>${next}</td></tr>`;
+  }).join('\n');
+  const points = buildDayPoints(tripData, day);
+  return (
+    `<p style="margin:0 0 10px;color:#64748b;font-size:14px">${subtitle}</p>\n` +
+    `<div class="timeline-table"><table>\n<thead><tr><th>순서</th><th>장소</th><th>종류</th><th>평점 (리뷰)</th><th>다음 이동</th></tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table></div>\n` +
+    (points.length ? `<p style="margin:10px 0 14px;line-height:1.9"><b>이 날의 포인트</b> — ${points.join(' ')}</p>\n` : '') +
+    (narrativeHtml ? `<p style="margin:0 0 14px;line-height:1.9">${narrativeHtml}</p>\n` : '')
+  );
+}
+
+/**
+ * @param {Array}  sections
+ * @param {Object} affiliateMap  - position별 제휴 HTML
+ * @param {Array}  bodyImages    - blog_assets.body_images
+ * @param {Array}  seoKeywords   - 하이라이트할 키워드 목록
+ * @param {string} catColor      - 카테고리 색상 hex
+ * @param {Object} tripData      - 일자 카드 생성용(없으면 일반 렌더)
+ */
+function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb', tripData = null) {
+  // 2026-09-29(§3): 같은 이미지는 글 안에서 1번만. 예전엔 섹션 인덱스에 맞는 이미지가
+  // 없으면 bodyImages[i % length]로 순환해 같은 사진·지도가 여러 섹션에 반복됐다.
+  const usedImageUrls = new Set();
   return sections
     .map((s, i) => {
       const tag = s.level === 'h3' ? 'h3' : 'h2';
       const hookKey = `section${i + 1}_end`;
       const affiliateHtml = affiliateMap[hookKey] ?? '';
+      const dayMatch = tripData?.spots?.length ? (s.heading ?? '').match(DAY_HEADING_PATTERN) : null;
 
-      // 섹션 인덱스와 일치하는 이미지 우선, 없으면 순환
-      const imgData = bodyImages.length > 0
-        ? (bodyImages.find((img) => img.section_index === i) ?? bodyImages[i % bodyImages.length])
-        : null;
+      // 섹션 인덱스와 정확히 일치하는 이미지만(순환 금지). 일자 섹션에는 스톡 사진을 넣지 않는다.
+      let imgData = dayMatch ? null : (bodyImages.find((img) => img.section_index === i) ?? null);
+      // 작가명이 빈 Pexels 사진("Photo by Pexels on Pexels")은 제외, 중복 URL도 제외
+      if (imgData?.pexels_id && !(imgData.photographer ?? '').trim()) imgData = null;
+      if (imgData && usedImageUrls.has(imgData.image_url)) imgData = null;
+      if (imgData?.image_url) usedImageUrls.add(imgData.image_url);
       // 첫 섹션 이미지에는 메인 키워드 포함 (SEO alt 최적화)
       const altText = i === 0
         ? `${seoKeywords[0] ?? ''} - ${s.heading}`.trim()
         : `${s.heading} (${seoKeywords[0] ?? ''})`.trim();
+      const creditHtml = imgData?.pexels_id
+        ? `<p class="photo-credit">Photo by ${imgData.photographer} on Pexels</p>\n`
+        : '';
       const imageHtml = imgData?.image_url
         ? `<div class="blog-img-wrap">\n` +
           `<img src="${imgData.image_url}" alt="${altText}" loading="lazy" style="width:100%;height:auto;display:block;" />\n` +
-          `<p class="photo-credit">Photo by ${imgData.photographer ?? 'Pexels'} on Pexels</p>\n` +
+          creditHtml +
           `</div>`
         : '';
 
-      // 마크다운 → HTML 변환 후 키워드 하이라이트
-      const bodyHtml = highlightKeywords(markdownToHtml(s.body ?? ''), seoKeywords);
-
-      // 첫 문장(마크다운 제거 후)을 callout 박스로 강조
-      const plainBody = (s.body ?? '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1');
-      const firstSentence = plainBody.split(/(?<=[.!?])\s+/)[0].trim();
-      const calloutHtml = firstSentence
-        ? `<div class="callout"><b>핵심:</b> ${firstSentence}</div>`
-        : '';
+      let contentHtml;
+      if (dayMatch) {
+        // 본문 = "코드 목록\n\n해설" — 목록은 표로 대체하고 해설만 남긴다.
+        const rawBody = s.body ?? '';
+        const idx = rawBody.indexOf('\n\n');
+        const narrative = idx >= 0 ? rawBody.slice(idx + 2) : '';
+        const narrativeHtml = narrative ? highlightKeywords(markdownToHtml(narrative), seoKeywords) : '';
+        contentHtml = buildDayCardHtml(tripData, Number(dayMatch[1]), narrativeHtml, seoKeywords);
+      } else {
+        // 마크다운 → HTML 변환 후 키워드 하이라이트. ("핵심:" callout 상자는 2026-09-29 제거 —
+        // 첫 문장을 그대로 복사해 한 섹션에 같은 내용이 반복됐다.)
+        contentHtml = `<p style="margin:0 0 14px;line-height:1.9">${highlightKeywords(markdownToHtml(s.body ?? ''), seoKeywords)}</p>\n`;
+      }
 
       return (
         // ① 섹션 헤더: 번호 뱃지 + 카테고리 색상
@@ -709,8 +792,8 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         `<${tag}>${s.heading}</${tag}>\n` +
         `</div>\n` +
         `${imageHtml}\n` +
-        `<p style="margin:0 0 14px;line-height:1.9">${bodyHtml}</p>\n` +
-        `${calloutHtml}${affiliateHtml}`
+        contentHtml +
+        `${affiliateHtml}`
       );
     })
     .join('\n\n');
@@ -830,7 +913,7 @@ async function monetizeBlogDraft(content) {
   }
 
   // ① 섹션 HTML (키워드 하이라이트 + 섹션 헤더 + 섹션별 이미지)
-  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor);
+  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data);
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면

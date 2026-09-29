@@ -1024,6 +1024,8 @@ async function pass3DayNarrative(keyword, day, daySpots, targetReader) {
     `그곳에서 하는 활동·분위기·요리 종류를 서술하지 말고 이름·평점·이동만 언급하세요("자연 속 휴식", "다양한 현지 요리" 같은 추측 금지). ` +
     `분류가 "음식점"이어도 요리 종류·인기 메뉴는 쓰지 마세요.\n` +
     `- "평점 정보 없음"인 곳은 "평점 정보 없음, 방문 전 확인 권장" 한 줄 이상 소개하지 마세요.\n` +
+    `- 형용사 대신 숫자로 쓰세요("높은 만족도를 자랑" 금지 → "★4.6, 리뷰 N개"). 한 문장에 한 가지 정보만.\n` +
+    `- 이날 표에 이미 있는 내용(평점·이동시간·이동수단)은 다시 쓰지 마세요. "자랑한다·안성맞춤·만끽·추천한다" 같은 상투어 금지.\n` +
     `- 마지막 문단·"핵심:" 요약 반복 금지.\n` +
     `해설 텍스트만 반환하세요(목록 다시 쓰지 말 것):`
   );
@@ -1338,6 +1340,29 @@ function buildAffiliateHooks(sections, affiliateCategory) {
 // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §2④): enhanceBlogDraft 안
 // 클로저였던 게이트 체인을 최상위 함수로 뽑아냈다 — regenerateFailedSections()가
 // 전체 재작성 없이 섹션 단위로도 같은 게이트를 적용해야 하기 때문.
+// 2026-09-29(작업지시서 §5): "AI가 쓴 것 같다"의 정체 — 같은 형용사·틀 반복(자랑 7회,
+// 추천한다/좋다 23회). 상투어는 글 전체에서 1회만 허용하고 2회째부터 그 문장을 삭제한다.
+const CLICHE_PATTERNS = [/자랑/, /안성맞춤/, /만끽/, /여유로운\s*시간/, /높은\s*만족도/, /인기가\s*많/, /추천한다/, /하면\s*좋다/, /다양한\s*매력/, /효율적으로/];
+
+function capCliches(bodies) {
+  const counts = CLICHE_PATTERNS.map(() => 0);
+  let removedTotal = 0;
+  const out = bodies.map((body) => {
+    if (!body) return body;
+    const r = rewriteSentences(body, (sentence) => {
+      let drop = false;
+      CLICHE_PATTERNS.forEach((re, i) => {
+        if (re.test(sentence)) { counts[i] += 1; if (counts[i] > 1) drop = true; }
+      });
+      return drop ? null : sentence;
+    });
+    removedTotal += r.removed;
+    return r.text;
+  });
+  if (removedTotal) logger.warn(`[blog_content_enhancer] 상투어 반복 감지 → 문장 ${removedTotal}개 삭제(각 1회 허용)`);
+  return out;
+}
+
 function applyContentGatesFor(text, tripData, keyword) {
   let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
   sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
@@ -1536,8 +1561,13 @@ async function enhanceBlogDraft(content) {
     // §2②: 일자 섹션이 생기면 "시간대별 동선/이동 방법/교통편"류는 같은 구간
     // 정보를 중복 서술하므로 아예 뺀다 — 남겨두면 LLM이 다시 쓰다 틀리고,
     // 게이트가 틀린 문장을 지우면서 섹션이 비는 사고로 이어졌었다(실측 확인).
+    // 2026-09-29(작업지시서 "읽히는 글로" §4): 이름 목록(시간대별 동선 등)만 막으면
+    // "일별 상세 일정"처럼 새 이름으로 빠져나간다 → "일차·일별·일자·동선·일정" 단어가
+    // 들어간 섹션은 전부 제거(일자 카드가 그 내용을 이미 담는다).
+    const DAY_RELATED_HEADING = /일차|일별|일자|동선|일정/;
     const nonDaySections = bodySections.filter(
-      (s) => !DAY_SECTION_PATTERN.test(s.heading ?? '') && !ITINERARY_NARRATION_PATTERN.test(s.heading ?? '')
+      (s) => !DAY_SECTION_PATTERN.test(s.heading ?? '') && !ITINERARY_NARRATION_PATTERN.test(s.heading ?? '') &&
+        !DAY_RELATED_HEADING.test(s.heading ?? '')
     );
     const removedCount = bodySections.length - nonDaySections.length
       - bodySections.filter((s) => DAY_SECTION_PATTERN.test(s.heading ?? '')).length;
@@ -1655,10 +1685,24 @@ async function enhanceBlogDraft(content) {
     }
     return { ...s, body: applyContentGates(s.body) };
   });
-  const finalFaqSections = faqSections.map((f) => ({
+  const finalFaqSectionsRaw = faqSections.map((f) => ({
     ...f,
     a: applyContentGates(f.a),
   }));
+  // 상투어는 섹션·FAQ 전체에서 통틀어 1회(섹션 순서대로). 일자 섹션의 코드 목록 문단은 제외하고 해설만 대상.
+  const capped = capCliches([
+    ...finalSections.map((s) => (DAY_SECTION_PATTERN.test(s.heading ?? '') ? (s.body ?? '').split('\n\n').slice(1).join('\n\n') : s.body)),
+    ...finalFaqSectionsRaw.map((f) => f.a),
+  ]);
+  finalSections.forEach((s, i) => {
+    if (DAY_SECTION_PATTERN.test(s.heading ?? '')) {
+      const list = (s.body ?? '').split('\n\n')[0];
+      s.body = capped[i] ? `${list}\n\n${capped[i]}` : list;
+    } else {
+      s.body = capped[i];
+    }
+  });
+  const finalFaqSections = finalFaqSectionsRaw.map((f, i) => ({ ...f, a: capped[finalSections.length + i] }));
 
   const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);

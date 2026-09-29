@@ -339,7 +339,12 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
 
   if (!apiKey) return paths;
 
+  // 2026-09-29(작업지시서 "사실은 맞췄습니다. 이제 읽히는 글로" §3): 스톡 사진은 도입부
+  // 1장만 — 일자("N일차") 섹션에는 넣지 않는다(실측: 같은 세부 야경 사진이 일자 섹션마다
+  // 5번 반복). 일자별 지도는 트레쥴 배포 후 연결한다.
+  const stockTarget = sections.findIndex((sec, idx) => idx >= Math.max(startIndex, 1) && !/\d+\s*일차/.test(sec.heading ?? ''));
   for (let i = startIndex; i < count; i++) {
+    if (category === 'travel' && i !== stockTarget) continue;
     const section = sections[i];
     const query = buildSectionQuery(keyword, section.heading ?? '', category, content);
     // 2026-09-28(작업지시서 §5④): 지역을 특정할 수 없으면 이 섹션은 사진 없이 둔다.
@@ -356,7 +361,7 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
       const allPhotos = res.data.photos ?? [];
       const regionFiltered = category === 'travel' ? allPhotos.filter((p) => photoMatchesRegion(p, region)) : allPhotos;
       // 이미 사용된 ID는 건너뜀
-      const photo = regionFiltered.find((p) => !usedIds.has(p.id));
+      const photo = regionFiltered.find((p) => !usedIds.has(p.id) && (p.photographer ?? '').trim());
       if (!photo) continue;
       usedIds.add(photo.id);
 
