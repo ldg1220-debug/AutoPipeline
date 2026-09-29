@@ -851,7 +851,10 @@ async function monetizeBlogDraft(content) {
   const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data, content.fact_check);
   const distanceDisclosureHtml = buildStraightLineDisclosure(content.trip_data); // 임시 조치(2026-09-08), 1회만
   const courseMapHtml = buildCourseMapImage(content.trip_data);
-  const timelineHtml = buildTimelineTable(content.trip_data);
+  // 2026-09-29(작업지시서 "카드형 세부 7일 초안" §5): 일자 카드가 같은 표를 이미 보여주므로 위쪽
+  // 전체 타임라인 표는 뺀다(요약 TL;DR과 전체 코스 지도는 유지). 일자 섹션이 없는 글만 표를 쓴다.
+  const hasDayCards = (blog_draft.sections ?? []).some((sec) => /\d+\s*일차/.test(sec.heading ?? '')) && content.trip_data?.spots?.length;
+  const timelineHtml = hasDayCards ? '' : buildTimelineTable(content.trip_data);
 
   // ① 키워드 태그 클라우드
   const tagCloudHtml = buildKeywordTags(seoKeywords);

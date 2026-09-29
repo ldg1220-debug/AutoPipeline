@@ -59,7 +59,10 @@ export function buildDayPoints(tripData, day) {
     const carMin = legs.filter((l) => l.toNextMode === 'car').reduce((sum, l) => sum + l.toNextMinutes, 0);
     points.push(`이동이 가장 많은 날입니다(총 ${total}분).${carMin > 0 ? ` 차량 구간이 ${carMin}분 포함돼 있습니다.` : ''}`);
   } else if (legs.length === 1) {
-    points.push(`이동은 한 번(${MODE_KR[legs[0].toNextMode] ?? '이동'} ${legs[0].toNextMinutes}분)뿐이라 여유 있는 날입니다.`);
+    const m = MODE_KR[legs[0].toNextMode] ?? '이동';
+    points.push(legs[0].toNextMinutes >= 30
+      ? `이동은 한 번이지만 ${m} ${legs[0].toNextMinutes}분이라 시간을 넉넉히 잡으세요.`
+      : `이동은 한 번(${m} ${legs[0].toNextMinutes}분)뿐이라 여유 있는 날입니다.`);
   } else if (legs.length > 1 && legs.every((l) => l.toNextMode === 'walk')) {
     points.push(`이동은 모두 도보입니다(총 ${total}분).`);
   }

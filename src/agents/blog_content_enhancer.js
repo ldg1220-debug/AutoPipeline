@@ -8,6 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
+import { inferSpotKind } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -812,6 +813,9 @@ function correctOrStripLegMentions(text, tripData) {
       .map((name) => ({ name, idx: sentence.indexOf(name) }))
       .filter((m) => m.idx !== -1)
       .sort((a, b) => a.idx - b.idx);
+    // 2026-09-29(작업지시서 §4): "(스팟) … N분 거리에 있어"는 그 장소까지 가는 시간처럼 읽히지만
+    // 실제 N분은 거기서 다음 장소로 가는 시간이다(방향 오독) → 스팟이 한 개 이하인 이 문장은 삭제.
+    if (mentioned.length < 2 && /\d+\s*분\s*(정도\s*)?거리에\s*있/.test(sentence)) return null;
     if (mentioned.length < 2) return sentence; // 스팟 쌍 없음 — 분→수단 방식(아래 함수)에 맡김
     const [from, to] = mentioned;
     const leg = legPairMap.get(`${from.name}→${to.name}`) ?? legPairMap.get(`${to.name}→${from.name}`);
@@ -904,14 +908,20 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     // 10곳 중 2곳뿐인 거짓 제목이 나왔다(실측: 세부 2박3일). 최솟값으로 바꾼다.
     // 2026-09-29(작업지시서 "승인 초안 2편 대조" §6): 기본 제목을 숫자 패턴으로 —
     // "N곳, 첫 장소부터 마지막 장소까지 N km"(어느 글에나 붙는 "효율적 일정" 방지).
+    // 2026-09-29(작업지시서 "카드형 세부 7일 초안" §2): 첫·마지막 스팟은 검색하는 사람이 모르는 이름
+    // (식당·스파)이 되기 쉽다 → 숙소 제외, 리뷰 수 상위 두 곳. 이름이 20자 초과이거나 한글·영문이
+    // 섞여 어색하면 다음 순위로.
     const buildFallbackTitle = () => {
-      const ordered = [...tripData.spots].sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
-      const first = ordered[0]?.name;
-      const last = ordered[ordered.length - 1]?.name;
+      const isAwkward = (n) => !n || n.length > 20 || (/[가-힣]/.test(n) && /[A-Za-z]{3,}/.test(n));
+      const famous = [...tripData.spots]
+        .filter((sp) => sp.category !== '숙소' && !isAwkward(sp.name))
+        .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
       const km = typeof tripData.totalDistanceKm === 'number' ? ` ${tripData.totalDistanceKm}km` : '';
-      return first && last && first !== last
-        ? `${keyword} 코스 — ${tripData.spots.length}곳, ${first}부터 ${last}까지${km}`
-        : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선`;
+      // 리뷰 수 상위 두 곳을 코스 진행 순서(일차·순서)로 배열해 "A부터 B까지"가 자연스럽게 읽히게 한다.
+      const pair = famous.slice(0, 2).sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
+      return famous.length >= 2
+        ? `${keyword} 코스 — ${tripData.spots.length}곳, ${pair[0].name}부터 ${pair[1].name}까지${km}`
+        : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선${km}`;
     };
     if (tripData?.spots?.length && /\bvs\b|비교|패키지/i.test(outline.title)) {
       logger.warn(`[blog_content_enhancer] 제목에 비교/패키지 표현 감지 → 재작성: "${outline.title}"`);
@@ -1141,7 +1151,10 @@ async function pass4FactCheck(keyword, sections, tripData = null) {
     await throttle(2000);
     let result = await callGeminiFallback(prompt, true);
     if (!result || !Array.isArray(result?.sections) || result.sections.length !== sections.length) {
-      logger.warn('[blog_content_enhancer] Pass 4 Gemini failed, trying OpenAI fallback');
+      // 2026-09-29(작업지시서 §9): 실패 사유를 남긴다 — HTTP 오류는 callGeminiFallback가 이미
+      // 모델별로 로그하므로, 여기까지 사유 없이 왔다면 null(키 없음/전 모델 실패) 또는 섹션 수 불일치다.
+      const why = !result ? '응답 없음(키 없음 또는 전 모델 실패)' : `섹션 수 불일치(응답 ${Array.isArray(result?.sections) ? result.sections.length : '없음'} ≠ 원본 ${sections.length})`;
+      logger.warn(`[blog_content_enhancer] Pass 4 Gemini failed (${why}), trying OpenAI fallback`);
       result = await callGPT4oMini(prompt);
     }
     if (Array.isArray(result?.sections) && result.sections.length === sections.length) {
@@ -1328,6 +1341,51 @@ function capCliches(bodies) {
   });
   if (removedTotal) logger.warn(`[blog_content_enhancer] 상투어 반복 감지 → 문장 ${removedTotal}개 삭제(각 1회 허용)`);
   return out;
+}
+
+// 2026-09-29(작업지시서 "카드형 세부 7일 초안" §3): 모든 삭제 게이트가 끝난 뒤 마지막 한 번 —
+// 첫 문장이 "이곳은/이 음식점은…"처럼 앞 문장을 가리키는 지시어로 시작하는 문단은, 앞 문장이
+// 게이트에 지워져 주어가 없는 파편일 가능성이 높아 문단째 삭제한다(게이트별로 따로 하지 않음).
+const ORPHAN_PARAGRAPH_START = /^\s*(이곳은|이곳에서|이 음식점은|이 숙소는|이 스파는|이 해변은|이 사원은|이 시장은|여기는|이 코스는|이 장소는)/;
+function dropOrphanParagraphs(text) {
+  if (!text) return text;
+  const paragraphs = text.split(/\n{2,}/);
+  const kept = paragraphs.filter((p) => !ORPHAN_PARAGRAPH_START.test(p));
+  if (kept.length !== paragraphs.length) {
+    logger.warn(`[blog_content_enhancer] 주어 없는 파편 문단 ${paragraphs.length - kept.length}개 삭제`);
+  }
+  return kept.join('\n\n');
+}
+
+// 2026-09-29(§6): FAQ 3개를 코드로 — LLM에 맡기면 지어내므로 trip_data 값만 쓴다.
+function buildCodeFaqs(tripData, keyword) {
+  const spots = tripData?.spots ?? [];
+  if (!spots.length) return [];
+  const faqs = [];
+  const totalMin = spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
+  const legCount = spots.filter((x) => typeof x.toNextMinutes === 'number').length;
+  if (typeof tripData.totalDistanceKm === 'number') {
+    faqs.push({
+      q: `${keyword} 코스의 총 이동 거리는?`,
+      a: `${tripData.totalDistanceKm}km입니다.${totalMin > 0 ? ` 이동 합계는 약 ${(totalMin / 60).toFixed(1)}시간(구간 ${legCount}개)입니다.` : ''}`,
+    });
+  }
+  const beaches = spots.filter((x) => inferSpotKind(x) === '해변');
+  if (beaches.length) {
+    faqs.push({
+      q: '해변은 어디가 포함돼 있나요?',
+      a: beaches.map((b) => `${b.day ?? 1}일차 ${b.name}(${typeof b.rating === 'number' ? `★${b.rating}` : '평점 정보 없음'})`).join(', ') + '입니다.',
+    });
+  }
+  const rated = spots.filter((x) => typeof x.rating === 'number');
+  if (rated.length) {
+    const top = rated.reduce((a, b) => (b.rating > a.rating || (b.rating === a.rating && (b.reviewCount ?? 0) > (a.reviewCount ?? 0)) ? b : a));
+    faqs.push({
+      q: '평점이 가장 높은 곳은?',
+      a: `${top.name} ★${top.rating}${typeof top.reviewCount === 'number' ? `(리뷰 ${top.reviewCount.toLocaleString()}개)` : ''}, ${top.day ?? 1}일차 코스에 포함돼 있습니다.`,
+    });
+  }
+  return faqs;
 }
 
 // 2026-09-29(작업지시서 §5④): "대중교통을 이용할 경우 약 3.6시간"은 구간 수단이 섞여 있어
@@ -1660,7 +1718,15 @@ async function enhanceBlogDraft(content) {
       s.body = capped[i];
     }
   });
-  const finalFaqSections = finalFaqSectionsRaw.map((f, i) => ({ ...f, a: capped[finalSections.length + i] }));
+  // §3: 모든 삭제 게이트가 끝난 마지막 정리 — 주어 없는 파편 문단 삭제(일자 섹션 제외)
+  finalSections.forEach((s) => {
+    if (!DAY_SECTION_PATTERN.test(s.heading ?? '')) s.body = dropOrphanParagraphs(s.body);
+  });
+  const llmFaqs = finalFaqSectionsRaw
+    .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[finalSections.length + i]) }))
+    .filter((f) => (f.a ?? '').trim());
+  const codeFaqs = buildCodeFaqs(tripData, keyword).filter((cf) => !llmFaqs.some((f) => f.q === cf.q));
+  const finalFaqSections = [...llmFaqs, ...codeFaqs];
 
   const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자)`);

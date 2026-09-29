@@ -1538,3 +1538,18 @@
 - **관련 파일**: `src/utils/dayCard.js`(신규), `src/agents/monetizer.js`, `src/agents/qa_editor.js`,
   `src/agents/tradule_source.js`, `src/agents/blog_content_enhancer.js`,
   `docs/work-orders/2026-09-29_day-card-polish.md`
+
+### D-068: 카드형 초안 발행 전 마무리 — 제목 명소, 고아 문단, 방향 오독 문장, 중복 표, 코드 FAQ, HTML 저장
+- **결정**: (1) 제목 "A부터 B까지"를 첫·마지막 스팟이 아니라 숙소 제외·리뷰 수 상위 두 곳(20자 초과·한글+영문
+  혼용 이름은 다음 순위)으로, 코스 진행 순서로 배열. (2) 주어 없는 파편은 세 번째 지적 — 게이트별
+  처리를 그만두고 모든 삭제·상투어 게이트가 끝난 마지막 단계 한 곳에서, 첫 문장이 "이곳은/이 음식점은…"
+  으로 시작하는 문단을 문단째 삭제. (3) "(스팟) … N분 거리에 있어"는 도착시간처럼 읽히지만 실제는 출발시간
+  (방향 오독) → 스팟이 한 개 이하인 이런 문장은 삭제. (4) 위쪽 전체 타임라인 표 제거(일자 카드가 같은 표를
+  보여줌; TL;DR 요약·전체 지도 유지). (5) FAQ 3개를 코드로(총 이동 거리·해변·평점 최고), LLM FAQ가 비어도
+  항상 채움. (6) 이동 1구간이어도 30분 이상이면 "시간을 넉넉히 잡으세요". (7) `--draft-only` 때 최종 HTML을
+  `output/blog/html/{slug}.html`로 저장 — 발행 경로가 신규 글뿐이라 /269 URL을 살려 교체하려면
+  티스토리 HTML 모드에 붙여넣을 파일이 필요. (8) Pass 4 폴백 로그에 사유 추가: 실제 코드상 HTTP 오류는
+  이미 모델별로 로그되는데 그 줄이 안 보였으므로, 원인은 키/쿼터가 아니라 "응답 섹션 수 ≠ 원본"일 가능성이
+  높다(다음 실행 로그로 확인).
+- **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/utils/dayCard.js`,
+  `scripts/run-blog-pipeline.js`, `docs/work-orders/2026-09-29_card-draft-finishing.md`

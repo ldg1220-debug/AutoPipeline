@@ -1136,6 +1136,21 @@ async function main() {
       console.log(`  - ${c.keyword}`);
     });
     console.log(`\n  ${outDir}/blog/monetized_${date}.json`);
+    // 2026-09-29(작업지시서 §8): 기존 글(예: /269) URL을 살려 교체할 수 있도록 최종 HTML을 파일로도
+    // 저장한다 — 티스토리 편집 화면(HTML 모드)에 붙여넣기용. 발행 경로가 "새 글"뿐이라 필요하다.
+    for (const c of monetizedData.contents ?? []) {
+      const html = c.blog_draft?.monetized_html;
+      if (!html) continue;
+      const slug = (c.blog_draft?.slug || c.keyword).replace(/[^a-zA-Z0-9가-힣-]+/g, '-');
+      const htmlPath = `${outDir}/blog/html/${slug}.html`;
+      try {
+        await fs.promises.mkdir(path.dirname(htmlPath), { recursive: true });
+        await fs.promises.writeFile(htmlPath, html, "utf-8");
+        console.log(`  ${htmlPath}`);
+      } catch (err) {
+        logger.warn(`[blog:pipeline] HTML 저장 실패 (${slug}): ${err.message}`);
+      }
+    }
     return;
   }
 
