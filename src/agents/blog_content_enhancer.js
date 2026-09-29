@@ -472,10 +472,18 @@ function sanitizeOutlineForNoTripData(outline, tripData) {
 // 같은 방식.
 const FORBIDDEN_SECTION_PATTERN = /숙소|가격대|예산|비용\s*산정|경비/;
 
-function sanitizeOutlineForbidden(outline) {
-  const sections = (outline.sections ?? []).filter((s) => !FORBIDDEN_SECTION_PATTERN.test(s.heading ?? ''));
+// 2026-09-29(초안 대조: 제목의 "패키지 vs 개별 예약 비교"는 걸러졌지만 "패키지 상품의 장단점"(800자)·"개별 예약의
+// 장단점"(723자) 섹션이 본문에 통째로 남음): 코스 글(trip_data 있음)에선 패키지·개별 예약·항공·비교(vs) 각도의
+// 섹션도 제거한다 — 가격 비교를 부르는 각도인데 가격 데이터는 없다. 경제 글의 "금리 비교" 같은 제목은 건드리지
+// 않도록 trip_data가 있을 때만 적용.
+const TRAVEL_BANNED_ANGLE_PATTERN = /패키지|개별\s*예약|자유\s*여행\s*vs|\bvs\b|항공|비행기|여행사|비교/i;
+
+function sanitizeOutlineForbidden(outline, tripData = null) {
+  const isBanned = (h) => FORBIDDEN_SECTION_PATTERN.test(h ?? '') ||
+    (tripData?.spots?.length && TRAVEL_BANNED_ANGLE_PATTERN.test(h ?? ''));
+  const sections = (outline.sections ?? []).filter((s) => !isBanned(s.heading));
   if (sections.length !== (outline.sections ?? []).length) {
-    const removed = (outline.sections ?? []).filter((s) => FORBIDDEN_SECTION_PATTERN.test(s.heading ?? ''));
+    const removed = (outline.sections ?? []).filter((s) => isBanned(s.heading));
     logger.warn(`[blog_content_enhancer] 금지 섹션(숙소·예산 등) 감지 → 제거: ${removed.map((s) => `"${s.heading}"`).join(', ')}`);
   }
   return { ...outline, sections };
@@ -674,7 +682,7 @@ function stripUnverifiedModeMinutes(text, tripData) {
 // "인근/근처/가까이" 문장은 두 스팟 사이 실제 구간이 15분 이하일 때만 유지.
 function stripBudgetTalk(text) {
   if (!text) return text;
-  const r = rewriteSentences(text, (sentence) => (/예산|경비|비용|가성비|저렴|절약|입장료|요금/.test(sentence) ? null : sentence));
+  const r = rewriteSentences(text, (sentence) => (/예산|경비|비용|가성비|저렴|절약|입장료|요금|패키지|개별\s*예약|여행사|가격\s*(안정|변동)/.test(sentence) ? null : sentence));
   if (r.removed) logger.warn(`[blog_content_enhancer] 예산·비용 서술 감지 → 문장 ${r.removed}개 삭제`);
   return r.text;
 }
@@ -1774,7 +1782,7 @@ async function enhanceBlogDraft(content) {
   // 섹션 금지"를 지시해도 LLM이 여전히 "이동 방법 및 교통 정보" 섹션을 만드는 사고가
   // 재발함 — 코드로 한 번 더 강제한다(sanitizeTitleForTransport와 같은 패턴).
   outline = sanitizeOutlineForNoTripData(outline, tripData);
-  outline = sanitizeOutlineForbidden(outline);
+  outline = sanitizeOutlineForbidden(outline, tripData);
 
   // H2/H3 섹션만 추출 (FAQ 제외)
   let bodySections = (outline.sections ?? []).filter(
