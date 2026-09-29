@@ -634,6 +634,30 @@ function stripMismatchedDurationMentions(text, tripData) {
   return r.text;
 }
 
+// 2026-09-29(로그: LLM이 일반 섹션에 "하루 평균 이동 시간은 대중교통을 이용할 경우 약 30분"을 지어냈고,
+// Pass 5 교정은 숫자 가드에 되돌려짐): "하루 평균 이동 시간" 문장은 실제 값(배 구간 제외 구간 합 ÷ 일수)과
+// ±10분 이상 다르면 삭제한다 — 수단 붙은 평균은 어차피 수단이 섞여 있어 사실일 수 없다.
+function stripFabricatedDailyAverage(text, tripData) {
+  if (!text || !tripData?.spots?.length || !tripData.days) return text;
+  const byDay = groupSpotsByDay(tripData.spots);
+  let total = 0;
+  for (const list of byDay.values()) {
+    list.slice(0, -1).forEach((sp, i) => {
+      if (typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, list[i + 1])) total += sp.toNextMinutes;
+    });
+  }
+  const avg = total / tripData.days;
+  const r = rewriteSentences(text, (sentence) => {
+    if (!/(하루\s*평균|평균\s*이동\s*시간|일\s*평균)/.test(sentence)) return sentence;
+    const m = sentence.match(/(?:약\s*)?(\d+(?:\.\d+)?)\s*(분|시간)/);
+    if (!m) return sentence;
+    const minutes = Number(m[1]) * (m[2] === '시간' ? 60 : 1);
+    return Math.abs(minutes - avg) <= 10 ? sentence : null;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 실제 평균(${Math.round(avg)}분)과 다른 하루 평균 이동시간 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
 // 게이트④: trip_data 스팟에는 가격 필드가 없다 — 본문에 나오는 금액(원/달러/페소)은
 // 전부 출처가 없는 창작이다. 금액이 포함된 문장을 통째로 삭제한다.
 // 2026-09-29 확장(작업지시서 "QA 통과한 세부 초안을 한 줄씩 대조" §6-②): 원화·
@@ -1451,6 +1475,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = correctOrStripLegMentions(sanitized, tripData);
   sanitized = correctLegTransportMentions(sanitized, tripData);
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);
+  sanitized = stripFabricatedDailyAverage(sanitized, tripData);
   sanitized = neutralizeModeTotalTime(sanitized);
   sanitized = stripUnsourcedMoney(sanitized);
   sanitized = stripFirstPersonExperienceClaims(sanitized);
