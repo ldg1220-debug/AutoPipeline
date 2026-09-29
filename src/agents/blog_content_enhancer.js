@@ -883,9 +883,10 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     outline.sections = outline.sections.map((s) => ({ ...s, heading: stripHeadingMarks(s.heading) }));
   }
   if (outline?.title) {
-    const titleBeforeGates = outline.title;
+    const titleBeforeWordGates = outline.title;
     outline.title = sanitizeTitleForTransport(outline.title, tripData);
     outline.title = sanitizeTitleForBannedWords(outline.title);
+    const wordGateChangedTitle = outline.title !== titleBeforeWordGates;
     outline.title = sanitizeDaysAgainstTripData(outline.title, tripData, keyword);
     // 2026-09-28(작업지시서 "세부 초안 2차 대조" §7): "패키지 투어 vs 자유여행
     // 비교" 같은 제목은 가격 비교를 기대하게 만드는데, 가격은 게이트④가 이미
@@ -909,8 +910,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
       // 제목이 남는 사고가 실측 확인됨("지우기만 하면 제목이 빈약해진다").
       outline.title = buildFallbackTitle();
     } else if (
-      tripData?.spots?.length && outline.title !== titleBeforeGates &&
-      !/\d/.test(outline.title)
+      tripData?.spots?.length && wordGateChangedTitle
     ) {
       // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §4): 위 길이 기준(keyword.length+10)을
       // 넘겨도 단어만 빠진 제목("대중교통으로 즐기는 여행" → "여행")은 뜻이 없다 —
@@ -1331,12 +1331,12 @@ function applyContentGatesFor(text, tripData, keyword) {
  * 그대로 두고 실패한 섹션만 다시 쓴다. 재생성 결과가 원본보다 짧으면(순손실)
  * 그 섹션은 원본을 유지한다.
  */
-export async function regenerateFailedSections(content, failedHeadings) {
+export async function regenerateFailedSections(content, failedHeadings, { regenShortFaq = false } = {}) {
   const { keyword, blog_draft, trip_data: tripData } = content;
   const sections = blog_draft?.sections ?? [];
   const targetReader = blog_draft?.target_reader ?? '여행 계획 중인 독자';
   const failedSet = new Set(failedHeadings ?? []);
-  if (failedSet.size === 0 || !sections.length) return content;
+  if ((failedSet.size === 0 && !regenShortFaq) || !sections.length) return content;
 
   const outlineContext = `제목: ${blog_draft.title}, 섹션: ${sections.map((s) => s.heading).join(' / ')}`;
   const byDay = tripData?.spots?.length ? groupSpotsByDay(tripData.spots) : new Map();
@@ -1366,10 +1366,22 @@ export async function regenerateFailedSections(content, failedHeadings) {
     return { ...section, body: newBody };
   }));
 
+  // 2026-09-29(실측: 세부 5박7일 재작성 후에도 "FAQ 답변 너무 짧음: 1개"로 재반려):
+  // 섹션 헤딩만 재생성하면 짧은 FAQ 답변은 그대로 남는다. 150자 미만 답변만 다시
+  // 쓰고, 결과가 더 짧으면 원본을 유지한다.
+  let newFaq = blog_draft.faq ?? [];
+  if (regenShortFaq) {
+    newFaq = await Promise.all(newFaq.map(async (f) => {
+      if ((f.a ?? '').length >= 150) return f;
+      const answer = applyContentGatesFor(await pass3Faq(keyword, { q: f.q, a_hint: '' }, targetReader), tripData, keyword);
+      return (answer?.length ?? 0) > (f.a?.length ?? 0) ? { ...f, a: answer } : f;
+    }));
+  }
+
   const wordCount = newSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   return {
     ...content,
-    blog_draft: { ...blog_draft, sections: newSections, word_count: wordCount },
+    blog_draft: { ...blog_draft, sections: newSections, faq: newFaq, word_count: wordCount },
   };
 }
 

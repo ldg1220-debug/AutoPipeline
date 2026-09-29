@@ -1034,17 +1034,18 @@ async function main() {
         const needsFullRewrite = [];
         for (const c of rejectedItems) {
           const failedHeadings = extractFailedHeadings(c.blog_qa?.issues);
-          if (failedHeadings.length > 0) {
-            partial.push({ content: c, failedHeadings });
+          const hasShortFaq = (c.blog_qa?.issues ?? []).some((i) => i.includes('FAQ 답변 너무 짧음'));
+          if (failedHeadings.length > 0 || hasShortFaq) {
+            partial.push({ content: c, failedHeadings, hasShortFaq });
           } else {
             needsFullRewrite.push(c);
           }
         }
 
         const partialResults = [];
-        for (const { content: c, failedHeadings } of partial) {
-          logger.info(`[blog:pipeline] "${c.keyword}" → 섹션 ${failedHeadings.length}개만 재생성: [${failedHeadings.join(', ')}]`);
-          partialResults.push(await regenerateFailedSections(c, failedHeadings));
+        for (const { content: c, failedHeadings, hasShortFaq } of partial) {
+          logger.info(`[blog:pipeline] "${c.keyword}" → 섹션 ${failedHeadings.length}개${hasShortFaq ? ' + 짧은 FAQ' : ''}만 재생성: [${failedHeadings.join(', ')}]`);
+          partialResults.push(await regenerateFailedSections(c, failedHeadings, { regenShortFaq: hasShortFaq }));
         }
 
         let fullRewriteResults = [];
