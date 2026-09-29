@@ -819,7 +819,7 @@ function correctOrStripLegMentions(text, tripData) {
       .sort((a, b) => a.idx - b.idx);
     // 2026-09-29(작업지시서 §4): "(스팟) … N분 거리에 있어"는 그 장소까지 가는 시간처럼 읽히지만
     // 실제 N분은 거기서 다음 장소로 가는 시간이다(방향 오독) → 스팟이 한 개 이하인 이 문장은 삭제.
-    if (mentioned.length < 2 && /\d+\s*분\s*(정도\s*)?거리에\s*있/.test(sentence)) return null;
+    if (mentioned.length < 2 && /\d+\s*분\s*(정도\s*)?거리에\s*(있|위치)/.test(sentence)) return null;
     if (mentioned.length < 2) return sentence; // 스팟 쌍 없음 — 분→수단 방식(아래 함수)에 맡김
     const [from, to] = mentioned;
     const leg = legPairMap.get(`${from.name}→${to.name}`) ?? legPairMap.get(`${to.name}→${from.name}`);
@@ -1393,6 +1393,24 @@ function buildCodeFaqs(tripData, keyword) {
       a: beaches.map((b) => `${b.day ?? 1}일차 ${b.name}(${typeof b.rating === 'number' ? `★${b.rating}` : '평점 정보 없음'})`).join(', ') + '입니다.',
     });
   }
+  // 하루 평균·가장 긴 날 (dayTotals: 배열 또는 day 키 객체)
+  const dt = tripData.dayTotals;
+  const dtEntries = Array.isArray(dt) ? dt.map((e) => [e?.day, e]) : Object.entries(dt ?? {}).map(([k, e]) => [Number(k), e]);
+  const dayKms = dtEntries
+    .map(([d, e]) => [d, typeof e === 'number' ? e : e?.distanceKm])
+    .filter(([d, km]) => d != null && typeof km === 'number' && km > 0);
+  if (dayKms.length && tripData.days) {
+    const [longDay, longKm] = dayKms.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / tripData.days).toFixed(1);
+    faqs.push({ q: '하루 평균 얼마나 이동하나요?', a: `하루 평균 ${avg}km이고, 가장 긴 날은 ${longDay}일차(${longKm}km)입니다.` });
+  }
+  const byReviews = spots.filter((x) => typeof x.reviewCount === 'number').sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
+  if (byReviews.length) {
+    faqs.push({
+      q: '대표 명소는 어디인가요?',
+      a: '리뷰 수 상위 ' + byReviews.length + '곳입니다. ' + byReviews.map((x) => `${x.name}(${typeof x.rating === 'number' ? `★${x.rating}, ` : ''}리뷰 ${x.reviewCount.toLocaleString()}개, ${x.day ?? 1}일차)`).join(', ') + '.',
+    });
+  }
   const rated = spots.filter((x) => typeof x.rating === 'number');
   if (rated.length) {
     const top = rated.reduce((a, b) => (b.rating > a.rating || (b.rating === a.rating && (b.reviewCount ?? 0) > (a.reviewCount ?? 0)) ? b : a));
@@ -1693,7 +1711,11 @@ async function enhanceBlogDraft(content) {
 
   // FAQ 답변 작성
   const faqSections = [];
-  for (const faqItem of faqItems) {
+  // 2026-09-29(작업지시서 "LLM FAQ가 지어냅니다" §2): 실측 — FAQ 답에 코스에 없는 가게 3곳·"2주 전 예약 필수"·
+  // 틀린 지리("수바-배즈바스 비치는 말라파스쿠아 섬")가 들어갔고, 이 FAQ는 JSON-LD(FAQPage)로 구글에도
+  // 노출된다. FAQ는 게이트가 가장 약한 곳이라 trip_data가 있는 글은 LLM FAQ를 만들지 않고 코드 FAQ만 쓴다.
+  const useLlmFaq = !tripData?.spots?.length;
+  for (const faqItem of (useLlmFaq ? faqItems : [])) {
     const answer = await pass3Faq(keyword, faqItem, intent.target_reader);
     faqSections.push({ q: faqItem.q, a: answer });
   }
