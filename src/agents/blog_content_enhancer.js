@@ -1432,14 +1432,35 @@ function capCliches(bodies) {
 // 첫 문장이 "이곳은/이 음식점은…"처럼 앞 문장을 가리키는 지시어로 시작하는 문단은, 앞 문장이
 // 게이트에 지워져 주어가 없는 파편일 가능성이 높아 문단째 삭제한다(게이트별로 따로 하지 않음).
 const ORPHAN_PARAGRAPH_START = /^\s*(이곳은|이곳에서|이 음식점은|이 숙소는|이 스파는|이 해변은|이 사원은|이 시장은|여기는|이 코스는|이 장소는)/;
-function dropOrphanParagraphs(text) {
+function dropOrphanParagraphs(text, tripData = null) {
   if (!text) return text;
-  const paragraphs = text.split(/\n{2,}/);
-  const kept = paragraphs.filter((p) => !ORPHAN_PARAGRAPH_START.test(p));
-  if (kept.length !== paragraphs.length) {
-    logger.warn(`[blog_content_enhancer] 주어 없는 파편 문단 ${paragraphs.length - kept.length}개 삭제`);
-  }
-  return kept.join('\n\n');
+  const spotNames = (tripData?.spots ?? []).map((sp) => sp.name).filter(Boolean);
+  const hasSpot = (str) => spotNames.some((n) => str.includes(n));
+  // 2026-09-29(초안 대조: 문단 중간의 "이곳은 평점 4.6점, 리뷰 2,650개…", "평점 4.3점, 리뷰 3,573개로 … 이곳은",
+  // 이어진 "차로 이동이 필요하지만…"): 가게 이름 문장이 지워져 주어 없는 파편이 문단 중간에 남았다. 문단 첫
+  // 문장뿐 아니라 문장 단위로 — 지시어/평점으로 시작하는데 그 문장과 바로 앞 문장 어디에도 스팟 이름이 없으면
+  // 삭제하고, 삭제 직후 "차로/도보로 이동…"으로 시작하는 문장도 함께 삭제한다.
+  const SUBJECTLESS_START = /^\s*(이곳|이 레스토랑|이 식당|이 카페|이 스파|이 사원|이 공원|이 해변|평점\s*\d|★\s*\d)/;
+  const MOVE_START = /^\s*(차로|차량으로|도보로|대중교통으로)\s*이동/;
+  let removed = 0;
+  const paragraphs = text.split(/\n{2,}/).filter((p) => {
+    if (ORPHAN_PARAGRAPH_START.test(p)) { removed += 1; return false; }
+    return true;
+  }).map((p) => {
+    const sents = p.split(/(?<=[.!?])\s+/);
+    const out = [];
+    let prevRemoved = false;
+    for (const sent of sents) {
+      const prev = out[out.length - 1] ?? '';
+      const subjectless = SUBJECTLESS_START.test(sent) && spotNames.length && !hasSpot(sent) && !hasSpot(prev);
+      if (subjectless || (prevRemoved && MOVE_START.test(sent))) { removed += 1; prevRemoved = true; continue; }
+      prevRemoved = false;
+      out.push(sent);
+    }
+    return out.join(' ');
+  }).filter((p) => p.trim());
+  if (removed) logger.warn(`[blog_content_enhancer] 주어 없는 파편 ${removed}개 삭제`);
+  return paragraphs.join('\n\n');
 }
 
 // 2026-09-29(§6): FAQ 3개를 코드로 — LLM에 맡기면 지어내므로 trip_data 값만 쓴다.
@@ -1848,7 +1869,7 @@ async function enhanceBlogDraft(content) {
   });
   // §3: 모든 삭제 게이트가 끝난 마지막 정리 — 주어 없는 파편 문단 삭제(일자 섹션 제외)
   finalSections.forEach((s) => {
-    if (!DAY_SECTION_PATTERN.test(s.heading ?? '')) s.body = dropOrphanParagraphs(s.body);
+    if (!DAY_SECTION_PATTERN.test(s.heading ?? '')) s.body = dropOrphanParagraphs(s.body, tripData);
   });
   // 2026-09-29(실측: 세부 5박7일 — LLM이 "꼭 해야 할 액티비티"·"리조트 휴식 시간" 같은 코스와 무관한 일반
   // 섹션을 만들어 "구체 수치 부족"으로 재작성 후에도 반려): trip_data가 있는 글에서 수치가 2개 미만인
@@ -1866,7 +1887,7 @@ async function enhanceBlogDraft(content) {
     }
   }
   const llmFaqs = finalFaqSectionsRaw
-    .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[origSectionCount + i]) }))
+    .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[origSectionCount + i], tripData) }))
     .filter((f) => (f.a ?? '').trim());
   // generated:'code' 표시 — QA의 FAQ 최소 글자수 규칙과 재작성(LLM 덮어쓰기)에서 제외하기 위함.
   const codeFaqs = buildCodeFaqs(tripData, keyword)
