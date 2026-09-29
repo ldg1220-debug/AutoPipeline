@@ -1085,7 +1085,17 @@ function buildTripDataFactsBlock(tripData) {
   // 검증 불가 수치"라며 삭제): 총 거리·총 이동시간이 이 블록에 없어서 검수자가 실제 값을
   // 모르는 수치로 오판했다. 트레쥴이 준 totalDistanceKm와 구간 합계를 명시한다.
   const totalMin = tripData.spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
+  // 2026-09-29(로그: Pass 5가 "일차별 이동 거리는 API에서 제공되지 않아 검증 불가"라며 삭제): 일차별
+  // 거리(dayTotals)도 사실 블록에 넣는다. dayTotals는 배열([{day, distanceKm}]) 또는 day 키 객체 둘 다 올 수 있다.
+  const dayKmParts = [];
+  const dt = tripData.dayTotals;
+  const dtEntries = Array.isArray(dt) ? dt.map((e) => [e?.day, e]) : Object.entries(dt ?? {}).map(([k, e]) => [Number(k), e]);
+  for (const [d, e] of dtEntries) {
+    const km = typeof e === 'number' ? e : e?.distanceKm;
+    if (d != null && typeof km === 'number' && km > 0) dayKmParts.push(`${d}일차 ${km}km`);
+  }
   const totalLine =
+    (dayKmParts.length ? `일차별 이동 거리(트레쥴 제공 값): ${dayKmParts.join(', ')}\n` : '') +
     (typeof tripData.totalDistanceKm === 'number' ? `총 이동 거리: ${tripData.totalDistanceKm}km (트레쥴 제공 값)\n` : '') +
     (totalMin > 0 ? `구간 이동시간 합계: ${totalMin}분 (${(totalMin / 60).toFixed(1)}시간, 구간 값의 합)\n` : '');
 
