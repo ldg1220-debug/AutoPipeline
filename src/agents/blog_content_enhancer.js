@@ -1775,8 +1775,23 @@ async function enhanceBlogDraft(content) {
   finalSections.forEach((s) => {
     if (!DAY_SECTION_PATTERN.test(s.heading ?? '')) s.body = dropOrphanParagraphs(s.body);
   });
+  // 2026-09-29(실측: 세부 5박7일 — LLM이 "꼭 해야 할 액티비티"·"리조트 휴식 시간" 같은 코스와 무관한 일반
+  // 섹션을 만들어 "구체 수치 부족"으로 재작성 후에도 반려): trip_data가 있는 글에서 수치가 2개 미만인
+  // 비-일자 섹션은 데이터에 근거가 없는 채우기 글이라 재작성해도 QA를 못 넘는다 → 섹션 4개 이상이
+  // 남는 범위에서 삭제한다(QA 최소 섹션 수 4개).
+  const origSectionCount = finalSections.length; // 아래 삭제 후에도 FAQ의 capped 인덱스를 유지
+  if (tripData?.spots?.length) {
+    const numeric = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
+    const isThin = (sec) => !DAY_SECTION_PATTERN.test(sec.heading ?? '') && ((sec.body ?? '').match(numeric) ?? []).length < 2;
+    for (let i = finalSections.length - 1; i >= 0; i--) {
+      if (finalSections.length > 4 && isThin(finalSections[i])) {
+        logger.warn(`[blog_content_enhancer] 수치 없는 일반 섹션 삭제: "${finalSections[i].heading}"`);
+        finalSections.splice(i, 1);
+      }
+    }
+  }
   const llmFaqs = finalFaqSectionsRaw
-    .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[finalSections.length + i]) }))
+    .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[origSectionCount + i]) }))
     .filter((f) => (f.a ?? '').trim());
   // generated:'code' 표시 — QA의 FAQ 최소 글자수 규칙과 재작성(LLM 덮어쓰기)에서 제외하기 위함.
   const codeFaqs = buildCodeFaqs(tripData, keyword)

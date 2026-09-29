@@ -512,7 +512,7 @@ body{width:730px;height:200px;background:linear-gradient(135deg,#0f172a,#1e293b)
 .val{font-size:26px;font-weight:700;color:#f1f5f9;line-height:1.1;margin-bottom:7px}
 .lbl{font-size:11px;color:#94a3b8;line-height:1.4}
 </style></head><body>
-<div class="title">${keyword.slice(0, 8)}</div>
+<div class="title">${(keyword.split(/\s+/)[0] || keyword).slice(0, 8)}</div>
 <div class="cards">${cards}</div>
 </body></html>`;
 
