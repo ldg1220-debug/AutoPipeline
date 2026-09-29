@@ -667,6 +667,18 @@ function stripUnverifiedModeMinutes(text, tripData) {
   return r.text;
 }
 
+// 2026-09-29(작업지시서 "남은 서술은 두고, '경제적'만 막습니다"): 틀린 말·상투어만 막는다. "경제적"은
+// 근거 없는 판단(구 경제채널 어투), "역사적 가치/명소"는 현대 건축물(레아신전, 2012년 완공)에 붙어 틀렸다.
+// 문장을 지우지 않고 해당 구절만 제거해 문장을 유지한다.
+function removeBannedPhrases(text) {
+  if (!text) return text;
+  const out = text
+    .replace(/경제적(으로|인|이며|이고)?\s*/g, '')
+    .replace(/역사적(인)?\s*(가치|명소)/g, '$2');
+  if (out !== text) logger.warn('[blog_content_enhancer] 금지 구절("경제적"·"역사적 가치/명소") 제거');
+  return out;
+}
+
 // 2026-09-29(로그: LLM이 일반 섹션에 "하루 평균 이동 시간은 대중교통을 이용할 경우 약 30분"을 지어냈고,
 // Pass 5 교정은 숫자 가드에 되돌려짐): "하루 평균 이동 시간" 문장은 실제 값(배 구간 제외 구간 합 ÷ 일수)과
 // ±10분 이상 다르면 삭제한다 — 수단 붙은 평균은 어차피 수단이 섞여 있어 사실일 수 없다.
@@ -1510,6 +1522,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripUnverifiedModeMinutes(sanitized, tripData);
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);
   sanitized = stripFabricatedDailyAverage(sanitized, tripData);
+  sanitized = removeBannedPhrases(sanitized);
   sanitized = neutralizeModeTotalTime(sanitized);
   sanitized = stripUnsourcedMoney(sanitized);
   sanitized = stripFirstPersonExperienceClaims(sanitized);
