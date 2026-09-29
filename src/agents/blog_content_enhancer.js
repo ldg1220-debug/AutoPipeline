@@ -1444,8 +1444,14 @@ function dropOrphanParagraphs(text, tripData = null) {
   // 이어진 "차로 이동이 필요하지만…"): 가게 이름 문장이 지워져 주어 없는 파편이 문단 중간에 남았다. 문단 첫
   // 문장뿐 아니라 문장 단위로 — 지시어/평점으로 시작하는데 그 문장과 바로 앞 문장 어디에도 스팟 이름이 없으면
   // 삭제하고, 삭제 직후 "차로/도보로 이동…"으로 시작하는 문장도 함께 삭제한다.
-  const SUBJECTLESS_START = /^\s*(이곳|이 레스토랑|이 식당|이 카페|이 스파|이 사원|이 공원|이 해변|평점\s*\d|★\s*\d)/;
+  // 2026-09-29(초안 대조: "스페인 식민 통치 시기에 건설된 이 요새는…" — 이름 문장이 지워져 주어가 없는데
+  // "이곳/이 레스토랑"으로 시작하지 않아 통과): 시작 위치와 무관하게 "이 (요새|성당|십자가|…)은/는" 같은 지시
+  // 명사구가 있고 그 문장·바로 앞 문장에 스팟 이름이 없으면 주어 없는 파편으로 본다.
+  const PLACE_NOUN = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크';
+  const SUBJECTLESS_START = new RegExp(`^\\s*(이곳|이 (${PLACE_NOUN})|평점\\s*\\d|★\\s*\\d)`);
+  const DEMONSTRATIVE_ANYWHERE = new RegExp(`이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
   const MOVE_START = /^\s*(차로|차량으로|도보로|대중교통으로)\s*이동/;
+  const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서)`);
   let removed = 0;
   const paragraphs = text.split(/\n{2,}/).filter((p) => {
     if (ORPHAN_PARAGRAPH_START.test(p)) { removed += 1; return false; }
@@ -1455,9 +1461,11 @@ function dropOrphanParagraphs(text, tripData = null) {
     const out = [];
     let prevRemoved = false;
     for (const sent of sents) {
-      const prev = out[out.length - 1] ?? '';
-      const subjectless = SUBJECTLESS_START.test(sent) && spotNames.length && !hasSpot(sent) && !hasSpot(prev);
-      if (subjectless || (prevRemoved && MOVE_START.test(sent))) { removed += 1; prevRemoved = true; continue; }
+      // 같은 문단에서 앞서 남은 문장 중 스팟 이름이 나온 적이 있으면(이름 문장 → 평점 문장 → "이 십자가는…")
+      // 지시어의 대상이 살아있으므로 파편이 아니다.
+      const spotSeenInParagraph = out.some((kept) => hasSpot(kept));
+      const subjectless = (SUBJECTLESS_START.test(sent) || DEMONSTRATIVE_ANYWHERE.test(sent)) && spotNames.length && !hasSpot(sent) && !spotSeenInParagraph;
+      if (subjectless || (prevRemoved && (MOVE_START.test(sent) || NOUN_START.test(sent)))) { removed += 1; prevRemoved = true; continue; }
       prevRemoved = false;
       out.push(sent);
     }

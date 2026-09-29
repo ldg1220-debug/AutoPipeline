@@ -34,6 +34,16 @@ const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 //                              여부로 travel/economy 자동 판정, §5 아래 참고)
 // --auto                    : 키워드 선택 프롬프트 건너뜀 (자동 선택)
 const args = process.argv.slice(2);
+// 2026-09-29(실사고: `--draft-only:` — 끝에 콜론이 붙어 플래그가 인식되지 않고 발행 단계까지 진행, 그날 이미
+// 발행된 키워드라 발행기가 건너뛰어 피해는 없었음): 모르는 `--옵션`이 있으면 발행 전에 중단한다.
+// (--force-keyword/--force-category의 값은 `--`로 시작하지 않으므로 여기서 걸리지 않는다.)
+const KNOWN_FLAGS = new Set(['--auto', '--draft-only', '--force-category', '--force-keyword', '--single']);
+const unknownFlags = args.filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a));
+if (unknownFlags.length) {
+  console.error(`[blog:pipeline] 중단: 알 수 없는 옵션 ${unknownFlags.map((f) => `"${f}"`).join(', ')}\n` +
+    `  사용 가능: ${[...KNOWN_FLAGS].join(' ')}\n  오타(끝의 ':' 등)를 확인하세요 — 인식 안 된 --draft-only는 실제 발행으로 이어질 수 있습니다.`);
+  process.exit(1);
+}
 const forceKwIdx = args.indexOf('--force-keyword');
 // 2026-09-22 실측: cli.js가 아니라 이 스크립트를 직접 호출할 때도 따옴표로 감싼
 // 구를 그대로 붙여 넣을 수 있어("'도쿄', '테마파크 투어'") 여기서도 한 번 걷어낸다.
