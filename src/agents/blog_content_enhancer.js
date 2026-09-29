@@ -668,6 +668,46 @@ function stripUnverifiedModeMinutes(text, tripData) {
   return r.text;
 }
 
+// 2026-09-29(초안 대조): (1) "예산은 여행 스타일에 따라 유동적으로 계획하는 것이 좋다" — 예산·비용은 금지 주제인데
+// 금액 게이트는 숫자만 봐서 통과했다 → 예산·비용·저렴 등이 든 문장은 삭제. (2) "마젤란의 십자가 인근에 위치한
+// Cabana Restaurant" — 실제 십자가→Cabana는 차량 39분인데 "인근" 주장이 나갔다 → 두 스팟이 함께 나오는
+// "인근/근처/가까이" 문장은 두 스팟 사이 실제 구간이 15분 이하일 때만 유지.
+function stripBudgetTalk(text) {
+  if (!text) return text;
+  const r = rewriteSentences(text, (sentence) => (/예산|경비|비용|가성비|저렴|절약|입장료|요금/.test(sentence) ? null : sentence));
+  if (r.removed) logger.warn(`[blog_content_enhancer] 예산·비용 서술 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
+function stripProximityClaims(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const byDay = groupSpotsByDay(tripData.spots);
+  const closePairs = new Set();
+  for (const list of byDay.values()) {
+    list.slice(0, -1).forEach((sp, i) => {
+      const next = list[i + 1];
+      if (typeof sp.toNextMinutes === 'number' && sp.toNextMinutes <= 15 && !isBoatLeg(sp, next)) {
+        closePairs.add(`${sp.name}|${next.name}`);
+        closePairs.add(`${next.name}|${sp.name}`);
+      }
+    });
+  }
+  const spotNames = [...new Set(tripData.spots.map((sp) => sp.name).filter(Boolean))];
+  const r = rewriteSentences(text, (sentence) => {
+    if (!/(인근|근처|바로\s*옆|가까이|가까운)/.test(sentence)) return sentence;
+    const mentioned = spotNames.filter((n) => sentence.includes(n));
+    if (mentioned.length < 2) return sentence;
+    for (let i = 0; i < mentioned.length; i++) {
+      for (let j = i + 1; j < mentioned.length; j++) {
+        if (closePairs.has(`${mentioned[i]}|${mentioned[j]}`)) return sentence;
+      }
+    }
+    return null;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 근거 없는 인접 주장 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
 // 2026-09-29(작업지시서 "남은 서술은 두고, '경제적'만 막습니다"): 틀린 말·상투어만 막는다. "경제적"은
 // 근거 없는 판단(구 경제채널 어투), "역사적 가치/명소"는 현대 건축물(레아신전, 2012년 완공)에 붙어 틀렸다.
 // 문장을 지우지 않고 해당 구절만 제거해 문장을 유지한다.
@@ -1454,8 +1494,14 @@ function dropOrphanParagraphs(text, tripData = null) {
   const MOVE_START = /^\s*(차로|차량으로|도보로|대중교통으로)\s*이동/;
   const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서)`);
   let removed = 0;
+  // 2026-09-29(초안: "세부 5박 7일 여행 코스에서 주목할 만한 장소들의 평점과 특징" — 마침표 없는 제목 반복 조각):
+  // 문장 종결(., !, ?, 다, 요) 없이 끝나는 짧은 문단은 제목을 되풀이한 조각이라 삭제(목록·표·HTML 제외).
+  const isHeadingEcho = (p) => {
+    const t = p.trim();
+    return t.length > 0 && t.length < 80 && !/[.!?다요]$/.test(t) && !/^([-*·]|\d+\.|<)/.test(t);
+  };
   const paragraphs = text.split(/\n{2,}/).filter((p) => {
-    if (ORPHAN_PARAGRAPH_START.test(p)) { removed += 1; return false; }
+    if (ORPHAN_PARAGRAPH_START.test(p) || isHeadingEcho(p)) { removed += 1; return false; }
     return true;
   }).map((p) => {
     const sents = p.split(/(?<=[.!?])\s+/);
@@ -1557,6 +1603,8 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);
   sanitized = stripFabricatedDailyAverage(sanitized, tripData);
   sanitized = removeBannedPhrases(sanitized);
+  sanitized = stripBudgetTalk(sanitized);
+  sanitized = stripProximityClaims(sanitized, tripData);
   sanitized = neutralizeModeTotalTime(sanitized);
   sanitized = stripUnsourcedMoney(sanitized);
   sanitized = stripFirstPersonExperienceClaims(sanitized);
