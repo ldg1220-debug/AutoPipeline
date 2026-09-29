@@ -564,14 +564,38 @@ function buildDeterministicItineraryForDay(tripData, day) {
 // 둘러봄/느낌/좋았음/맛있었음 — 전부 화자가 그 자리에 있어야 성립하는 동사).
 const FIRST_PERSON_EXPERIENCE_PATTERN = /다녀오면서|다녀왔|직접\s*가보니|가봤는데|개인적으로|.{0,10}느꼈다|여행하며\s*느낀|제가\s*묵었|방문했|방문으로\s*시작했|시작했다|즐겼다|즐길\s*수\s*있었|보냈다|먹었다|마셨다|걸었다|묵었다|머물렀다|둘러봤|느낄\s*수\s*있었|경험이었|경험했|휴식이\s*되었|좋았다|맛있었다/;
 
+// 2026-09-29(작업지시서 "승인 초안 2편 대조" §4): 문장 단위 게이트 공용 처리.
+// (a) 기존 분리 정규식 /(?<=[.!?다요])\s+/ 는 "20~30분마다 반면"처럼 문장 중간의
+// "다/요"에서도 잘라 파편을 만들었다 → 마침표류 뒤에서만 자른다. (b) 줄바꿈을
+// 보존한다(예전엔 join(' ')이라 문단이 뭉개졌다). (c) 문장을 지운 직후 그 문장을
+// 받던 "이 시간대/이때/이러한…"으로 시작하는 고아 문장도 함께 지운다.
+// fn(sentence) → 유지·수정된 문장 문자열, 또는 null(삭제).
+const ORPHAN_START = /^(이 시간대|이때|그때|그 시간|이러한|이런|그러한|이 경우|그 경우)/;
+
+function rewriteSentences(text, fn) {
+  let removed = 0;
+  const lines = text.split('\n').map((line) => {
+    if (!line.trim()) return line;
+    const sents = line.split(/(?<=[.!?])\s+/);
+    const out = [];
+    let prevRemoved = false;
+    for (const sent of sents) {
+      const r = fn(sent);
+      if (r === null) { removed += 1; prevRemoved = true; continue; }
+      if (prevRemoved && ORPHAN_START.test(sent.trim())) { removed += 1; continue; }
+      prevRemoved = false;
+      out.push(r);
+    }
+    return out.join(' ');
+  });
+  return { text: lines.join('\n'), removed };
+}
+
 function stripFirstPersonExperienceClaims(text) {
   if (!text) return text;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
-  const kept = sentences.filter((s) => !FIRST_PERSON_EXPERIENCE_PATTERN.test(s));
-  if (kept.length !== sentences.length) {
-    logger.warn(`[blog_content_enhancer] 1인칭 체험 표현 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
-  }
-  return kept.join(' ');
+  const r = rewriteSentences(text, (x) => (FIRST_PERSON_EXPERIENCE_PATTERN.test(x) ? null : x));
+  if (r.removed) logger.warn(`[blog_content_enhancer] 1인칭 체험 표현 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 // 2026-09-28(작업지시서 §2③): 한 섹션에서 체험 서술 문장이 3개 이상 걸리면
@@ -579,7 +603,7 @@ function stripFirstPersonExperienceClaims(text) {
 // 쓰였다는 신호이므로 재생성이 필요하다는 걸 호출부에 알린다.
 function countFirstPersonExperienceSentences(text) {
   if (!text) return 0;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
+  const sentences = text.split(/(?<=[.!?])\s+/);
   return sentences.filter((s) => FIRST_PERSON_EXPERIENCE_PATTERN.test(s)).length;
 }
 
@@ -596,17 +620,13 @@ function stripMismatchedDurationMentions(text, tripData) {
   );
   if (totalMinutes === 0) return text;
   const actualHours = totalMinutes / 60;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
-  const kept = sentences.filter((sentence) => {
+  const r = rewriteSentences(text, (sentence) => {
     const match = sentence.match(/(\d+(?:\.\d+)?)\s*시간/);
-    if (!match) return true;
-    const mentionedHours = Number(match[1]);
-    return Math.abs(mentionedHours - actualHours) <= 0.5;
+    if (!match) return sentence;
+    return Math.abs(Number(match[1]) - actualHours) <= 0.5 ? sentence : null;
   });
-  if (kept.length !== sentences.length) {
-    logger.warn(`[blog_content_enhancer] 구간 합(${actualHours.toFixed(1)}시간)과 다른 소요시간 문장 ${sentences.length - kept.length}개 삭제`);
-  }
-  return kept.join(' ');
+  if (r.removed) logger.warn(`[blog_content_enhancer] 구간 합(${actualHours.toFixed(1)}시간)과 다른 소요시간 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 // 게이트④: trip_data 스팟에는 가격 필드가 없다 — 본문에 나오는 금액(원/달러/페소)은
@@ -619,12 +639,9 @@ const MONEY_PATTERN = /\d[\d,]*\s*(천\s*|만\s*|억\s*)?원|₱\s*\d|\$\s*\d|\d
 
 function stripUnsourcedMoney(text) {
   if (!text) return text;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
-  const kept = sentences.filter((s) => !MONEY_PATTERN.test(s));
-  if (kept.length !== sentences.length) {
-    logger.warn(`[blog_content_enhancer] 출처 없는 금액 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
-  }
-  return kept.join(' ');
+  const r = rewriteSentences(text, (x) => (MONEY_PATTERN.test(x) ? null : x));
+  if (r.removed) logger.warn(`[blog_content_enhancer] 출처 없는 금액 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 // 게이트①: "3일짜리 코스인데 넷째·다섯째 날까지 지어낸다"는 사고 방지. 일자 서수
@@ -633,21 +650,15 @@ function stripUnsourcedMoney(text) {
 const KOREAN_ORDINAL_DAY = { 첫: 1, 둘: 2, 셋: 3, 넷: 4, 다섯: 5, 여섯: 6, 일곱: 7 };
 function stripExceedingDayMentions(text, maxDays) {
   if (!text || !maxDays) return text;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
-  const kept = sentences.filter((s) => {
+  const r = rewriteSentences(text, (s) => {
     const ordinalMatch = s.match(/(첫|둘|셋|넷|다섯|여섯|일곱)째\s*날/);
-    if (ordinalMatch && KOREAN_ORDINAL_DAY[ordinalMatch[1]] > maxDays) return false;
+    if (ordinalMatch && KOREAN_ORDINAL_DAY[ordinalMatch[1]] > maxDays) return null;
     const numberedMatch = s.match(/(\d+)\s*일차|[Dd]ay\s*(\d+)/);
-    if (numberedMatch) {
-      const dayNum = Number(numberedMatch[1] ?? numberedMatch[2]);
-      if (dayNum > maxDays) return false;
-    }
-    return true;
+    if (numberedMatch && Number(numberedMatch[1] ?? numberedMatch[2]) > maxDays) return null;
+    return s;
   });
-  if (kept.length !== sentences.length) {
-    logger.warn(`[blog_content_enhancer] 코스 일수(${maxDays}일) 초과하는 일자 서술 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
-  }
-  return kept.join(' ');
+  if (r.removed) logger.warn(`[blog_content_enhancer] 코스 일수(${maxDays}일) 초과하는 일자 서술 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 /**
@@ -664,24 +675,35 @@ function buildSpotDayMap(tripData) {
   return map;
 }
 
+// 2026-09-29(작업지시서 "승인 초안 2편 대조" §3): 코스 스팟만 검사해서, 코스에 없는
+// 장소에 일차를 붙이면("둘째 날에는 불국사와 석굴암", "둘째 날에는 Larsian BBQ")
+// 통과했다. 일차 표현이 있는데 그날 코스 스팟이 하나도 안 나오고 장소명처럼 보이는
+// 표현(영문 고유명·알려진 관광지 접미)이 있으면 삭제한다. 일차 없이 코스 밖 장소를
+// 소개하는 문장은 허용.
+const NON_COURSE_PLACE_HINT = /[A-Za-z]{4,}|불국사|석굴암|첨성대|대릉원|안압지|월정교|박물관|미술관|폭포|타워|시장|공원|해변|비치|사원|요새/;
+
 function stripWrongDayMentions(text, tripData) {
   const spotDayMap = buildSpotDayMap(tripData);
   if (!text || spotDayMap.size === 0) return text;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
-  const kept = sentences.filter((sentence) => {
+  const lastDay = tripData?.days ?? Math.max(...spotDayMap.values());
+  const r = rewriteSentences(text, (sentence) => {
     const numberedMatch = sentence.match(/(\d+)\s*일차/);
     const ordinalMatch = sentence.match(/(첫|둘|셋|넷|다섯|여섯|일곱)째\s*날/);
-    if (!numberedMatch && !ordinalMatch) return true;
-    const mentionedDay = numberedMatch ? Number(numberedMatch[1]) : KOREAN_ORDINAL_DAY[ordinalMatch[1]];
+    const lastMatch = /마지막\s*날/.test(sentence);
+    if (!numberedMatch && !ordinalMatch && !lastMatch) return sentence;
+    const mentionedDay = numberedMatch ? Number(numberedMatch[1])
+      : ordinalMatch ? KOREAN_ORDINAL_DAY[ordinalMatch[1]] : lastDay;
+    let mentionsCourseSpot = false;
     for (const [spotName, actualDay] of spotDayMap) {
-      if (sentence.includes(spotName) && actualDay !== mentionedDay) return false;
+      if (!sentence.includes(spotName)) continue;
+      if (actualDay !== mentionedDay) return null;
+      mentionsCourseSpot = true;
     }
-    return true;
+    if (!mentionsCourseSpot && NON_COURSE_PLACE_HINT.test(sentence)) return null;
+    return sentence;
   });
-  if (kept.length !== sentences.length) {
-    logger.warn(`[blog_content_enhancer] 스팟-일차 불일치 문장 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
-  }
-  return kept.join(' ');
+  if (r.removed) logger.warn(`[blog_content_enhancer] 스팟-일차 불일치/코스 밖 장소 일차 문장 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 // 게이트②④: "오전 9시"·"오후 3시"·"저녁 7시" 같은 시각 표현은 trip_data에 없다
@@ -689,12 +711,9 @@ function stripWrongDayMentions(text, tripData) {
 const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}/;
 function stripTimeOfDayMentions(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
-  const kept = sentences.filter((s) => !TIME_OF_DAY_PATTERN.test(s));
-  if (kept.length !== sentences.length) {
-    logger.warn(`[blog_content_enhancer] 데이터에 없는 시각 표현 감지 → 문장 ${sentences.length - kept.length}개 삭제`);
-  }
-  return kept.join(' ');
+  const r = rewriteSentences(text, (x) => (TIME_OF_DAY_PATTERN.test(x) ? null : x));
+  if (r.removed) logger.warn(`[blog_content_enhancer] 데이터에 없는 시각 표현 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 // 2026-09-28(작업지시서 "세부 초안 2차 대조" §3 게이트⑥): Pass 5가 구간
@@ -752,7 +771,11 @@ function hasBatchim(word) {
 function fixParticleAfterWord(text, word) {
   const particleChars = Object.keys(PARTICLE_PAIRS).join('');
   const re = new RegExp(`${word}([${particleChars}])`, 'g');
-  return text.replace(re, (_m, p) => word + (hasBatchim(word) ? PARTICLE_PAIRS[p].batchim : PARTICLE_PAIRS[p].noBatchim));
+  let out = text.replace(re, (_m, p) => word + (hasBatchim(word) ? PARTICLE_PAIRS[p].batchim : PARTICLE_PAIRS[p].noBatchim));
+  // 2026-09-29(작업지시서 "승인 초안 2편 대조" §2②): "차량나"(→차량이나), "도보으로"(→도보로) 처리
+  out = out.replace(new RegExp(`${word}(이나|나)(?![가-힣])`, 'g'), () => word + (hasBatchim(word) ? '이나' : '나'));
+  out = out.replace(new RegExp(`${word}(으로|로)(?![가-힣])`, 'g'), () => word + (hasBatchim(word) ? '으로' : '로'));
+  return out;
 }
 
 // 2026-09-28(작업지시서 "세 번 다 반려된 이유" §3 게이트⑥): 분→수단 표만으로는
@@ -780,56 +803,40 @@ function correctOrStripLegMentions(text, tripData) {
   const legPairMap = buildLegPairMap(tripData);
   if (!text || legPairMap.size === 0) return text;
   const spotNames = [...new Set((tripData?.spots ?? []).map((s) => s.name).filter(Boolean))];
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
   let fixedCount = 0;
-  let droppedCount = 0;
-  const kept = [];
-  for (const sentence of sentences) {
+  const r = rewriteSentences(text, (sentence) => {
     const minuteMatch = sentence.match(/(\d+)\s*분/);
-    if (!minuteMatch) { kept.push(sentence); continue; }
+    if (!minuteMatch) return sentence;
     // 문장에 등장하는 스팟명을 나온 순서대로 찾는다 — 먼저 나온 쪽이 출발지.
     const mentioned = spotNames
       .map((name) => ({ name, idx: sentence.indexOf(name) }))
       .filter((m) => m.idx !== -1)
       .sort((a, b) => a.idx - b.idx);
-    if (mentioned.length < 2) { kept.push(sentence); continue; } // 스팟 쌍 없음 — 분→수단 방식(아래 함수)에 맡김
+    if (mentioned.length < 2) return sentence; // 스팟 쌍 없음 — 분→수단 방식(아래 함수)에 맡김
     const [from, to] = mentioned;
     const leg = legPairMap.get(`${from.name}→${to.name}`) ?? legPairMap.get(`${to.name}→${from.name}`);
-    if (!leg) {
-      droppedCount += 1;
-      continue; // 두 스팟 사이에 실제 구간 자체가 없음
-    }
-    const minutes = Number(minuteMatch[1]);
-    if (minutes !== leg.minutes) {
-      droppedCount += 1;
-      continue; // 분이 다름
-    }
+    if (!leg) return null; // 두 스팟 사이에 실제 구간 자체가 없음
+    if (Number(minuteMatch[1]) !== leg.minutes) return null; // 분이 다름
     const foundWord = Object.keys(TRANSPORT_WORD_TO_MODE).find((w) => sentence.includes(w));
-    if (!foundWord || TRANSPORT_WORD_TO_MODE[foundWord] === leg.mode) { kept.push(sentence); continue; }
+    if (!foundWord || TRANSPORT_WORD_TO_MODE[foundWord] === leg.mode) return sentence;
     const correctWord = MODE_KR[leg.mode] ?? leg.mode;
     let corrected = sentence;
     for (const [word, mode] of Object.entries(TRANSPORT_WORD_TO_MODE)) {
       if (mode === TRANSPORT_WORD_TO_MODE[foundWord]) corrected = corrected.split(word).join(correctWord);
     }
-    corrected = fixParticleAfterWord(corrected, correctWord);
     fixedCount += 1;
-    kept.push(corrected);
-  }
-  if (fixedCount > 0) {
-    logger.warn(`[blog_content_enhancer] 구간 이동수단 오류 ${fixedCount}건 스팟명 대조로 치환`);
-  }
-  if (droppedCount > 0) {
-    logger.warn(`[blog_content_enhancer] 스팟 쌍과 트레쥴 구간이 안 맞는 문장 ${droppedCount}개 삭제`);
-  }
-  return kept.join(' ');
+    return fixParticleAfterWord(corrected, correctWord);
+  });
+  if (fixedCount > 0) logger.warn(`[blog_content_enhancer] 구간 이동수단 오류 ${fixedCount}건 스팟명 대조로 치환`);
+  if (r.removed > 0) logger.warn(`[blog_content_enhancer] 스팟 쌍과 트레쥴 구간이 안 맞는 문장 ${r.removed}개 삭제`);
+  return r.text;
 }
 
 function correctLegTransportMentions(text, tripData) {
   const minuteModeMap = buildLegMinuteModeMap(tripData);
   if (!text || minuteModeMap.size === 0) return text;
-  const sentences = text.split(/(?<=[.!?다요])\s+/);
   let changedCount = 0;
-  const result = sentences.map((sentence) => {
+  const result = rewriteSentences(text, (sentence) => {
     const minuteMatch = sentence.match(/(\d+)\s*분/);
     if (!minuteMatch) return sentence;
     const minutes = Number(minuteMatch[1]);
@@ -845,11 +852,11 @@ function correctLegTransportMentions(text, tripData) {
     corrected = fixParticleAfterWord(corrected, correctWord);
     changedCount += 1;
     return corrected;
-  });
+  }).text;
   if (changedCount > 0) {
     logger.warn(`[blog_content_enhancer] 구간 이동수단 오류 ${changedCount}건 코드로 치환`);
   }
-  return result.join(' ');
+  return result;
 }
 
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
@@ -895,11 +902,15 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     // N이 최솟값이어야 사실이다(10곳 중 9곳이 N 이상이라는 뜻) — 이전 코드는
     // 최댓값(Math.max)을 넣어 "평점 4.9 이상"이라 쓰고는 실제로 4.9 이상은
     // 10곳 중 2곳뿐인 거짓 제목이 나왔다(실측: 세부 2박3일). 최솟값으로 바꾼다.
+    // 2026-09-29(작업지시서 "승인 초안 2편 대조" §6): 기본 제목을 숫자 패턴으로 —
+    // "N곳, 첫 장소부터 마지막 장소까지 N km"(어느 글에나 붙는 "효율적 일정" 방지).
     const buildFallbackTitle = () => {
-      const ratedSpots = tripData.spots.filter((s) => typeof s.rating === 'number');
-      const minRating = ratedSpots.length ? Math.min(...ratedSpots.map((s) => s.rating)) : null;
-      return minRating != null
-        ? `${keyword} 코스 — ${tripData.spots.length}곳, 평점 ${minRating} 이상으로 고른 동선`
+      const ordered = [...tripData.spots].sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
+      const first = ordered[0]?.name;
+      const last = ordered[ordered.length - 1]?.name;
+      const km = typeof tripData.totalDistanceKm === 'number' ? ` ${tripData.totalDistanceKm}km` : '';
+      return first && last && first !== last
+        ? `${keyword} 코스 — ${tripData.spots.length}곳, ${first}부터 ${last}까지${km}`
         : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선`;
     };
     if (tripData?.spots?.length && /\bvs\b|비교|패키지/i.test(outline.title)) {
@@ -908,6 +919,10 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     } else if (tripData?.spots?.length && outline.title.length < keyword.length + 10) {
       // 이동수단·금지어를 걷어내고 나니 "세부 2박3일 코스 — 일정"처럼 빈약한
       // 제목이 남는 사고가 실측 확인됨("지우기만 하면 제목이 빈약해진다").
+      outline.title = buildFallbackTitle();
+    } else if (tripData?.spots?.length && !/\d+\s*(곳|km|개)/.test(outline.title)) {
+      // §6: 게이트가 안 지웠어도 숫자 사실(N곳·km)이 없는 제목은 기본 패턴으로 교체.
+      logger.warn(`[blog_content_enhancer] 제목에 숫자 사실 없음 → 숫자 패턴으로 교체: "${outline.title}"`);
       outline.title = buildFallbackTitle();
     } else if (
       tripData?.spots?.length && wordGateChangedTitle
@@ -994,7 +1009,7 @@ async function pass3Body(keyword, section, targetReader, outlineContext, isFirst
 async function pass3DayNarrative(keyword, day, daySpots, targetReader) {
   const spotList = daySpots.map((s) => {
     const rating = typeof s.rating === 'number' ? `평점 ${s.rating}` : '평점 정보 없음';
-    return `${s.name}(${s.category ?? ''}, ${rating})`;
+    return `${s.name}(분류: ${s.category ?? '기타'}, ${rating})`;
   }).join(', ');
   const prompt = (
     `"${keyword}" 코스의 ${day}일차 해설을 2~4문장(200~350자)으로 쓰세요.\n` +
@@ -1005,6 +1020,10 @@ async function pass3DayNarrative(keyword, day, daySpots, targetReader) {
     `과거형 체험 서술은 절대 쓰지 마세요(실제로 다녀온 것처럼 쓰지 말 것).\n` +
     `- 평점은 위 목록에 있는 값만 그대로 인용하세요. "평점 정보 없음"인 곳은 평점을 언급하지 마세요.\n` +
     `- 구체적인 메뉴명·요금·영업시간을 지어내지 마세요.\n` +
+    `- 장소의 성격은 이름과 분류에서 알 수 있는 범위만 쓰세요. 분류가 "기타"이거나 이름만으로 성격을 알 수 없으면 ` +
+    `그곳에서 하는 활동·분위기·요리 종류를 서술하지 말고 이름·평점·이동만 언급하세요("자연 속 휴식", "다양한 현지 요리" 같은 추측 금지). ` +
+    `분류가 "음식점"이어도 요리 종류·인기 메뉴는 쓰지 마세요.\n` +
+    `- "평점 정보 없음"인 곳은 "평점 정보 없음, 방문 전 확인 권장" 한 줄 이상 소개하지 마세요.\n` +
     `- 마지막 문단·"핵심:" 요약 반복 금지.\n` +
     `해설 텍스트만 반환하세요(목록 다시 쓰지 말 것):`
   );
@@ -1527,7 +1546,12 @@ async function enhanceBlogDraft(content) {
   // outline.sections만 걸렀고 FAQ는 그대로 통과시켜서 "예산은 얼마인가요?" 질문에
   // 지어낸 달러·페소 금액으로 답변이 나왔다. FAQ 질문 단계에서도 같은 패턴으로
   // 걸러 애초에 생성 자체를 안 하게 한다(API 호출도 아낌).
-  const faqItems = (outline.faq ?? []).filter((f) => !FORBIDDEN_SECTION_PATTERN.test(f.q ?? ''));
+  // 2026-09-29(작업지시서 §5): 운영 시간·휴무처럼 trip_data에 답이 없는 질문은 질문째 뺀다
+  // (실측: "성동시장은 언제 열리나요?"인데 답에 운영 시간이 없음).
+  const UNANSWERABLE_FAQ_PATTERN = /언제\s*(열|문|닫)|운영\s*시간|영업\s*시간|몇\s*시|휴무|개장|폐장|입장료|요금/;
+  const faqItems = (outline.faq ?? []).filter(
+    (f) => !FORBIDDEN_SECTION_PATTERN.test(f.q ?? '') && !UNANSWERABLE_FAQ_PATTERN.test(f.q ?? '')
+  );
   if (faqItems.length !== (outline.faq ?? []).length) {
     logger.warn(`[blog_content_enhancer] FAQ 중 예산·숙소 관련 질문 제거: ${(outline.faq ?? []).length - faqItems.length}개`);
   }
@@ -1607,10 +1631,21 @@ async function enhanceBlogDraft(content) {
   // 함께 적용: 코스 일수를 넘는 일자 서술 삭제, 출처 없는 금액 삭제, 1인칭 체험
   // 표현 삭제. 프롬프트 지시가 세 번 뚫린 뒤 결정론적 사후 필터로 전환.
   const applyContentGates = (text) => applyContentGatesFor(text, tripData, keyword);
-  const finalSections = reviewResult.sections.map((s) => ({
-    ...s,
-    body: applyContentGates(s.body),
-  }));
+  // 2026-09-29(작업지시서 "승인 초안 2편 대조" §2①): 일자 섹션의 목록은 trip_data로
+  // 코드가 만든 값이라 게이트(수단 치환 등)가 건드리면 오히려 틀린다(실측: 세부 1일차
+  // 목록의 "도보 18분"이 "대중교통 18분"으로 바뀜). 목록은 코드로 다시 만들어 게이트
+  // 밖에 두고, 뒤에 붙은 해설만 게이트를 통과시킨다.
+  const finalSections = reviewResult.sections.map((s) => {
+    const dayMatch = (s.heading ?? '').match(DAY_SECTION_PATTERN);
+    if (dayMatch && tripData?.spots?.length) {
+      const list = buildDeterministicItineraryForDay(tripData, Number(dayMatch[1]));
+      const idx = (s.body ?? '').indexOf('\n\n');
+      const rest = idx >= 0 ? s.body.slice(idx + 2) : '';
+      const gatedRest = rest ? applyContentGates(rest) : '';
+      return { ...s, body: gatedRest ? `${list}\n\n${gatedRest}` : list };
+    }
+    return { ...s, body: applyContentGates(s.body) };
+  });
   const finalFaqSections = faqSections.map((f) => ({
     ...f,
     a: applyContentGates(f.a),
