@@ -634,6 +634,39 @@ function stripMismatchedDurationMentions(text, tripData) {
   return r.text;
 }
 
+// 2026-09-29(초안 대조: "레아신전에서 Cabana까지 차량으로 58분 이동하며, 이곳에서 샹그릴라까지 차량으로 8분" —
+// 두 번째 구간은 실제로 도보 8분인데, 구간 대조 게이트가 문장의 첫 번째 "N분"만 검사해 통과했다):
+// 문장 안의 모든 "(이동수단) … N분" 표현을 검사한다. 문장에 등장하는 스팟이 관여하는 실제 구간(배 구간 제외)
+// 중에 같은 수단·같은 분이 없으면 문장을 삭제한다. 스팟이 하나도 없는 문장은 대상 아님.
+function stripUnverifiedModeMinutes(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const byDay = groupSpotsByDay(tripData.spots);
+  const legs = [];
+  for (const list of byDay.values()) {
+    list.slice(0, -1).forEach((sp, i) => {
+      const next = list[i + 1];
+      if (typeof sp.toNextMinutes === 'number' && sp.toNextMode && !isBoatLeg(sp, next)) {
+        legs.push({ from: sp.name, to: next.name, mode: sp.toNextMode, minutes: sp.toNextMinutes });
+      }
+    });
+  }
+  const spotNames = [...new Set(tripData.spots.map((sp) => sp.name).filter(Boolean))];
+  const occurrence = /(도보|걸어서|차량|차로|차를|대중교통|버스|지하철|전철)[^.\d]{0,8}?(\d+)\s*분/g;
+  const r = rewriteSentences(text, (sentence) => {
+    const mentioned = spotNames.filter((n) => sentence.includes(n));
+    if (!mentioned.length) return sentence;
+    const relevant = legs.filter((l) => mentioned.includes(l.from) || mentioned.includes(l.to));
+    for (const m of sentence.matchAll(occurrence)) {
+      const mode = TRANSPORT_WORD_TO_MODE[m[1]];
+      const minutes = Number(m[2]);
+      if (!relevant.some((l) => l.mode === mode && l.minutes === minutes)) return null;
+    }
+    return sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 스팟 관여 구간과 수단·분이 안 맞는 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
 // 2026-09-29(로그: LLM이 일반 섹션에 "하루 평균 이동 시간은 대중교통을 이용할 경우 약 30분"을 지어냈고,
 // Pass 5 교정은 숫자 가드에 되돌려짐): "하루 평균 이동 시간" 문장은 실제 값(배 구간 제외 구간 합 ÷ 일수)과
 // ±10분 이상 다르면 삭제한다 — 수단 붙은 평균은 어차피 수단이 섞여 있어 사실일 수 없다.
@@ -1474,6 +1507,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripIslandLandTransport(sanitized, tripData);
   sanitized = correctOrStripLegMentions(sanitized, tripData);
   sanitized = correctLegTransportMentions(sanitized, tripData);
+  sanitized = stripUnverifiedModeMinutes(sanitized, tripData);
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);
   sanitized = stripFabricatedDailyAverage(sanitized, tripData);
   sanitized = neutralizeModeTotalTime(sanitized);
