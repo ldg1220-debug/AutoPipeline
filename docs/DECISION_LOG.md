@@ -1553,3 +1553,10 @@
   높다(다음 실행 로그로 확인).
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/utils/dayCard.js`,
   `scripts/run-blog-pipeline.js`, `docs/work-orders/2026-09-29_card-draft-finishing.md`
+
+### D-069: 코드 FAQ가 QA 길이 규칙에 걸리고 재작성이 LLM으로 덮어쓰던 결함
+- **결정**: D-068의 코드 FAQ(trip_data 사실 문장, 짧음)가 QA "FAQ 답변 최소 150자"에 걸려 반려
+  ("FAQ 답변 너무 짧음: 3개")됐고, 그 재작성 경로(`regenShortFaq`)가 150자 미만 FAQ를 LLM으로
+  다시 써서 사실 기반 답을 지어낸 답으로 바꿀 수 있었다. 코드 FAQ에 `generated:'code'`를 표시해
+  QA 길이 규칙과 재작성에서 제외.
+- **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/qa_editor.js`

@@ -635,7 +635,8 @@ function validateBlogStructure(content) {
     }
   }
 
-  const shortFaq = faq.filter((f) => (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
+  // 코드가 만든 FAQ(generated:'code')는 trip_data 사실 문장이라 짧은 게 정상 — 길이 규칙 면제.
+  const shortFaq = faq.filter((f) => f.generated !== 'code' && (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
   if (shortFaq.length > 0) {
     issues.push(`FAQ 답변 너무 짧음: ${shortFaq.length}개 (최소 ${BLOG_MIN_FAQ_CHARS}자)`);
   }

@@ -1452,7 +1452,8 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
   let newFaq = blog_draft.faq ?? [];
   if (regenShortFaq) {
     newFaq = await Promise.all(newFaq.map(async (f) => {
-      if ((f.a ?? '').length >= 150) return f;
+      // 코드가 trip_data로 만든 FAQ는 사실 그대로라 LLM으로 덮어쓰지 않는다(2026-09-29 실측: 재작성이 덮어쓸 뻔함).
+      if (f.generated === 'code' || (f.a ?? '').length >= 150) return f;
       const answer = applyContentGatesFor(await pass3Faq(keyword, { q: f.q, a_hint: '' }, targetReader), tripData, keyword);
       return (answer?.length ?? 0) > (f.a?.length ?? 0) ? { ...f, a: answer } : f;
     }));
@@ -1725,7 +1726,10 @@ async function enhanceBlogDraft(content) {
   const llmFaqs = finalFaqSectionsRaw
     .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[finalSections.length + i]) }))
     .filter((f) => (f.a ?? '').trim());
-  const codeFaqs = buildCodeFaqs(tripData, keyword).filter((cf) => !llmFaqs.some((f) => f.q === cf.q));
+  // generated:'code' 표시 — QA의 FAQ 최소 글자수 규칙과 재작성(LLM 덮어쓰기)에서 제외하기 위함.
+  const codeFaqs = buildCodeFaqs(tripData, keyword)
+    .filter((cf) => !llmFaqs.some((f) => f.q === cf.q))
+    .map((cf) => ({ ...cf, generated: 'code' }));
   const finalFaqSections = [...llmFaqs, ...codeFaqs];
 
   const wordCount = finalSections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
