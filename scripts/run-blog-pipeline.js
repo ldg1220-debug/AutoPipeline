@@ -1058,8 +1058,17 @@ async function main() {
         const partial = [];
         const needsFullRewrite = [];
         for (const c of rejectedItems) {
-          const failedHeadings = extractFailedHeadings(c.blog_qa?.issues);
+          let failedHeadings = extractFailedHeadings(c.blog_qa?.issues);
           const hasShortFaq = (c.blog_qa?.issues ?? []).some((i) => i.includes('FAQ 답변 너무 짧음'));
+          // 2026-09-30(Cowork 지시서): "글 전체 분량 부족"만으로 반려되면 문제 헤딩이 없어 전체 재작성(Pass1~5 재실행, 비용 2배)으로
+          // 갔는데, 재작성본이 오히려 더 짧은 경우까지 있었다(시드니 1박2일 2,876자 → 2,199자). LLM이 쓴 산문 섹션 중 가장 짧은
+          // 한 섹션만 다시 만든다(일자 카드·"코스 한눈에 보기" 같은 코드 생성 섹션 제외).
+          const lengthOnly = (c.blog_qa?.issues ?? []).some((i) => i.includes('글 전체 분량 부족'));
+          if (failedHeadings.length === 0 && !hasShortFaq && lengthOnly) {
+            const candidates = (c.blog_draft?.sections ?? []).filter((sec) => !/\d+\s*일차|한눈에/.test(sec.heading ?? ''));
+            const shortest = candidates.sort((a, b) => (a.body?.length ?? 0) - (b.body?.length ?? 0))[0];
+            if (shortest) failedHeadings = [shortest.heading];
+          }
           if (failedHeadings.length > 0 || hasShortFaq) {
             partial.push({ content: c, failedHeadings, hasShortFaq });
           } else {

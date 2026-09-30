@@ -777,6 +777,9 @@ function stripFillerAdvice(text) {
   const MISSED = /놓치는\s*(부분|점)/;
   const TRANSIT_ADVICE = /대중교통(을|의)\s*(적극(적으로)?\s*)?(활용|이용하여|이용해)|대중교통(을|의)\s*적극/;
   const BARE_BODA = /(^|\s)보다\s+[가-힣]{1,8}(을|를)\s/;
+  // 2026-09-30(Cowork 지시서): "방문 전 각 장소의 운영 정보를 확인하여 … 추천한다/좋다" 류 상투 안내 문장 삭제 —
+  // 어느 글에나 붙는 일반 권유이고 데이터가 없다. (코드가 만드는 카드·한눈에 보기의 "방문 전 현장 상황 확인" 문장은 이 게이트를 거치지 않는다.)
+  const VISIT_CHECK = /(방문\s*(하기\s*)?전|가기\s*전|여행\s*(을\s*떠나기\s*)?전)[^.!?]*(확인|알아보|조사|숙지|파악)[^.!?]*(추천|권장|권하|좋|바람직|중요|필요|하세요|해\s*두|것이다|한다)/;
   let removedMissed = false;
   const r = rewriteSentences(text, (sentence) => {
     if (MISSED.test(sentence)) { removedMissed = true; return null; }
@@ -784,6 +787,7 @@ function stripFillerAdvice(text) {
     removedMissed = false;
     if (TRANSIT_ADVICE.test(sentence) && !/\d+\s*분/.test(sentence)) return null;
     if (BARE_BODA.test(sentence)) return null;
+    if (VISIT_CHECK.test(sentence)) return null;
     return sentence;
   });
   if (r.removed) logger.warn(`[blog_content_enhancer] 상투 권유·비문 파편 감지 → 문장 ${r.removed}개 삭제`);
