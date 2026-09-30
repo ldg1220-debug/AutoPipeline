@@ -23,7 +23,7 @@ const HELP = `사용법: ab <명령> [키워드/인자]
   status                 최신 실행 결과 요약
   validate               환경변수 확인
   regions                트레쥴 지역 스냅샷 갱신
-  unpublish <URL> [--yes]  삭제한 글의 DB 발행 기록 정리 (관련 글 카드에서 제외)
+  unpublish <번호|URL> [--yes]  삭제한 글의 DB 발행 기록 정리   예) ab unpublish 266
   cats                   티스토리 카테고리 설정
   help                   이 도움말`;
 

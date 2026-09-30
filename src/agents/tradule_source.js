@@ -601,6 +601,7 @@ export async function attachTripData(keywordData) {
     let cleanSpots = [];
     let ratedCount = 0;
     const attemptLog = [];
+    let sawSparse = false;
     const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
@@ -609,10 +610,16 @@ export async function attachTripData(keywordData) {
       const agencyFiltered = filterRegionSelfSpots(filterTravelAgencySpots(sanitized), region);
       const ratedSpots = filterUnratedSpots(agencyFiltered);
       const agencyDropped = sanitized.length - agencyFiltered.length;
+      // 2026-09-30(발행글 대조: 시드니 days=5 응답이 6·6·1·1·1곳 — 3~5일차가 스팟 하나짜리 카드로 발행됨): 여러 날 코스에서
+      // 스팟이 2곳 미만인 날이 있거나 요청한 일수만큼 날이 채워지지 않으면 "희소 코스"로 보고, 일수를 줄여 재시도한다.
+      const perDay = new Map();
+      for (const sp of agencyFiltered) perDay.set(sp.day ?? 1, (perDay.get(sp.day ?? 1) ?? 0) + 1);
+      const sparse = d > 1 && (perDay.size < d || [...perDay.values()].some((n) => n < 2));
+      if (sparse) sawSparse = true;
       attemptLog.push(
-        `${d}일=${agencyFiltered.length}곳(원본${rawCount}, 평점있는곳${ratedSpots.length}, 여행사·공항제외-${agencyDropped})`
+        `${d}일=${agencyFiltered.length}곳(원본${rawCount}, 평점있는곳${ratedSpots.length}, 여행사·공항제외-${agencyDropped}${sparse ? ', 하루 1곳 이하인 날 있음→희소' : ''})`
       );
-      if (ratedSpots.length >= MIN_SPOTS) {
+      if (ratedSpots.length >= MIN_SPOTS && !sparse) {
         brief = attempt;
         days = d;
         cleanSpots = agencyFiltered;
@@ -620,7 +627,7 @@ export async function attachTripData(keywordData) {
         break;
       }
       // 이번 시도가 최선이면 (스킵하게 되더라도) 로그·디버그 저장용으로 남겨둔다.
-      if (!brief || ratedSpots.length > ratedCount) {
+      if (!sparse && (!brief || ratedSpots.length > ratedCount)) {
         brief = attempt;
         days = d;
         cleanSpots = agencyFiltered;
@@ -637,7 +644,7 @@ export async function attachTripData(keywordData) {
         `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, ${retryNote} ` +
         `(시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
       );
-      updated.push({ ...item, skip_reason: `평점 있는 스팟 ${ratedCount}개 (최소 ${MIN_SPOTS}개)` });
+      updated.push({ ...item, skip_reason: (!brief && sawSparse) ? '일자별 스팟이 부족한 코스(하루 1곳 이하인 날 존재, 일수를 줄여도 마찬가지)' : `평점 있는 스팟 ${ratedCount}개 (최소 ${MIN_SPOTS}개)` });
       continue;
     }
     if (days !== startDays) {

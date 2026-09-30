@@ -23,7 +23,7 @@ const ITEMS = [
   { label: '자동 파이프라인 (--auto)',                        confirm: true, build: () => node('run-blog-pipeline.js', '--auto') },
   { label: '최신 실행 결과 요약 (status)',                    build: () => node('check-status.js') },
   { label: '환경변수 확인 (validate)',                        build: () => node('validate-env.js') },
-  { label: '삭제한 글 발행 기록 정리 — URL 입력',            ask: '삭제한 글 URL (예: https://maeilg.com/270)', confirm: true,
+  { label: '삭제한 글 발행 기록 정리 — URL 입력',            ask: '삭제한 글 번호 (예: 266) 또는 URL', confirm: true,
     build: (v) => node('unpublish-post.js', v, '--yes') },
   { label: '트레쥴 지역 스냅샷 갱신',                         build: () => node('refresh-tradule-regions.js') },
 ];

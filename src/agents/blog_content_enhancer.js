@@ -667,11 +667,20 @@ function stripUnverifiedModeMinutes(text, tripData) {
       // 스팟 이름 없이 "이곳은 차로 이동 시 37분", "성당을 방문할 때는 대중교통을 이용해 29분"처럼 지시 표현만 있는 수단+N분
       // 문장은 어느 구간인지 알 수 없고(실제로는 그 장소에서 다음으로 가는 시간) 방향 단서도 없으면 삭제한다.
       const PLACE = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크';
-      const refersToPlace = new RegExp(`이곳|이 (${PLACE})|(${PLACE})(을|를|에|은|는|으로|에서)`).test(sentence);
+      const refersToPlace = new RegExp(`이곳|도착(할|한|해|하)|이 (${PLACE})|(${PLACE})(을|를|에|은|는|으로|에서)`).test(sentence);
       const hasDirection = /(다음|이후|다른|출발|까지|부터|에서)/.test(sentence);
       return refersToPlace && !hasDirection && [...sentence.matchAll(occurrence)].length ? null : sentence;
     }
-    const relevant = legs.filter((l) => mentioned.includes(l.from) || mentioned.includes(l.to));
+    let relevant = legs.filter((l) => mentioned.includes(l.from) || mentioned.includes(l.to));
+    // 2026-09-30(발행글 대조: "시드니 하버 브리지까지의 이동은 차량으로 약 38분"(실제는 브리지에서 페더데일로 가는 38분),
+    // "Sydney Tower Eye … 대중교통으로 12분이면 도착"(실제는 타워에서 차이나타운 12분) — 도착 표현인데 출발 구간): 스팟이 하나이고
+    // 도착 단서(까지·도착·접근)만 있으면 그 스팟으로 *들어오는* 구간, 출발 단서(다음·이후·출발·다른)만 있으면 *나가는* 구간과 대조한다.
+    if (mentioned.length === 1) {
+      const arrival = /(까지|도착|접근)/.test(sentence);
+      const departure = /(다음|이후|출발|다른)/.test(sentence);
+      if (arrival && !departure) relevant = legs.filter((l) => l.to === mentioned[0]);
+      else if (departure && !arrival) relevant = legs.filter((l) => l.from === mentioned[0]);
+    }
     // 2026-09-30(초안: "Sage Health Spa … 이곳은 차로 이동 시 37분", "산토니뇨 성당 … 대중교통을 이용해 29분" — 둘 다 그
     // 장소에서 *다음으로* 가는 구간인데 그 장소까지 가는 시간처럼 읽힘; Pass 5가 잡았으나 가드에 되돌려짐): 스팟이 하나뿐이고
     // 방향 단서(다음·이후·다른·출발·까지·부터·에서)가 없는 "수단+N분" 문장은 방향이 모호하므로 삭제.
@@ -1015,8 +1024,28 @@ function correctOrStripLegMentions(text, tripData) {
     if (mentioned.length < 2 && /\d+\s*분\s*(정도\s*)?거리에\s*(있|위치)/.test(sentence)) return null;
     if (mentioned.length < 2) return sentence; // 스팟 쌍 없음 — 분→수단 방식(아래 함수)에 맡김
     const [from, to] = mentioned;
-    const leg = legPairMap.get(`${from.name}→${to.name}`) ?? legPairMap.get(`${to.name}→${from.name}`);
-    if (!leg) return null; // 두 스팟 사이에 실제 구간 자체가 없음
+    // 2026-09-30(발행글: "시드니 하버 브리지까지의 이동은 차량으로 약 38분이 걸리며, 페더데일 …" — 브리지→페더데일이 실제 차량 38분
+    // 구간이라 두 스팟 대조는 통과했지만 "브리지까지"는 브리지가 *도착지*라는 뜻이라 실제로는 팬케잌스→브리지(도보 16분)): 스팟 바로
+    // 뒤에 "까지"가 붙으면 도착지, "에서"가 붙으면 출발지로 보고 그 방향의 구간과만 대조한다.
+    const roleOf = (n) => {
+      const tail = sentence.slice(sentence.indexOf(n) + n.length);
+      if (/^\s*까지/.test(tail)) return 'dest';
+      if (/^\s*에서/.test(tail)) return 'origin';
+      return null;
+    };
+    const dest = mentioned.find((m) => roleOf(m.name) === 'dest');
+    const origin = mentioned.find((m) => roleOf(m.name) === 'origin');
+    let leg;
+    if (dest || origin) {
+      const cands = [];
+      if (origin && dest) cands.push(legPairMap.get(`${origin.name}→${dest.name}`));
+      else if (dest) mentioned.forEach((o) => { if (o.name !== dest.name) cands.push(legPairMap.get(`${o.name}→${dest.name}`)); });
+      else mentioned.forEach((o) => { if (o.name !== origin.name) cands.push(legPairMap.get(`${origin.name}→${o.name}`)); });
+      leg = cands.find(Boolean);
+    } else {
+      leg = legPairMap.get(`${from.name}→${to.name}`) ?? legPairMap.get(`${to.name}→${from.name}`);
+    }
+    if (!leg) return null; // 두 스팟 사이에 (그 방향의) 실제 구간이 없음
     if (Number(minuteMatch[1]) !== leg.minutes) return null; // 분이 다름
     const foundWord = Object.keys(TRANSPORT_WORD_TO_MODE).find((w) => sentence.includes(w));
     if (!foundWord || TRANSPORT_WORD_TO_MODE[foundWord] === leg.mode) return sentence;
