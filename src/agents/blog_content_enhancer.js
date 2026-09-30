@@ -663,8 +663,19 @@ function stripUnverifiedModeMinutes(text, tripData) {
   const occurrence = /(도보|걸어서|차량|차로|차를|대중교통|버스|지하철|전철)[^.\d]{0,8}?(\d+)\s*분/g;
   const r = rewriteSentences(text, (sentence) => {
     const mentioned = spotNames.filter((n) => sentence.includes(n));
-    if (!mentioned.length) return sentence;
+    if (!mentioned.length) {
+      // 스팟 이름 없이 "이곳은 차로 이동 시 37분", "성당을 방문할 때는 대중교통을 이용해 29분"처럼 지시 표현만 있는 수단+N분
+      // 문장은 어느 구간인지 알 수 없고(실제로는 그 장소에서 다음으로 가는 시간) 방향 단서도 없으면 삭제한다.
+      const PLACE = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크';
+      const refersToPlace = new RegExp(`이곳|이 (${PLACE})|(${PLACE})(을|를|에|은|는|으로|에서)`).test(sentence);
+      const hasDirection = /(다음|이후|다른|출발|까지|부터|에서)/.test(sentence);
+      return refersToPlace && !hasDirection && [...sentence.matchAll(occurrence)].length ? null : sentence;
+    }
     const relevant = legs.filter((l) => mentioned.includes(l.from) || mentioned.includes(l.to));
+    // 2026-09-30(초안: "Sage Health Spa … 이곳은 차로 이동 시 37분", "산토니뇨 성당 … 대중교통을 이용해 29분" — 둘 다 그
+    // 장소에서 *다음으로* 가는 구간인데 그 장소까지 가는 시간처럼 읽힘; Pass 5가 잡았으나 가드에 되돌려짐): 스팟이 하나뿐이고
+    // 방향 단서(다음·이후·다른·출발·까지·부터·에서)가 없는 "수단+N분" 문장은 방향이 모호하므로 삭제.
+    if (mentioned.length === 1 && !/(다음|이후|다른|출발|까지|부터|에서)/.test(sentence) && [...sentence.matchAll(occurrence)].length) return null;
     for (const m of sentence.matchAll(occurrence)) {
       const mode = TRANSPORT_WORD_TO_MODE[m[1]];
       const minutes = Number(m[2]);
@@ -1580,6 +1591,27 @@ function dropOrphanParagraphs(text, tripData = null) {
     for (let i = paragraphs.length - 2; i >= 1; i--) {
       const para = paragraphs[i];
       if (!hasSpot(para) && !/\d/.test(para) && !/^\s*([-*·]|\d+\.|<)/.test(para)) {
+        removed += 1;
+        paragraphs.splice(i, 1);
+      }
+    }
+  }
+  // 2026-09-30(초안: 개요 "둘째 날에는 마젤란의 십자가를 방문 … 그 후에는 샹그릴라 막탄 세부로 이동" — 실제 2일차는
+  // 샹그릴라 → 마젤란의 십자가 → Cabana; Pass 5가 잡았으나 가드에 되돌려짐): "N일차/첫날/둘째 날…"로 시작하는 문단에서
+  // 그날 스팟이 나오는 순서가 trip_data의 순서와 다르면 그 문단은 삭제(그날 내용은 일자 카드가 정확히 담는다).
+  if (tripData?.spots?.length) {
+    const DAY_LEAD = /^\s*(첫날|첫째\s*날|둘째\s*날|셋째\s*날|넷째\s*날|다섯째\s*날|여섯째\s*날|일곱째\s*날|마지막\s*날|(\d+)\s*일차)/;
+    const ORD = { 첫날: 1, 첫째: 1, 둘째: 2, 셋째: 3, 넷째: 4, 다섯째: 5, 여섯째: 6, 일곱째: 7 };
+    const lastDay = tripData.days ?? Math.max(...tripData.spots.map((x) => x.day ?? 1));
+    for (let i = paragraphs.length - 1; i >= 0; i--) {
+      const m = paragraphs[i].match(DAY_LEAD);
+      if (!m) continue;
+      const day = m[2] ? Number(m[2]) : (/마지막/.test(m[1]) ? lastDay : ORD[m[1].replace(/\s*날/, '')] ?? ORD[m[1]]);
+      if (!day) continue;
+      const daySpots = tripData.spots.filter((x) => (x.day ?? 1) === day).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const inText = daySpots.map((x) => ({ n: x.name, idx: paragraphs[i].indexOf(x.name) })).filter((x) => x.idx >= 0).sort((a, b) => a.idx - b.idx).map((x) => x.n);
+      const expected = daySpots.map((x) => x.name).filter((n) => inText.includes(n));
+      if (inText.length >= 2 && inText.join('|') !== expected.join('|')) {
         removed += 1;
         paragraphs.splice(i, 1);
       }
