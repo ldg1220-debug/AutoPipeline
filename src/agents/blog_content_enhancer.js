@@ -1552,7 +1552,18 @@ function dropOrphanParagraphs(text, tripData = null) {
       // 같은 문단에서 앞서 남은 문장 중 스팟 이름이 나온 적이 있으면(이름 문장 → 평점 문장 → "이 십자가는…")
       // 지시어의 대상이 살아있으므로 파편이 아니다.
       const spotSeenInParagraph = out.some((kept) => hasSpot(kept));
-      const subjectless = (SUBJECTLESS_START.test(sent) || DEMONSTRATIVE_ANYWHERE.test(sent)) && spotNames.length && !hasSpot(sent) && !spotSeenInParagraph;
+      // 2026-09-30(초안: "첫날 일정의 시작점으로, 이곳에서 Sage Health Spa까지는…" — 도착지 이름이 문장에 있어 통과했지만
+      // "이곳"이 가리킬 출발지 이름 문단은 지워짐): 지시어가 있는데 지시어보다 앞(같은 문장·앞선 문장)에 스팟
+      // 이름이 없으면, 뒤에 다른 스팟이 나와도 가리킬 대상이 없는 파편이다.
+      const demMatch = sent.match(DEMONSTRATIVE_ANYWHERE);
+      const demIdx = demMatch ? demMatch.index : -1;
+      const spotIdxs = spotNames.map((n) => sent.indexOf(n)).filter((i) => i >= 0);
+      const firstSpotIdx = spotIdxs.length ? Math.min(...spotIdxs) : -1;
+      const antecedentMissing = demIdx >= 0 && !spotSeenInParagraph && (firstSpotIdx === -1 || firstSpotIdx > demIdx);
+      const subjectless = spotNames.length && (
+        antecedentMissing ||
+        (SUBJECTLESS_START.test(sent) && !hasSpot(sent) && !spotSeenInParagraph)
+      );
       if (subjectless || (prevRemoved && (MOVE_START.test(sent) || NOUN_START.test(sent)))) { removed += 1; prevRemoved = true; continue; }
       prevRemoved = false;
       out.push(sent);
