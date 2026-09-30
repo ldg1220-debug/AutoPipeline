@@ -40,7 +40,12 @@ const COMMANDS = {
 };
 
 const [name, ...rest] = process.argv.slice(2);
-if (!name || name === 'help' || !COMMANDS[name]) {
+// 인자 없이 `ab`만 치면 번호 메뉴(scripts/menu.js)를 띄운다.
+if (!name) {
+  await import('./menu.js');
+  await new Promise(() => {}); // 메뉴가 끝나면(입력 종료) 프로세스가 자연 종료된다 — 아래 단일 명령 경로로 내려가지 않는다
+}
+if (name === 'help' || !COMMANDS[name]) {
   if (name && name !== 'help') console.error(`알 수 없는 명령: ${name}\n`);
   console.log(HELP);
   process.exit(name && name !== 'help' ? 1 : 0);

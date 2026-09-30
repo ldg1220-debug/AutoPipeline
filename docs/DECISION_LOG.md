@@ -1753,3 +1753,12 @@
   `AB_PRINT=1`이면 실행하지 않고 만들어질 명령만 출력(검증용).
 - **버린 대안**: package.json에 npm 별칭만 추가(`npm run` 타이핑은 여전히 길고 키워드 따옴표 문제 유지).
 - **관련 파일**: `scripts/ab.js`, `ab.cmd`, `package.json`(`npm run ab -- …`도 가능), `CLAUDE.md`
+
+### D-088: 번호 선택 메뉴 (`1` / `ab`)
+- **결정**: D-087의 `ab <명령>` 외에, 프로젝트 폴더로 이동한 뒤 `1`(루트 `1.cmd`) 또는 인자 없는 `ab`만 치면 번호 메뉴
+  (`scripts/menu.js`)가 뜨고, 번호를 고르면 실행 후 다시 메뉴로 돌아온다. 항목: 로그인, git pull, 테스트(세부 5박7일
+  초안만), 키워드 입력 초안, 키워드 입력 발행, 자동 파이프라인, status, validate, 삭제 글 DB 정리(URL 입력), 지역 스냅샷 갱신.
+  발행·자동 실행·DB 정리는 y/N 확인, 입력에 `--옵션`이 섞이면 취소. 항목은 `menu.js`의 `ITEMS` 배열만 고치면 된다.
+- **버그 기록**: 첫 구현에서 `rl.close()`가 `close` 핸들러를 통해 빈 문자열을 먼저 resolve해 모든 입력이 빈 값으로
+  처리됐다 — 가상 터미널(pty)로 재현해 resolve→close 순서로 수정. 파이프 입력 테스트는 readline 버퍼링 때문에 무의미했다.
+- **관련 파일**: `scripts/menu.js`, `1.cmd`, `scripts/ab.js`, `CLAUDE.md`

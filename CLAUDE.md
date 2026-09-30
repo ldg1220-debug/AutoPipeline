@@ -88,6 +88,7 @@ Agent 4: auto_publisher   → output/qa_reports/publish_YYYYMMDD.json
 ## 자주 쓰는 명령
 
 ```bash
+1                         # 프로젝트 폴더에서 `1`만 치면 번호 메뉴(scripts/menu.js) — 로그인·git pull·테스트·발행 선택
 ab login                  # 티스토리 로그인 (= npm run blog:login)
 ab draft 세부 5박7일        # 초안만 생성 — 따옴표 불필요, 발행 안 함 (scripts/ab.js, Windows는 ab.cmd)
 ab publish 세부 5박7일      # 실제 발행 (확인 질문 후)
