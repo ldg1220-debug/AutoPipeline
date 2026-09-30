@@ -1542,6 +1542,63 @@ function dropOrphanParagraphs(text, tripData = null) {
   return paragraphs.join('\n\n');
 }
 
+// 2026-09-30(실행 로그 3회 연속: 아웃라인 변동으로 LLM 산문 섹션이 개요 하나뿐 — 본문 1,583/2,618/1,605자):
+// LLM 산문이 얇게 나와도 글이 최소한의 읽을거리를 갖도록, trip_data 값만으로 "코스 한눈에 보기" 섹션을 코드로
+// 만든다. 지어낼 여지가 없고(숫자·이름만), 게이트를 거치지 않는 코드 생성 블록이다. 끄려면 이 함수가 ''를 반환하게.
+function buildCourseGlanceBody(tripData) {
+  const spots = tripData?.spots ?? [];
+  if (spots.length < 6) return '';
+  const byDay = groupSpotsByDay(spots);
+  const paras = [];
+
+  // 1) 규모·이동 (배 구간 제외 합계)
+  let legCount = 0; let totalMin = 0; let boatCount = 0;
+  const byMode = new Map();
+  for (const list of byDay.values()) {
+    list.slice(0, -1).forEach((sp, i) => {
+      if (isBoatLeg(sp, list[i + 1])) { boatCount += 1; return; }
+      if (typeof sp.toNextMinutes !== 'number') return;
+      legCount += 1; totalMin += sp.toNextMinutes;
+      const key = sp.toNextMode ?? null;
+      byMode.set(key, (byMode.get(key) ?? 0) + 1);
+    });
+  }
+  const modeText = [...byMode].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${MODE_KR[m] ?? '이동'} ${n}구간`).join(' · ');
+  let p1 = `이 코스는 총 ${spots.length}곳, ${byDay.size}일 일정입니다.`;
+  if (typeof tripData.totalDistanceKm === 'number') p1 += ` 총 이동 거리는 ${tripData.totalDistanceKm}km입니다.`;
+  if (legCount > 0) p1 += ` 이동 구간 ${legCount}개의 시간을 합치면 약 ${(totalMin / 60).toFixed(1)}시간(${totalMin}분)이고, 수단은 ${modeText} 순으로 많습니다.`;
+  if (boatCount > 0) p1 += ` 섬으로 가는 ${boatCount}개 구간은 배를 타며 시간은 확인되지 않아 합계에서 뺐습니다.`;
+  paras.push(p1);
+
+  // 2) 일차별 이동량
+  const dt = tripData.dayTotals;
+  const dtEntries = Array.isArray(dt) ? dt.map((e) => [e?.day, e]) : Object.entries(dt ?? {}).map(([k, e]) => [Number(k), e]);
+  const dayKms = dtEntries.map(([d, e]) => [d, typeof e === 'number' ? e : e?.distanceKm]).filter(([d, km]) => d != null && typeof km === 'number' && km > 0);
+  if (dayKms.length >= 2) {
+    const longest = dayKms.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const shortest = dayKms.reduce((a, b) => (b[1] < a[1] ? b : a));
+    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / dayKms.length).toFixed(1);
+    paras.push(`이동량은 하루 평균 ${avg}km입니다. 가장 많이 움직이는 날은 ${longest[0]}일차(${longest[1]}km), 가장 적게 움직이는 날은 ${shortest[0]}일차(${shortest[1]}km)입니다.`);
+  }
+
+  // 3) 리뷰 수 상위 명소
+  const top = spots.filter((x) => typeof x.reviewCount === 'number').sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
+  if (top.length) {
+    paras.push('리뷰 수가 가장 많은 곳은 ' + top.map((x) => `${x.name}(${typeof x.rating === 'number' ? `★${x.rating}, ` : ''}리뷰 ${x.reviewCount.toLocaleString()}개, ${x.day ?? 1}일차)`).join(', ') + '입니다.');
+  }
+
+  // 4) 구성 (종류별 곳 수)
+  const kinds = new Map();
+  for (const sp of spots) { const k = inferSpotKind(sp); if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1); }
+  if (kinds.size) paras.push('장소는 ' + [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}곳`).join(' · ') + '으로 구성돼 있습니다.');
+
+  // 5) 평점 정보 없는 곳
+  const unrated = spots.filter((x) => typeof x.rating !== 'number').map((x) => x.name);
+  if (unrated.length) paras.push(`평점 정보가 없는 곳은 ${unrated.join(', ')}입니다. 방문 전 현장 상황을 확인하세요.`);
+
+  return paras.join('\n\n');
+}
+
 // 2026-09-29(§6): FAQ 3개를 코드로 — LLM에 맡기면 지어내므로 trip_data 값만 쓴다.
 function buildCodeFaqs(tripData, keyword) {
   const spots = tripData?.spots ?? [];
@@ -1957,6 +2014,12 @@ async function enhanceBlogDraft(content) {
   // 비-일자 섹션은 데이터에 근거가 없는 채우기 글이라 재작성해도 QA를 못 넘는다 → 섹션 4개 이상이
   // 남는 범위에서 삭제한다(QA 최소 섹션 수 4개).
   const origSectionCount = finalSections.length; // 아래 삭제 후에도 FAQ의 capped 인덱스를 유지
+  // "코스 한눈에 보기"는 삭제·정리 게이트를 다 통과한 뒤 코드가 직접 끼워 넣는다(개요 바로 뒤).
+  const glanceBody = buildCourseGlanceBody(tripData);
+  if (glanceBody && !finalSections.some((sec) => /한눈에/.test(sec.heading ?? ''))) {
+    const overviewIdx = finalSections.findIndex((sec) => /개요|소개/.test(sec.heading ?? ''));
+    finalSections.splice(overviewIdx >= 0 ? overviewIdx + 1 : 0, 0, { level: 2, heading: '코스 한눈에 보기', body: glanceBody });
+  }
   if (tripData?.spots?.length) {
     const numeric = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
     const isThin = (sec) => !DAY_SECTION_PATTERN.test(sec.heading ?? '') && ((sec.body ?? '').match(numeric) ?? []).length < 2;
