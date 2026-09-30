@@ -1180,11 +1180,12 @@ async function main() {
         // 해당 블록(인포카드 등)은 뺀다. 수동 업로드 후 붙이도록 로그로 안내.
         let imgIdx = 0;
         const assetDir = `${outDir}/blog/html/${slug}_assets`;
-        const dataImg = /(<div class="info-card-wrap">\s*)?<img\b[^>]*?src="data:image\/(\w+);base64,([^"]+)"[^>]*>(\s*<\/div>)?/g;
+        const dataImg = /(<div class="(?:info-card-wrap|blog-img-wrap)">\s*)?<img\b([^>]*?)src="data:image\/(\w+);base64,([^"]+)"([^>]*)>(\s*<\/div>)?/g;
         const pending = [];
-        html = html.replace(dataImg, (m, open, ext, b64) => {
+        html = html.replace(dataImg, (m, open, pre, ext, b64, post) => {
           imgIdx += 1;
-          const file = `${assetDir}/${open ? 'info_card' : `image_${imgIdx}`}.${ext === 'jpeg' ? 'jpg' : ext}`;
+          const isInfo = /핵심 지표/.test(pre + post);
+          const file = `${assetDir}/${isInfo ? 'info_card' : `image_${imgIdx}`}.${ext === 'jpeg' ? 'jpg' : ext}`;
           pending.push({ file, b64 });
           return '';
         });

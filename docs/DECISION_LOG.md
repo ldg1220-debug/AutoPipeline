@@ -1947,3 +1947,8 @@
 - **버린 대안**: RSS 대조(파싱·범위 문제로 페이지 직접 확인이 더 단순), 가드 완전 제거.
 - **주의**: 관련 글 확인은 네트워크가 필요 — 실패 시 카드를 빼므로 오프라인에선 관련 글이 없다.
 - **관련 파일**: `scripts/run-blog-pipeline.js`, `src/utils/internalLinks.js`, `src/agents/blog_content_enhancer.js`, `docs/work-orders/2026-09-30_269-live-infocard-related.md`
+
+### D-109: HTML export 인포카드 실제 마크업(blog-img-wrap) 대응
+- **결정**: D-108의 data: 이미지 제거가 `info-card-wrap`만 찾았으나 monetizer는 인포카드를 `blog-img-wrap`으로 감싼다(실행 로그에서 `image_1.jpg`로 저장돼 발견).
+  두 래퍼 모두 블록째 제거하고, alt에 "핵심 지표"가 있으면 `info_card.jpg`로 저장한다.
+- **관련 파일**: `scripts/run-blog-pipeline.js`
