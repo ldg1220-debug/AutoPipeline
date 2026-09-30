@@ -1877,3 +1877,10 @@
 - **미조치/기록**: /271(시드니 4박5일)은 이미 발행됨(3~5일차 1곳짜리) — 삭제·재생성 여부는 사용자 결정. 트레쥴에 시드니 일자별 분배 개선 요청 필요.
   로컬이 D-098 이전 코드로 실행돼(놓치는 부분·"대중교통을 활용해 49.1km" 잔존) `git pull` 필요.
 - **관련 파일**: `scripts/unpublish-post.js`, `scripts/menu.js`, `scripts/ab.js`, `src/agents/blog_content_enhancer.js`, `src/agents/tradule_source.js`
+
+### D-100: 메뉴 확인 질문은 Enter=예, git pull 후 메뉴 자동 재시작, 삭제 글 여러 개 한 번에
+- **결정**: (1) 메뉴·`ab publish`의 확인 질문을 `(Y/n, Enter=예)`로 — Enter만 치면 진행, n/no/아니오/취소만 취소(사용자 요청: Enter가 N이라 불편).
+  실제 발행에서도 Enter=예이므로 오입력 주의(n으로 취소). (2) 메뉴에서 `git pull`을 실행하면 실행 중인 메뉴는 옛 코드라 옛 문구·번호가 그대로였다
+  (실측: pull 후에도 "URL 입력" 옛 화면) → pull 성공(종료 코드 0) 후 메뉴를 새 프로세스로 자동 재시작. (3) `unpublish-post.js`/메뉴가 번호 여러 개
+  (`266 271`)를 받아 한 번에 정리. 참고: 메뉴 번호가 바뀌었다(텍스트만 테스트 추가로 삭제 정리는 9→10번).
+- **관련 파일**: `scripts/menu.js`, `scripts/ab.js`, `scripts/unpublish-post.js`

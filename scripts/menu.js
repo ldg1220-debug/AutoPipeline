@@ -13,7 +13,7 @@ const node = (file, ...args) => ({ cmd: process.execPath, args: [path.join(ROOT,
 
 const ITEMS = [
   { label: '블로그 로그인 (티스토리)',                       build: () => node('tistory-login.js') },
-  { label: 'git pull origin main',                            build: () => ({ cmd: 'git', args: ['pull', 'origin', 'main'] }) },
+  { label: 'git pull origin main (끝나면 메뉴를 새 코드로 자동 재시작)', reload: true, build: () => ({ cmd: 'git', args: ['pull', 'origin', 'main'] }) },
   { label: '텍스트만 테스트: 세부 5박7일 (이미지 생성 안 함 · 비용 절감)', build: () => node('run-blog-pipeline.js', '--force-keyword', '세부 5박7일', '--draft-only', '--no-assets') },
   { label: '테스트: 세부 5박7일 초안만 (발행 안 함)',        build: () => node('run-blog-pipeline.js', '--force-keyword', '세부 5박7일', '--draft-only') },
   { label: '초안만 생성 — 키워드 직접 입력 (발행 안 함)',    ask: '키워드 (예: 오사카 2박3일)',
@@ -23,8 +23,8 @@ const ITEMS = [
   { label: '자동 파이프라인 (--auto)',                        confirm: true, build: () => node('run-blog-pipeline.js', '--auto') },
   { label: '최신 실행 결과 요약 (status)',                    build: () => node('check-status.js') },
   { label: '환경변수 확인 (validate)',                        build: () => node('validate-env.js') },
-  { label: '삭제한 글 발행 기록 정리 — URL 입력',            ask: '삭제한 글 번호 (예: 266) 또는 URL', confirm: true,
-    build: (v) => node('unpublish-post.js', v, '--yes') },
+  { label: '삭제한 글 발행 기록 정리 — 글 번호 입력',          ask: '삭제한 글 번호 (여러 개는 공백으로: 266 271) 또는 URL', confirm: true,
+    build: (v) => node('unpublish-post.js', ...v.split(/[\s,]+/).filter(Boolean), '--yes') },
   { label: '트레쥴 지역 스냅샷 갱신',                         build: () => node('refresh-tradule-regions.js') },
 ];
 
@@ -72,12 +72,20 @@ async function main() {
       if (value.startsWith('--') || /(^|\s)--[a-z]/i.test(value)) { console.log('입력에 --옵션이 들어 있어 취소했습니다.'); continue; }
     }
     if (item.confirm) {
-      const ok = await ask(`"${item.label}"${value ? ` (${value})` : ''} 을(를) 실행합니다. 계속할까요? (y/N) `);
-      if (!/^y(es)?$/i.test(ok)) { console.log('취소했습니다.'); continue; }
+      const ok = await ask(`"${item.label}"${value ? ` (${value})` : ''} 을(를) 실행합니다. 계속할까요? (Y/n, Enter=예) `);
+      // Enter만 치면 Yes(기본값). n/no/아니오/취소만 취소한다.
+      if (/^(n|no|아니오|아니|취소)$/i.test(ok)) { console.log('취소했습니다.'); continue; }
     }
     console.log(`\n▶ ${item.label}${value ? ` — ${value}` : ''}\n`);
     const code = await run(item.build(value));
     console.log(`\n(종료 코드 ${code})`);
+    // git pull로 코드가 바뀌었으면 실행 중인 메뉴는 옛 코드이므로 새 프로세스로 다시 띄운다.
+    if (item.reload && code === 0 && !PRINT_ONLY) {
+      console.log('\n새 코드로 메뉴를 다시 시작합니다...');
+      const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'menu.js')], { cwd: ROOT, stdio: 'inherit' });
+      child.on('exit', (c) => process.exit(c ?? 0));
+      return;
+    }
   }
 }
 

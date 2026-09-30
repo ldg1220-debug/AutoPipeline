@@ -72,9 +72,9 @@ function run() {
 
 if (name === 'publish' && !process.env.AB_PRINT) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  rl.question(`"${rest.join(' ')}"을(를) 실제로 발행합니다. 계속할까요? (y/N) `, (ans) => {
+  rl.question(`"${rest.join(' ')}"을(를) 실제로 발행합니다. 계속할까요? (Y/n, Enter=예) `, (ans) => {
     rl.close();
-    if (/^y(es)?$/i.test(ans.trim())) run(); else console.log('취소했습니다.');
+    if (/^(n|no|아니오|아니|취소)$/i.test(ans.trim())) console.log('취소했습니다.'); else run();
   });
 } else {
   run();
