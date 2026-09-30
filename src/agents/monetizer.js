@@ -316,7 +316,7 @@ function buildTldrBulletsFromTripData(tripData) {
   if (!straightLine) {
     const modes = [...new Set(spots.map((s) => s.toNextMode).filter(Boolean))];
     if (modes.length) {
-      const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+      const modeKr = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차', boat: '배편', ferry: '배편' };
       bullets.push(`<li>이동수단: ${modes.map((m) => modeKr[m] ?? m).join(', ')} 기준</li>`);
     }
   }
@@ -704,6 +704,8 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
   // 2026-09-29(§3): 같은 이미지는 글 안에서 1번만. 예전엔 섹션 인덱스에 맞는 이미지가
   // 없으면 bodyImages[i % length]로 순환해 같은 사진·지도가 여러 섹션에 반복됐다.
   const usedImageUrls = new Set();
+  // D-110: 본문 첫 이미지로 이미 들어가는 코스 지도를 첫 섹션 이미지로 또 넣지 않는다.
+  if (tripData?.imageUrl) usedImageUrls.add(tripData.imageUrl);
   return sections
     .map((s, i) => {
       const tag = s.level === 'h3' ? 'h3' : 'h2';

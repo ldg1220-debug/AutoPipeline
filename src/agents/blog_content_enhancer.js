@@ -781,7 +781,7 @@ function stripProximityClaims(text, tripData) {
 // 여행을 계획할 수 있다"처럼 비교 대상 없는 독립 부사 "보다 + 명사를" 문장은 비문 파편이라 삭제.
 function stripFillerAdvice(text) {
   if (!text) return text;
-  const MISSED = /놓치는\s*(부분|점)/;
+  const MISSED = /놓치(는|기 쉬운|지 말아야 (할|하는))\s*(부분|점|포인트|장소|곳|몇 가지)/;
   const TRANSIT_ADVICE = /대중교통(을|의)\s*(적극(적으로)?\s*)?(활용|이용하여|이용해)|대중교통(을|의)\s*적극/;
   const BARE_BODA = /(^|\s)보다\s+[가-힣]{1,8}(을|를)\s/;
   // 2026-09-30(Cowork 지시서): "방문 전 각 장소의 운영 정보를 확인하여 … 추천한다/좋다" 류 상투 안내 문장 삭제 —
@@ -926,7 +926,8 @@ function stripWrongDayMentions(text, tripData) {
 
 // 게이트②④: "오전 9시"·"오후 3시"·"저녁 7시" 같은 시각 표현은 trip_data에 없다
 // (있는 건 구간 이동 "분"뿐) — LLM이 지어낸 시각이 섞이면 안 되므로 문장째 삭제.
-const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}/;
+// D-110: "저녁에는 Cabana Restaurant에서 식사…"처럼 시각 없이 끼니·시간대를 못박는 문장도 데이터에 없다.
+const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}|(^|[\s,])(아침|점심|저녁|밤)(에는|엔)\s/;
 function stripTimeOfDayMentions(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
   const r = rewriteSentences(text, (x) => (TIME_OF_DAY_PATTERN.test(x) ? null : x));
@@ -1640,6 +1641,12 @@ function dropOrphanParagraphs(text, tripData = null) {
   if (!text) return text;
   const spotNames = (tripData?.spots ?? []).map((sp) => sp.name).filter(Boolean);
   const hasSpot = (str) => spotNames.some((n) => str.includes(n));
+  // D-110: 스팟 이름 문장이 지워진 뒤 남는 "여행 첫날 방문하면, …" 같은 일차 조건절 파편(이름 없음) 삭제.
+  if (spotNames.length) {
+    const DAY_LEAD = /^\s*(여행\s*)?(첫날|첫째\s*날|둘째\s*날|셋째\s*날|넷째\s*날|다섯째\s*날|\d+일차)(에|에는)?\s*(방문|가|들르|찾)(하면|으면|면|아|는)/;
+    const r0 = rewriteSentences(text, (x) => (DAY_LEAD.test(x) && !hasSpot(x) ? null : x));
+    if (r0.removed) { logger.warn(`[blog_content_enhancer] 장소명 없는 일차 조건절 파편 ${r0.removed}개 삭제`); text = r0.text; }
+  }
   // 2026-09-29(초안 대조: 문단 중간의 "이곳은 평점 4.6점, 리뷰 2,650개…", "평점 4.3점, 리뷰 3,573개로 … 이곳은",
   // 이어진 "차로 이동이 필요하지만…"): 가게 이름 문장이 지워져 주어 없는 파편이 문단 중간에 남았다. 문단 첫
   // 문장뿐 아니라 문장 단위로 — 지시어/평점으로 시작하는데 그 문장과 바로 앞 문장 어디에도 스팟 이름이 없으면
@@ -1782,8 +1789,9 @@ function buildCourseGlanceBody(tripData) {
   if (dayKms.length >= 2) {
     const longest = dayKms.reduce((a, b) => (b[1] > a[1] ? b : a));
     const shortest = dayKms.reduce((a, b) => (b[1] < a[1] ? b : a));
-    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / dayKms.length).toFixed(1);
-    paras.push(`이동량은 하루 평균 ${avg}km입니다. 가장 많이 움직이는 날은 ${longest[0]}일차(${longest[1]}km), 가장 적게 움직이는 날은 ${shortest[0]}일차(${shortest[1]}km)입니다.`);
+    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / (tripData.days || byDay.size || dayKms.length)).toFixed(1);
+    const unmeasured = (tripData.days || byDay.size) > dayKms.length ? ' 이동 거리가 집계되지 않은 날은 최솟값 비교에서 뺐습니다.' : '';
+    paras.push(`이동량은 하루 평균 ${avg}km입니다. 가장 많이 움직이는 날은 ${longest[0]}일차(${longest[1]}km), 가장 적게 움직이는 날은 ${shortest[0]}일차(${shortest[1]}km)입니다.${unmeasured}`);
   }
 
   // 3) 리뷰 수 상위 명소
@@ -1844,10 +1852,14 @@ function buildCodeFaqs(tripData, keyword) {
   }
   const rated = spots.filter((x) => typeof x.rating === 'number');
   if (rated.length) {
-    const top = rated.reduce((a, b) => (b.rating > a.rating || (b.rating === a.rating && (b.reviewCount ?? 0) > (a.reviewCount ?? 0)) ? b : a));
+    const maxRating = Math.max(...rated.map((x) => x.rating));
+    const tops = rated.filter((x) => x.rating === maxRating).sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
+    const fmt = (x) => `${x.name} ★${x.rating}${typeof x.reviewCount === 'number' ? `(리뷰 ${x.reviewCount.toLocaleString()}개)` : ''}, ${x.day ?? 1}일차`;
     faqs.push({
       q: '평점이 가장 높은 곳은?',
-      a: `${top.name} ★${top.rating}${typeof top.reviewCount === 'number' ? `(리뷰 ${top.reviewCount.toLocaleString()}개)` : ''}, ${top.day ?? 1}일차 코스에 포함돼 있습니다.`,
+      a: tops.length === 1
+        ? `${fmt(tops[0])} 코스에 포함돼 있습니다.`
+        : `★${maxRating}로 ${tops.length}곳이 같습니다. ${tops.slice(0, 3).map(fmt).join(' / ')} 코스입니다.`,
     });
   }
   return faqs;
