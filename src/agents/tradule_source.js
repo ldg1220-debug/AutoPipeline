@@ -602,6 +602,7 @@ export async function attachTripData(keywordData) {
     let ratedCount = 0;
     const attemptLog = [];
     let sawSparse = false;
+    let sparseAtRequested = null; // 사용자가 요청한 일수 자체가 희소 코스인 경우의 일자별 스팟 수
     const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
@@ -616,6 +617,12 @@ export async function attachTripData(keywordData) {
       for (const sp of agencyFiltered) perDay.set(sp.day ?? 1, (perDay.get(sp.day ?? 1) ?? 0) + 1);
       const sparse = d > 1 && (perDay.size < d || [...perDay.values()].some((n) => n < 2));
       if (sparse) sawSparse = true;
+      // 2026-09-30(사용자 지적: "시드니 5박6일 요청했는데 1박2일"): 요청한 일수의 코스가 희소(하루 1곳 이하인 날)이면 조용히 더 짧은
+      // 코스로 바꿔 발행하지 말고, 이유를 알리고 스킵한다. (평점 있는 스팟 부족으로 일수를 줄이는 기존 재시도와는 별개.)
+      if (sparse && d === startDays) {
+        sparseAtRequested = [...perDay.entries()].sort((a, b) => a[0] - b[0]).map(([, n]) => n).join('·');
+        break;
+      }
       attemptLog.push(
         `${d}일=${agencyFiltered.length}곳(원본${rawCount}, 평점있는곳${ratedSpots.length}, 여행사·공항제외-${agencyDropped}${sparse ? ', 하루 1곳 이하인 날 있음→희소' : ''})`
       );
@@ -633,6 +640,12 @@ export async function attachTripData(keywordData) {
         cleanSpots = agencyFiltered;
         ratedCount = ratedSpots.length;
       }
+    }
+    if (sparseAtRequested) {
+      const msg = `${startDays}일 코스가 일자별 ${sparseAtRequested}곳으로 하루 1곳 이하인 날이 있어 요청한 일수로 만들 수 없음(트레쥴 일자 분배 문제)`;
+      logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${msg} → 다른 일수로 바꾸지 않고 스킵`);
+      updated.push({ ...item, skip_reason: msg });
+      continue;
     }
     rawResponses[item.keyword] = brief;
 
