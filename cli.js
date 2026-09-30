@@ -476,7 +476,7 @@ async function flowBlog(rl, regions, extractRegion, resolveRegionByTheme) {
         // state.rawText만으로 --force-keyword를 만들므로 문제없다 — region 해석은
         // 파이프라인(attachTripData)이 알아서 한다.
         console.log('  웹 검색으로 정보를 채워 시도해볼 수도 있습니다(트레쥴 API보다 정확도는 낮습니다).');
-        const tryWeb = await askYesNoNav(rl, '웹 검색으로 시도할까요? (아니오 = 목록에서 직접 고르기)', false);
+        const tryWeb = await askYesNoNav(rl, '웹 검색으로 시도할까요? (아니오 = 목록에서 직접 고르기)', true);
         if (tryWeb === HOME) return rl;
         if (tryWeb === true) {
           state.mode = 'direct';

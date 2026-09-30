@@ -45,9 +45,13 @@ function run({ cmd, args }) {
     return Promise.resolve(0);
   }
   return new Promise((resolve) => {
+    // 실행 중 Ctrl+C: 같은 콘솔의 자식 프로세스만 멈추고 메뉴는 살려서 메뉴로 돌아온다(셸이 하는 방식).
+    const ignoreSigint = () => {};
+    process.on('SIGINT', ignoreSigint);
+    const done = (code) => { process.off('SIGINT', ignoreSigint); resolve(code); };
     const child = spawn(cmd, args, { cwd: ROOT, stdio: 'inherit' });
-    child.on('exit', (code) => resolve(code ?? 0));
-    child.on('error', (err) => { console.error(`실행 실패: ${err.message}`); resolve(1); });
+    child.on('exit', (code, signal) => done(code ?? (signal ? 130 : 0)));
+    child.on('error', (err) => { console.error(`실행 실패: ${err.message}`); done(1); });
   });
 }
 
