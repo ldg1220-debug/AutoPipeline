@@ -554,6 +554,16 @@ export async function attachTripData(keywordData) {
     }
 
     const startDays = resolveDays(region, item.keyword ?? '');
+    // D-107: 요청 일수가 지역 상한(도시형 5일·휴양형 7일)을 넘으면 조용히 줄여 발행하지 않고
+    // 상한을 알리며 스킵한다(예: "시드니 5박6일" → 4박5일로 바뀌어 나가던 문제).
+    const requestedDays = extractDays(item.keyword ?? '');
+    const capDays = regionMaxDays(region);
+    if (requestedDays > capDays) {
+      const msg = `요청한 ${requestedDays}일이 ${region}의 최대 일정(${capDays}일 = ${capDays - 1}박${capDays}일)을 넘어 만들 수 없음`;
+      logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${msg} → 일수를 줄여 발행하지 않고 스킵`);
+      updated.push({ ...item, skip_reason: msg });
+      continue;
+    }
     const isResortStyleRegion = regionStyle(region) === 'resort';
 
     // 2026-09-29(작업지시서 "휴양지 4일 이상은 잠시 발행을 막아주세요" §3-①):
