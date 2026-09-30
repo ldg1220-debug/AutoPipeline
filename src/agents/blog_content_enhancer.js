@@ -1544,7 +1544,7 @@ function dropOrphanParagraphs(text, tripData = null) {
   // 2026-09-30(초안: "관광객들은 이곳에서 필리핀의 역사를 느낄 수 있으며, 평점 4.4점…" — 문장 시작이 아니어서 통과): "이곳"도 위치 무관.
   const DEMONSTRATIVE_ANYWHERE = new RegExp(`이곳(은|이|에서|의|을)|이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
   const MOVE_START = /^\s*(차로|차량으로|도보로|대중교통으로)\s*이동/;
-  const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서)`);
+  const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서|의|\\s*내부|\\s*안)`);
   let removed = 0;
   // 2026-09-29(초안: "세부 5박 7일 여행 코스에서 주목할 만한 장소들의 평점과 특징" — 마침표 없는 제목 반복 조각):
   // 문장 종결(., !, ?, 다, 요) 없이 끝나는 짧은 문단은 제목을 되풀이한 조각이라 삭제(목록·표·HTML 제외).
@@ -1571,7 +1571,11 @@ function dropOrphanParagraphs(text, tripData = null) {
       const spotIdxs = spotNames.map((n) => sent.indexOf(n)).filter((i) => i >= 0);
       const firstSpotIdx = spotIdxs.length ? Math.min(...spotIdxs) : -1;
       const antecedentMissing = demIdx >= 0 && !spotSeenInParagraph && (firstSpotIdx === -1 || firstSpotIdx > demIdx);
+      // 2026-09-30(초안: 섹션이 "요새 내부의 전시물과 건축 양식은…"으로 시작 — 요새 이름 문단이 지워졌는데 "이곳/이 요새"가
+      // 아니라 명사로 바로 시작해 통과): 섹션 맨 앞 문장이 장소 명사로 시작하는데 앞에 스팟 이름이 없으면 파편이다.
+      const bareNounLead = pi === 0 && out.length === 0 && NOUN_START.test(sent) && !hasSpot(sent);
       const subjectless = spotNames.length && (
+        bareNounLead ||
         antecedentMissing ||
         (SUBJECTLESS_START.test(sent) && !hasSpot(sent) && !spotSeenInParagraph)
       );
