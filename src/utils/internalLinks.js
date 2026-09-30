@@ -60,6 +60,8 @@ const MIN_RELATED_POSTS_TO_SHOW = 3;
  * @returns {Promise<Array<{keyword,title,post_url,score}>>}
  */
 export async function findRelatedPosts(keyword, currentPostUrl, limit = INTERNAL_LINK_LIMIT, category = null) {
+  // 2026-09-29(초안 대조: /269를 새 HTML로 교체하면 그 글이 자기 자신 — 같은 키워드의 기존 글 — 을 관련 글로
+  // 링크한다; 새 초안은 currentPostUrl이 없어 URL 비교로는 못 거른다): 같은 키워드의 글도 후보에서 제외한다.
   // 발행된 포스트 전체 조회 (자기 자신 제외). category가 있으면 keywords 테이블과
   // 조인해 같은 카테고리만 후보로 삼는다 — blog_posts에는 category 컬럼이 없어서
   // keyword 텍스트로 keywords.category를 역참조한다.
@@ -71,19 +73,21 @@ export async function findRelatedPosts(keyword, currentPostUrl, limit = INTERNAL
          WHERE bp.status = 'published'
            AND bp.post_url IS NOT NULL
            AND (? IS NULL OR bp.post_url != ?)
+           AND bp.keyword != ?
            AND k.category = ?
          ORDER BY bp.published_at DESC
          LIMIT 100`
-      ).all(currentPostUrl ?? null, currentPostUrl ?? null, category)
+      ).all(currentPostUrl ?? null, currentPostUrl ?? null, keyword ?? '', category)
     : db.prepare(
         `SELECT keyword, title, post_url, published_at
          FROM blog_posts
          WHERE status = 'published'
            AND post_url IS NOT NULL
            AND (? IS NULL OR post_url != ?)
+           AND keyword != ?
          ORDER BY published_at DESC
          LIMIT 100`
-      ).all(currentPostUrl ?? null, currentPostUrl ?? null);
+      ).all(currentPostUrl ?? null, currentPostUrl ?? null, keyword ?? '');
 
   // 카테고리 필터링 결과가 너무 적으면(같은 카테고리 글이 아직 몇 편 안 됨) 관련 포스트
   // 블록 자체를 숨기는 게 낫다 — 억지로 다른 카테고리를 섞지 않는다.
