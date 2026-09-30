@@ -1743,3 +1743,13 @@
 - **미조치**: 개요 "이동은 주로 차량"(실제 14구간 중 차량 6·대중교통 5·도보 3 — 최다이긴 하나 과반 아님),
   Crocolandia "악어 중심 교육 전시" 등 데이터 밖 서술, 개요가 1일차만 다룸.
 - **관련 파일**: `src/utils/internalLinks.js`
+
+### D-087: 자주 쓰는 명령을 `ab` 하나로 단축 (따옴표 실수 방지)
+- **결정**: `npm run blog:login`처럼 긴 명령 대신 `ab <명령>`을 만들었다(`scripts/ab.js` + Windows용 루트 `ab.cmd`).
+  `ab login`, `ab draft 세부 5박7일`, `ab publish 세부 5박7일`, `ab pull`, `ab status`, `ab unpublish <URL>` 등.
+  키워드는 나머지 인자를 공백으로 이어 붙여 만들고 `spawn`(셸 없이)으로 실행하므로, 이 세션에서 두 번
+  사고를 낸 따옴표 실수(`"세부 5박7일"--draft-only` → /270 실발행, `--draft-only:` 오타)가 구조적으로
+  생기지 않는다. `publish`는 실제 발행이라 확인 질문(y/N)을 둔다. 키워드에 `--옵션`이 섞이면 거부.
+  `AB_PRINT=1`이면 실행하지 않고 만들어질 명령만 출력(검증용).
+- **버린 대안**: package.json에 npm 별칭만 추가(`npm run` 타이핑은 여전히 길고 키워드 따옴표 문제 유지).
+- **관련 파일**: `scripts/ab.js`, `ab.cmd`, `package.json`(`npm run ab -- …`도 가능), `CLAUDE.md`

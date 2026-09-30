@@ -74,7 +74,8 @@
     "shopping:comic": "node scripts/run-shopping-pipeline.js --comic",
     "shopping:comic:dry": "cross-env DRY_RUN=true node scripts/run-shopping-pipeline.js --comic",
     "web": "cd web && node server.js",
-    "web:dev": "cd web && node --watch server.js"
+    "web:dev": "cd web && node --watch server.js",
+    "ab": "node scripts/ab.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

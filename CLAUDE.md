@@ -88,6 +88,11 @@ Agent 4: auto_publisher   → output/qa_reports/publish_YYYYMMDD.json
 ## 자주 쓰는 명령
 
 ```bash
+ab login                  # 티스토리 로그인 (= npm run blog:login)
+ab draft 세부 5박7일        # 초안만 생성 — 따옴표 불필요, 발행 안 함 (scripts/ab.js, Windows는 ab.cmd)
+ab publish 세부 5박7일      # 실제 발행 (확인 질문 후)
+ab pull                   # git pull origin main
+ab help                   # 전체 단축 명령 목록
 npm run validate          # 환경변수 설정 확인 (첫 실행 전 필수)
 npm run estimate          # API 예상 비용 계산
 npm run dry-run           # 실제 업로드 없이 전체 테스트 (1회 실행 후 자동 종료)
