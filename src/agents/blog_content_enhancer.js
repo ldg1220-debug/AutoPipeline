@@ -727,8 +727,15 @@ function stripProximityClaims(text, tripData) {
   }
   const spotNames = [...new Set(tripData.spots.map((sp) => sp.name).filter(Boolean))];
   const r = rewriteSentences(text, (sentence) => {
-    if (!/(인근|근처|바로\s*옆|가까이|가까운)/.test(sentence)) return sentence;
+    // "현지 문화를 가까이에서 체험"처럼 위치 주장이 아닌 "가까이"는 제외(2026-09-30 오삭제 확인)
+    if (!/(인근|근처|바로\s*옆|이웃해|가까운\s*(곳|거리|위치)|가까이에?\s*(위치|있))/.test(sentence)) return sentence;
     const mentioned = spotNames.filter((n) => sentence.includes(n));
+    // 2026-09-30(초안: "House of Lechon … 산토니뇨 성당 근처에 위치" — 스팟이 한 개만 나와 통과, 실제 산토니뇨 성당→
+    // Lechon은 대중교통 29분): 스팟이 하나뿐인 인접 주장은 그 스팟이 15분 이하 구간(배 구간 제외)의 한쪽 끝일 때만 유지.
+    if (mentioned.length === 1) {
+      const near = [...closePairs].some((k) => k.split('|').includes(mentioned[0]));
+      return near ? sentence : null;
+    }
     if (mentioned.length < 2) return sentence;
     for (let i = 0; i < mentioned.length; i++) {
       for (let j = i + 1; j < mentioned.length; j++) {
@@ -1523,7 +1530,8 @@ function dropOrphanParagraphs(text, tripData = null) {
   // 명사구가 있고 그 문장·바로 앞 문장에 스팟 이름이 없으면 주어 없는 파편으로 본다.
   const PLACE_NOUN = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크';
   const SUBJECTLESS_START = new RegExp(`^\\s*(이곳|이 (${PLACE_NOUN})|평점\\s*\\d|★\\s*\\d)`);
-  const DEMONSTRATIVE_ANYWHERE = new RegExp(`이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
+  // 2026-09-30(초안: "관광객들은 이곳에서 필리핀의 역사를 느낄 수 있으며, 평점 4.4점…" — 문장 시작이 아니어서 통과): "이곳"도 위치 무관.
+  const DEMONSTRATIVE_ANYWHERE = new RegExp(`이곳(은|이|에서|의|을)|이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
   const MOVE_START = /^\s*(차로|차량으로|도보로|대중교통으로)\s*이동/;
   const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서)`);
   let removed = 0;
