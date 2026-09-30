@@ -476,7 +476,8 @@ const FORBIDDEN_SECTION_PATTERN = /숙소|가격대|예산|비용\s*산정|경�
 // 장단점"(723자) 섹션이 본문에 통째로 남음): 코스 글(trip_data 있음)에선 패키지·개별 예약·항공·비교(vs) 각도의
 // 섹션도 제거한다 — 가격 비교를 부르는 각도인데 가격 데이터는 없다. 경제 글의 "금리 비교" 같은 제목은 건드리지
 // 않도록 trip_data가 있을 때만 적용.
-const TRAVEL_BANNED_ANGLE_PATTERN = /패키지|개별\s*예약|자유\s*여행\s*vs|\bvs\b|항공|비행기|여행사|비교/i;
+// D-111: 액티비티·야시장·주의사항 각도는 trip_data에 근거가 없어 호핑투어·야시장·지프니·여행 보험 같은 창작이 붙는다.
+const TRAVEL_BANNED_ANGLE_PATTERN = /패키지|개별\s*예약|자유\s*여행\s*vs|\bvs\b|항공|비행기|여행사|비교|액티비티|야시장|주의\s*사항|유의\s*사항|준비물|꿀팁/i;
 
 function sanitizeOutlineForbidden(outline, tripData = null) {
   const isBanned = (h) => FORBIDDEN_SECTION_PATTERN.test(h ?? '') ||
@@ -781,7 +782,7 @@ function stripProximityClaims(text, tripData) {
 // 여행을 계획할 수 있다"처럼 비교 대상 없는 독립 부사 "보다 + 명사를" 문장은 비문 파편이라 삭제.
 function stripFillerAdvice(text) {
   if (!text) return text;
-  const MISSED = /놓치(는|기 쉬운|지 말아야 (할|하는))\s*(부분|점|포인트|장소|곳|몇 가지)/;
+  const MISSED = /(놓치(는|기 쉬운|지 말아야 (할|하는))|간과(하기 쉬운|하는|되기 쉬운))\s*(부분|점|포인트|장소|곳|몇 가지)?/;
   const TRANSIT_ADVICE = /대중교통(을|의)\s*(적극(적으로)?\s*)?(활용|이용하여|이용해)|대중교통(을|의)\s*적극/;
   const BARE_BODA = /(^|\s)보다\s+[가-힣]{1,8}(을|를)\s/;
   // 2026-09-30(Cowork 지시서): "방문 전 각 장소의 운영 정보를 확인하여 … 추천한다/좋다" 류 상투 안내 문장 삭제 —
@@ -927,7 +928,7 @@ function stripWrongDayMentions(text, tripData) {
 // 게이트②④: "오전 9시"·"오후 3시"·"저녁 7시" 같은 시각 표현은 trip_data에 없다
 // (있는 건 구간 이동 "분"뿐) — LLM이 지어낸 시각이 섞이면 안 되므로 문장째 삭제.
 // D-110: "저녁에는 Cabana Restaurant에서 식사…"처럼 시각 없이 끼니·시간대를 못박는 문장도 데이터에 없다.
-const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}|(^|[\s,])(아침|점심|저녁|밤)(에는|엔)\s/;
+const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}|(^|[\s,])(아침|점심|저녁|밤)(에는|엔)\s|해가\s*(지기\s*전|질\s*무렵)|일몰|석양|야경/;
 function stripTimeOfDayMentions(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
   const r = rewriteSentences(text, (x) => (TIME_OF_DAY_PATTERN.test(x) ? null : x));
@@ -1885,6 +1886,32 @@ function neutralizeModeTotalTime(text) {
   return text ? text.replace(MODE_TOTAL_TIME_PATTERN, '이동 합계 $5') : text;
 }
 
+// D-111(세부 5박7일 초안 대조): 개요의 "주요 관광지 10곳"(구간 수를 곳 수로 오기)·"하루에 약 5~6시간"·"연중 내내"·"이동 시간이 길지
+// 않으므로"(115분 날 존재), 본문의 "야시장"(코스에 없는 장소)·호핑투어·트라이시클·지프니·여행 보험·"해변가에 위치"처럼 trip_data에
+// 없는 사실 주장을 문장째 삭제한다. 스팟 이름에 들어 있는 단어(예: 야시장이 이름인 스팟)는 예외.
+function stripUngroundedClaims(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const names = tripData.spots.map((sp) => sp.name ?? '').join(' ');
+  const total = tripData.spots.length;
+  const perDay = new Set([...groupSpotsByDay(tripData.spots).values()].map((l) => l.length));
+  const INVENTED = /야시장|호핑\s*투어|트라이시클|지프니|여행자?\s*보험|혼잡한\s*시간/g;
+  const r = rewriteSentences(text, (sentence) => {
+    for (const m of sentence.matchAll(INVENTED)) if (!names.includes(m[0].replace(/\s+/g, ' '))) return null;
+    if (/(하루에?|일)\s*약?\s*\d+(\s*[~\-]\s*\d+)?\s*시간\s*(의|정도|가량)?\s*(일정|동안|소요)/.test(sentence)) return null;
+    if (/연중\s*내내|일\s*년\s*내내/.test(sentence)) return null;
+    if (/이동\s*시간이\s*(길지\s*않|짧)/.test(sentence)) return null;
+    if (/(해변가|바닷가|해안가)에?\s*위치|바다\s*(풍경|전망|뷰)/.test(sentence)) return null;
+    if (/(주요\s*)?(관광지|명소|장소)\s*(\d+)\s*곳/.test(sentence)) {
+      const n = Number(sentence.match(/(관광지|명소|장소)\s*(\d+)\s*곳/)?.[2]);
+      if (n && n !== total && !perDay.has(n)) return null;
+    }
+    if (/(놓치지\s*않고|빠짐없이)\s*(모두\s*)?(방문|둘러|볼)/.test(sentence)) return null;
+    return sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 데이터에 없는 사실 주장 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
 function applyContentGatesFor(text, tripData, keyword) {
   let sanitized = sanitizeDaysAgainstTripData(text, tripData, keyword);
   sanitized = stripExceedingDayMentions(sanitized, tripData?.days);
@@ -1904,6 +1931,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = neutralizeModeTotalTime(sanitized);
   sanitized = stripUnsourcedMoney(sanitized);
   sanitized = stripFirstPersonExperienceClaims(sanitized);
+  sanitized = stripUngroundedClaims(sanitized, tripData);
   return sanitized;
 }
 
