@@ -1,7 +1,7 @@
 // 번호 선택 메뉴 — 프로젝트 폴더에서 `1`(또는 `ab`)만 치면 뜬다. 실행이 끝나면 다시 메뉴로 돌아온다.
 // 메뉴 항목을 바꾸려면 아래 ITEMS만 고치면 된다.
 //   run:   실행할 명령(node 스크립트는 scripts/ 기준 파일명, git은 args만)
-//   ask:   실행 전에 물어볼 입력(키워드/URL). 있으면 그 값을 args에 끼워 넣는다.
+//   ask:   실행 전에 물어볼 입력(키워드/번호). 있으면 그 값을 args에 끼워 넣는다. default가 있으면 Enter만 쳐도 그 값을 쓴다.
 //   confirm: 실제 발행·DB 변경처럼 되돌리기 어려운 항목은 y/N 확인.
 import { spawn } from 'child_process';
 import path from 'path';
@@ -14,9 +14,9 @@ const node = (file, ...args) => ({ cmd: process.execPath, args: [path.join(ROOT,
 const ITEMS = [
   { label: '블로그 로그인 (티스토리)',                       build: () => node('tistory-login.js') },
   { label: 'git pull origin main (끝나면 메뉴를 새 코드로 자동 재시작)', reload: true, build: () => ({ cmd: 'git', args: ['pull', 'origin', 'main'] }) },
-  { label: '텍스트만 테스트: 세부 5박7일 (이미지 생성 안 함 · 비용 절감)', build: () => node('run-blog-pipeline.js', '--force-keyword', '세부 5박7일', '--draft-only', '--no-assets') },
-  { label: '테스트: 세부 5박7일 초안만 (발행 안 함)',        build: () => node('run-blog-pipeline.js', '--force-keyword', '세부 5박7일', '--draft-only') },
-  { label: '초안만 생성 — 키워드 직접 입력 (발행 안 함)',    ask: '키워드 (예: 오사카 2박3일)',
+  { label: '텍스트만 테스트 — 키워드 입력 (이미지 생성 안 함 · 비용 절감)', ask: '키워드', default: '세부 5박7일',
+    build: (v) => node('run-blog-pipeline.js', '--force-keyword', v, '--draft-only', '--no-assets') },
+  { label: '초안만 생성 — 키워드 입력 (발행 안 함)',          ask: '키워드', default: '세부 5박7일',
     build: (v) => node('run-blog-pipeline.js', '--force-keyword', v, '--draft-only') },
   { label: '실제 발행 — 키워드 직접 입력',                   ask: '발행할 키워드', confirm: true,
     build: (v) => node('run-blog-pipeline.js', '--force-keyword', v) },
@@ -71,7 +71,8 @@ async function main() {
 
     let value;
     if (item.ask) {
-      value = await ask(`${item.ask}> `);
+      value = await ask(`${item.ask}${item.default ? ` (Enter=${item.default})` : ''}> `);
+      if (!value && item.default) value = item.default;
       if (!value) { console.log('입력이 없어 취소했습니다.'); continue; }
       if (value.startsWith('--') || /(^|\s)--[a-z]/i.test(value)) { console.log('입력에 --옵션이 들어 있어 취소했습니다.'); continue; }
     }
