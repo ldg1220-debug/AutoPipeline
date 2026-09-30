@@ -759,6 +759,34 @@ function stripProximityClaims(text, tripData) {
   return r.text;
 }
 
+// 2026-09-30(작업지시서 "세부 5박7일 최종본: 합격. 손으로 지운 두 문단을 게이트로"): Cowork가 HTML에서 직접 지운 상투 문단을
+// 게이트로 옮긴다. ① "많은 분들이 놓치는 부분은 …" 상투 문장(+ 삭제 직후 "따라서/이를/이렇게" 연결 문장) 삭제.
+// ② "대중교통을 (적극) 활용…" 권유 문장 삭제(분이 든 구간 설명 "대중교통으로 N분"은 유지). ④ "이를 적극적으로 활용하여 보다
+// 여행을 계획할 수 있다"처럼 비교 대상 없는 독립 부사 "보다 + 명사를" 문장은 비문 파편이라 삭제.
+function stripFillerAdvice(text) {
+  if (!text) return text;
+  const MISSED = /놓치는\s*(부분|점)/;
+  const TRANSIT_ADVICE = /대중교통(을|의)\s*(적극(적으로)?\s*)?(활용|이용하여|이용해)|대중교통(을|의)\s*적극/;
+  const BARE_BODA = /(^|\s)보다\s+[가-힣]{1,8}(을|를)\s/;
+  let removedMissed = false;
+  const r = rewriteSentences(text, (sentence) => {
+    if (MISSED.test(sentence)) { removedMissed = true; return null; }
+    if (removedMissed && /^\s*(따라서|이를|이렇게|그러므로)\s/.test(sentence)) return null;
+    removedMissed = false;
+    if (TRANSIT_ADVICE.test(sentence) && !/\d+\s*분/.test(sentence)) return null;
+    if (BARE_BODA.test(sentence)) return null;
+    return sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 상투 권유·비문 파편 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
+// ③ "역사적"이 한 글에 3회를 넘으면 4회째부터 수식어만 제거(문장 유지).
+function limitHistoricalWord(bodies, max = 3) {
+  let count = 0;
+  return bodies.map((body) => (body ? body.replace(/역사적(인)?\s*/g, (m) => (++count > max ? '' : m)) : body));
+}
+
 // 2026-09-29(작업지시서 "남은 서술은 두고, '경제적'만 막습니다"): 틀린 말·상투어만 막는다. "경제적"은
 // 근거 없는 판단(구 경제채널 어투), "역사적 가치/명소"는 현대 건축물(레아신전, 2012년 완공)에 붙어 틀렸다.
 // 문장을 지우지 않고 해당 구절만 제거해 문장을 유지한다.
@@ -1777,6 +1805,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripMismatchedDurationMentions(sanitized, tripData);
   sanitized = stripFabricatedDailyAverage(sanitized, tripData);
   sanitized = removeBannedPhrases(sanitized);
+  sanitized = stripFillerAdvice(sanitized);
   sanitized = stripBudgetTalk(sanitized);
   sanitized = stripUnverifiedKm(sanitized, tripData);
   sanitized = stripProximityClaims(sanitized, tripData);
@@ -2095,6 +2124,8 @@ async function enhanceBlogDraft(content) {
     ...finalSections.map((s) => (DAY_SECTION_PATTERN.test(s.heading ?? '') ? (s.body ?? '').split('\n\n').slice(1).join('\n\n') : s.body)),
     ...finalFaqSectionsRaw.map((f) => f.a),
   ]);
+  const cappedFinal = limitHistoricalWord(capped);
+  capped.splice(0, capped.length, ...cappedFinal);
   finalSections.forEach((s, i) => {
     if (DAY_SECTION_PATTERN.test(s.heading ?? '')) {
       const list = (s.body ?? '').split('\n\n')[0];
