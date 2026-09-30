@@ -649,8 +649,12 @@ function validateBlogStructure(content) {
   }, 0);
   const totalChars = sections.reduce((sum, s) => sum + (s.body ?? '').length, 0)
     + faq.reduce((sum, f) => sum + (f.a ?? '').length, 0) + cardChars;
-  if (totalChars < BLOG_MIN_TOTAL_CHARS) {
-    issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${BLOG_MIN_TOTAL_CHARS}자 — AdSense 콘텐츠 가치 기준)`);
+  // 2026-09-30(실측: 시드니 1박2일 12곳 — 첫 QA가 2,876자로 "최소 3000자 미달" 반려 → 헤딩 특정 불가로 파이프라인 전체를
+  // 재실행(비용 2배)했고 재작성본은 오히려 더 짧은 2,199자로 통과): 2일 이하 코스는 스팟이 적어 사실만으로 채울 분량이
+  // 원래 적다 — 최소 분량을 2400자로 낮춘다.
+  const minTotalChars = (content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS;
+  if (totalChars < minTotalChars) {
+    issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${minTotalChars}자 — AdSense 콘텐츠 가치 기준)`);
   }
 
   // SEO 키워드 포함 여부 — 공백 제거 후 토큰 단위 검사 (한국어 복합어 대응)
