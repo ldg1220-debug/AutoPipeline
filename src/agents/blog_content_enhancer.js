@@ -676,6 +676,31 @@ function stripUnverifiedModeMinutes(text, tripData) {
   return r.text;
 }
 
+// 2026-09-30(초안 대조: "8곳의 주요 관광지를 포함한 50km 내외의 이동 거리" — 트레쥴 값에 없는 수치. Pass 5가
+// 고쳤지만 숫자 개수 가드(76→75)에 되돌려짐): 문장의 "N km"는 총 이동 거리 또는 일차별 거리(반올림 포함)와
+// 일치할 때만 유지하고, 아니면 문장을 삭제한다. 구간별 km는 trip_data에 없으므로 그런 서술도 함께 걸러진다.
+function stripUnverifiedKm(text, tripData) {
+  if (!text || !tripData) return text;
+  const allowed = [];
+  if (typeof tripData.totalDistanceKm === 'number') allowed.push(tripData.totalDistanceKm);
+  const dt = tripData.dayTotals;
+  const entries = Array.isArray(dt) ? dt : Object.values(dt ?? {});
+  for (const e of entries) {
+    const km = typeof e === 'number' ? e : e?.distanceKm;
+    if (typeof km === 'number') allowed.push(km);
+  }
+  if (!allowed.length) return text;
+  const matches = (x) => allowed.some((a) => Math.abs(a - x) <= 0.15 || Math.round(a) === x);
+  const r = rewriteSentences(text, (sentence) => {
+    for (const m of sentence.matchAll(/(\d+(?:\.\d+)?)\s*(?:km|킬로미터|㎞)/gi)) {
+      if (!matches(Number(m[1]))) return null;
+    }
+    return sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 트레쥴 값과 다른 km 서술 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
 // 2026-09-29(초안 대조): (1) "예산은 여행 스타일에 따라 유동적으로 계획하는 것이 좋다" — 예산·비용은 금지 주제인데
 // 금액 게이트는 숫자만 봐서 통과했다 → 예산·비용·저렴 등이 든 문장은 삭제. (2) "마젤란의 십자가 인근에 위치한
 // Cabana Restaurant" — 실제 십자가→Cabana는 차량 39분인데 "인근" 주장이 나갔다 → 두 스팟이 함께 나오는
@@ -1681,6 +1706,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripFabricatedDailyAverage(sanitized, tripData);
   sanitized = removeBannedPhrases(sanitized);
   sanitized = stripBudgetTalk(sanitized);
+  sanitized = stripUnverifiedKm(sanitized, tripData);
   sanitized = stripProximityClaims(sanitized, tripData);
   sanitized = neutralizeModeTotalTime(sanitized);
   sanitized = stripUnsourcedMoney(sanitized);
