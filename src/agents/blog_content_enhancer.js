@@ -1544,7 +1544,7 @@ function dropOrphanParagraphs(text, tripData = null) {
   const paragraphs = text.split(/\n{2,}/).filter((p) => {
     if (ORPHAN_PARAGRAPH_START.test(p) || isHeadingEcho(p)) { removed += 1; return false; }
     return true;
-  }).map((p) => {
+  }).map((p, pi) => {
     const sents = p.split(/(?<=[.!?])\s+/);
     const out = [];
     let prevRemoved = false;
@@ -1564,7 +1564,10 @@ function dropOrphanParagraphs(text, tripData = null) {
         antecedentMissing ||
         (SUBJECTLESS_START.test(sent) && !hasSpot(sent) && !spotSeenInParagraph)
       );
-      if (subjectless || (prevRemoved && (MOVE_START.test(sent) || NOUN_START.test(sent)))) { removed += 1; prevRemoved = true; continue; }
+      // 2026-09-30(초안: 개요가 "이로 인해 모든 장소 간 이동 시간 합계는 약 7.9시간…"으로 시작 — 앞 문장들이 게이트에
+      // 지워져 "이로 인해"가 가리킬 원인이 없음): 섹션 맨 앞 문장이 인과·지시 연결어로 시작하면 가리킬 앞 내용이 없다.
+      const danglingLead = pi === 0 && out.length === 0 && /^\s*(이로\s*인해|이로써|이에\s*따라|이\s*때문에|따라서|그러므로|그래서|이러한|이런)/.test(sent);
+      if (subjectless || danglingLead || (prevRemoved && (MOVE_START.test(sent) || NOUN_START.test(sent)))) { removed += 1; prevRemoved = true; continue; }
       prevRemoved = false;
       out.push(sent);
     }
