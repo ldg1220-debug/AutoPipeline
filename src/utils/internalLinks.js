@@ -60,6 +60,37 @@ const MIN_RELATED_POSTS_TO_SHOW = 3;
  * @returns {Promise<Array<{keyword,title,post_url,score}>>}
  */
 export async function findRelatedPosts(keyword, currentPostUrl, limit = INTERNAL_LINK_LIMIT, category = null) {
+  // D-108: 후보를 넉넉히 뽑아 실제 페이지가 살아 있는 것만(라벨=실제 글 제목) limit개 남긴다.
+  const candidates = await rankRelatedCandidates(keyword, currentPostUrl, limit * 4, category);
+  const live = [];
+  for (const c of candidates) {
+    if (live.length >= limit) break;
+    const title = await fetchLivePostTitle(c.post_url);
+    if (!title) { logger.warn(`[internalLinks] 관련 글 제외(삭제·접근 불가): ${c.post_url} (${c.keyword})`); continue; }
+    live.push({ ...c, title, keyword: title });
+  }
+  return live;
+}
+
+/** 페이지가 200이고 제목을 읽을 수 있으면 제목을, 아니면 null. 네트워크 실패도 null(카드 제외). */
+async function fetchLivePostTitle(url) {
+  try {
+    const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    if (res.status !== 200) return null;
+    // 삭제된 글이 홈으로 리다이렉트되는 경우 제외
+    const finalPath = new URL(res.url).pathname.replace(/\/+$/, '');
+    if (!/^\/(\d+|entry\/.+)$/.test(finalPath)) return null;
+    const html = await res.text();
+    const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+      ?? html.match(/<title>([^<]+)<\/title>/i)?.[1];
+    const t = og?.replace(/\s*::.*$/, '').trim();
+    return t ? t.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : null;
+  } catch {
+    return null;
+  }
+}
+
+async function rankRelatedCandidates(keyword, currentPostUrl, limit, category) {
   // 2026-09-29(초안 대조: /269를 새 HTML로 교체하면 그 글이 자기 자신 — 같은 키워드의 기존 글 — 을 관련 글로
   // 링크한다; 새 초안은 currentPostUrl이 없어 URL 비교로는 못 거른다): 같은 키워드의 글도 후보에서 제외한다.
   // 발행된 포스트 전체 조회 (자기 자신 제외). category가 있으면 keywords 테이블과
@@ -160,7 +191,7 @@ export function buildRelatedPostsHtml(relatedPosts) {
     .map(
       (p) =>
         `<a class="related-card" href="${p.post_url}" target="_blank" rel="noopener">` +
-        `<span class="related-card-kw">${p.keyword}</span>` +
+        (p.keyword && p.keyword !== p.title ? `<span class="related-card-kw">${p.keyword}</span>` : '') +
         `<span class="related-card-title">${p.title ?? p.keyword}</span>` +
         `</a>`
     )

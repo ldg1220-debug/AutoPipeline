@@ -1170,12 +1170,32 @@ async function main() {
     // 2026-09-29(작업지시서 §8): 기존 글(예: /269) URL을 살려 교체할 수 있도록 최종 HTML을 파일로도
     // 저장한다 — 티스토리 편집 화면(HTML 모드)에 붙여넣기용. 발행 경로가 "새 글"뿐이라 필요하다.
     for (const c of monetizedData.contents ?? []) {
-      const html = c.blog_draft?.monetized_html;
+      let html = c.blog_draft?.monetized_html;
       if (!html) continue;
       const slug = (c.blog_draft?.slug || c.keyword).replace(/[^a-zA-Z0-9가-힣-]+/g, '-');
       const htmlPath = `${outDir}/blog/html/${slug}.html`;
       try {
         await fs.promises.mkdir(path.dirname(htmlPath), { recursive: true });
+        // D-108: 티스토리는 HTML 모드로 붙인 data: URI 이미지를 제거해 빈칸이 된다 → 이미지는 파일로 저장하고
+        // 해당 블록(인포카드 등)은 뺀다. 수동 업로드 후 붙이도록 로그로 안내.
+        let imgIdx = 0;
+        const assetDir = `${outDir}/blog/html/${slug}_assets`;
+        const dataImg = /(<div class="info-card-wrap">\s*)?<img\b[^>]*?src="data:image\/(\w+);base64,([^"]+)"[^>]*>(\s*<\/div>)?/g;
+        const pending = [];
+        html = html.replace(dataImg, (m, open, ext, b64) => {
+          imgIdx += 1;
+          const file = `${assetDir}/${open ? 'info_card' : `image_${imgIdx}`}.${ext === 'jpeg' ? 'jpg' : ext}`;
+          pending.push({ file, b64 });
+          return '';
+        });
+        for (const { file, b64 } of pending) {
+          await fs.promises.mkdir(assetDir, { recursive: true });
+          await fs.promises.writeFile(file, Buffer.from(b64, 'base64'));
+          console.log(`  수동 업로드 필요: ${file}`);
+        }
+        // 티스토리 제목 칸은 HTML과 별개 — 수동 교체 때 같이 바꾸도록 파일 맨 위에 남긴다.
+        const titleText = (c.blog_draft?.title ?? '').replace(/--/g, '- -');
+        if (titleText) html = `<!-- TITLE: ${titleText} -->\n${html}`;
         await fs.promises.writeFile(htmlPath, html, "utf-8");
         console.log(`  ${htmlPath}`);
       } catch (err) {

@@ -1349,6 +1349,46 @@ function countFactNumbers(sections) {
   return sections.reduce((sum, s) => sum + ((s.body ?? '').match(FACT_NUMBER_PATTERN)?.length ?? 0), 0);
 }
 
+// D-108: 개수만 비교하면 "연간 500만 명" 같은 근거 없는 숫자 삭제(분·km 표기가 섞인 경우)까지 통째로 되돌린다.
+// 트레쥴 사실값(평점·리뷰수·구간 분·km·곳 수)이 지워졌을 때만 되돌린다. trip_data가 없으면 기존처럼 개수 비교.
+function collectFactTokens(sections) {
+  const out = [];
+  for (const sec of sections) {
+    const body = sec.body ?? '';
+    for (const m of body.matchAll(/★?\s*(\d\.\d)\s*점?/g)) out.push(m[1]);
+    for (const m of body.matchAll(/리뷰\s*([\d,]+)\s*개?/g)) out.push(m[1].replace(/,/g, ''));
+    for (const m of body.matchAll(/(\d+)\s*분/g)) out.push(m[1]);
+    for (const m of body.matchAll(/(\d+(?:\.\d+)?)\s*km/g)) out.push(m[1]);
+    for (const m of body.matchAll(/(\d+)\s*곳/g)) out.push(m[1]);
+  }
+  return out;
+}
+function tripFactValueSet(tripData) {
+  const set = new Set();
+  const add = (v) => { if (v != null && v !== '' && !Number.isNaN(Number(v))) { set.add(String(Number(v))); set.add(Number(v).toFixed(1)); } };
+  for (const sp of tripData?.spots ?? []) { add(sp.rating); add(sp.reviewCount); add(sp.toNextMinutes); }
+  const dt = tripData?.dayTotals;
+  for (const d of Array.isArray(dt) ? dt : Object.values(dt ?? {})) { add(d?.distanceKm); add(d?.spotCount); }
+  add(tripData?.totalDistanceKm); add(tripData?.spots?.length);
+  return set;
+}
+/** 검수 후 트레쥴 사실값이 사라졌으면 true. */
+function lostTripFacts(beforeSections, afterSections, tripData) {
+  const before = countFactNumbers(beforeSections);
+  const after = countFactNumbers(afterSections);
+  if (after >= before) return false;
+  if (!tripData?.spots?.length) return true;
+  const facts = tripFactValueSet(tripData);
+  const remain = new Map();
+  for (const t of collectFactTokens(afterSections)) remain.set(t, (remain.get(t) ?? 0) + 1);
+  for (const t of collectFactTokens(beforeSections)) {
+    const n = remain.get(t) ?? 0;
+    if (n > 0) { remain.set(t, n - 1); continue; }
+    if (facts.has(t) || facts.has(String(Number(t)))) return true; // 사라진 숫자가 사실값
+  }
+  return false;
+}
+
 async function pass4FactCheck(keyword, sections, tripData = null) {
   const fullText = sections.map((s) => `## ${s.heading}\n${s.body}`).join('\n\n');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
@@ -1411,7 +1451,7 @@ async function pass4FactCheck(keyword, sections, tripData = null) {
       // 숫자 근거 개수를 세어 줄었으면 검수 결과를 버리고 원본을 쓴다.
       const before = countFactNumbers(sections);
       const after  = countFactNumbers(result.sections);
-      if (after < before) {
+      if (lostTripFacts(sections, result.sections, tripData)) {
         logger.warn(`[blog_content_enhancer] Pass 4가 숫자 근거를 지움(${before}→${after}) → Pass 4 이전 본문 사용`);
         return sections;
       }
@@ -1504,7 +1544,7 @@ async function pass5GeminiReview(keyword, sections, today, tripData = null) {
       // 숫자 근거 개수를 세어 줄었으면 검수 결과를 버리고 Pass 4 결과(검수 전 본문)를 쓴다.
       const before = countFactNumbers(sections);
       const after  = countFactNumbers(result.sections);
-      if (after < before) {
+      if (lostTripFacts(sections, result.sections, tripData)) {
         logger.warn(`[blog_content_enhancer] Pass 5(${model})가 숫자 근거를 지움(${before}→${after}) → Pass 5 이전 본문 사용`);
         return { sections, issues: result.issues_found ?? [], verdict: 'reverted_number_loss' };
       }
