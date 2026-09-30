@@ -16,6 +16,7 @@ const HELP = `사용법: ab <명령> [키워드/인자]
 
   login                  티스토리 로그인 (npm run blog:login)
   draft <키워드>          초안만 생성, 발행 안 함   예) ab draft 세부 5박7일
+  text <키워드>           텍스트만 테스트(이미지 생성 안 함, 비용 절감)   예) ab text 세부 5박7일
   publish <키워드>        실제 발행(확인 질문 후)   예) ab publish 세부 5박7일
   auto                   자동 파이프라인(--auto)
   pull                   git pull origin main
@@ -29,6 +30,7 @@ const HELP = `사용법: ab <명령> [키워드/인자]
 const COMMANDS = {
   login:     () => script('tistory-login.js'),
   draft:     (rest) => script('run-blog-pipeline.js', '--force-keyword', rest.join(' '), '--draft-only'),
+  text:      (rest) => script('run-blog-pipeline.js', '--force-keyword', rest.join(' '), '--draft-only', '--no-assets'),
   publish:   (rest) => script('run-blog-pipeline.js', '--force-keyword', rest.join(' ')),
   auto:      () => script('run-blog-pipeline.js', '--auto'),
   pull:      () => ({ cmd: 'git', args: ['pull', 'origin', 'main'] }),
@@ -50,11 +52,11 @@ if (name === 'help' || !COMMANDS[name]) {
   console.log(HELP);
   process.exit(name && name !== 'help' ? 1 : 0);
 }
-if ((name === 'draft' || name === 'publish') && rest.filter((r) => !r.startsWith('--')).length === 0) {
+if ((name === 'draft' || name === 'publish' || name === 'text') && rest.filter((r) => !r.startsWith('--')).length === 0) {
   console.error(`키워드가 필요합니다. 예) ab ${name} 세부 5박7일`);
   process.exit(1);
 }
-if (rest.some((r) => (name === 'draft' || name === 'publish') && r.startsWith('--'))) {
+if (rest.some((r) => (name === 'draft' || name === 'publish' || name === 'text') && r.startsWith('--'))) {
   console.error(`키워드에 --옵션을 섞지 마세요: ${rest.join(' ')}`);
   process.exit(1);
 }

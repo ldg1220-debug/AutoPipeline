@@ -37,7 +37,11 @@ const args = process.argv.slice(2);
 // 2026-09-29(실사고: `--draft-only:` — 끝에 콜론이 붙어 플래그가 인식되지 않고 발행 단계까지 진행, 그날 이미
 // 발행된 키워드라 발행기가 건너뛰어 피해는 없었음): 모르는 `--옵션`이 있으면 발행 전에 중단한다.
 // (--force-keyword/--force-category의 값은 `--`로 시작하지 않으므로 여기서 걸리지 않는다.)
-const KNOWN_FLAGS = new Set(['--auto', '--draft-only', '--force-category', '--force-keyword', '--single']);
+const KNOWN_FLAGS = new Set(['--auto', '--draft-only', '--force-category', '--force-keyword', '--single', '--no-assets']);
+if (args.includes('--no-assets') && !args.includes('--draft-only')) {
+  console.error('[blog:pipeline] 중단: --no-assets는 이미지 없는 테스트용이라 --draft-only와 함께만 쓸 수 있습니다(이미지 없는 글이 실발행되는 것을 막음).');
+  process.exit(1);
+}
 const unknownFlags = args.filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a));
 if (unknownFlags.length) {
   console.error(`[blog:pipeline] 중단: 알 수 없는 옵션 ${unknownFlags.map((f) => `"${f}"`).join(', ')}\n` +
@@ -68,6 +72,9 @@ const forceCategory = forceCatIdx !== -1
 // monetized_{date}.json까지만 만든다 — cli.js 대화형 런처의 "초안만 만들기" 기본값용
 // (지시서 2026-09-16 §4: "기본값을 초안만으로 두세요 — 실수로 발행되는 것보다 낫다").
 const draftOnly = args.includes('--draft-only');
+// --no-assets: Part 3(썸네일 이미지 생성·정보카드·사진 검색)를 건너뛴다 — 본문 게이트만 반복 테스트할 때 이미지 생성 비용을 아끼려는 용도.
+// 결과 HTML엔 이미지·정보카드가 없다(발행용이 아님).
+const noAssets = args.includes('--no-assets');
 // --single: --force-keyword와 함께 쓰면 Part 1의 자동 시드 채굴(generateTravelSeeds→
 // mineKeywords, 실제 자동완성 API + DB 보충)을 완전히 건너뛰고 그 키워드 하나만 처리한다.
 // 실측(cli.js 사용자 피드백, 2026-09-17): "하노이"만 지정했는데 targetCount(=postsPerDay×2)
@@ -1117,9 +1124,14 @@ async function main() {
   // Part 3: Asset Builder
   let assetData;
   try {
-    assetData = await buildAllAssets(qaData);
-    await writeJSON(`${outDir}/blog/assets_${date}.json`, assetData);
-    logger.info('[blog:pipeline] Part 3 완료.');
+    if (noAssets) {
+      logger.info('[blog:pipeline] --no-assets: Part 3(이미지·정보카드) 건너뜀 — 발행용 초안이 아님');
+      assetData = qaData;
+    } else {
+      assetData = await buildAllAssets(qaData);
+      await writeJSON(`${outDir}/blog/assets_${date}.json`, assetData);
+      logger.info('[blog:pipeline] Part 3 완료.');
+    }
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 3 실패 (계속 진행): ${err.message}`);
     assetData = draftData;

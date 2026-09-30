@@ -14,6 +14,7 @@ const node = (file, ...args) => ({ cmd: process.execPath, args: [path.join(ROOT,
 const ITEMS = [
   { label: '블로그 로그인 (티스토리)',                       build: () => node('tistory-login.js') },
   { label: 'git pull origin main',                            build: () => ({ cmd: 'git', args: ['pull', 'origin', 'main'] }) },
+  { label: '텍스트만 테스트: 세부 5박7일 (이미지 생성 안 함 · 비용 절감)', build: () => node('run-blog-pipeline.js', '--force-keyword', '세부 5박7일', '--draft-only', '--no-assets') },
   { label: '테스트: 세부 5박7일 초안만 (발행 안 함)',        build: () => node('run-blog-pipeline.js', '--force-keyword', '세부 5박7일', '--draft-only') },
   { label: '초안만 생성 — 키워드 직접 입력 (발행 안 함)',    ask: '키워드 (예: 오사카 2박3일)',
     build: (v) => node('run-blog-pipeline.js', '--force-keyword', v, '--draft-only') },
