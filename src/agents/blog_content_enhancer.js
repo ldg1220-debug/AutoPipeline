@@ -669,22 +669,29 @@ function stripUnverifiedModeMinutes(text, tripData) {
       const PLACE = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크';
       const refersToPlace = new RegExp(`이곳|도착(할|한|해|하)|이 (${PLACE})|(${PLACE})(을|를|에|은|는|으로|에서)`).test(sentence);
       const hasDirection = /(다음|이후|다른|출발|까지|부터|에서)/.test(sentence);
-      return refersToPlace && !hasDirection && [...sentence.matchAll(occurrence)].length ? null : sentence;
+      // 2026-09-30(시드니 초안: "타롱가 주 … 평점 4.5점… 대중교통으로 약 64분이 소요되며, 호주 고유의 동물들과…" — 64분은 타롱가에서
+      // *다음으로* 가는 구간인데 주어 없이 수단+N분으로 시작해 도착시간처럼 읽힘): 스팟 이름도 지시 표현도 없이 수단어로 시작하는
+      // 수단+N분 문장도 방향을 알 수 없으므로(방향 단서 없으면) 삭제한다.
+      const leadsWithMode = /^\s*(도보|걸어서|차량|차로|대중교통|버스|지하철|전철)/.test(sentence);
+      const hasOcc = [...sentence.matchAll(occurrence)].length > 0;
+      return hasOcc && !hasDirection && (refersToPlace || leadsWithMode) ? null : sentence;
     }
     let relevant = legs.filter((l) => mentioned.includes(l.from) || mentioned.includes(l.to));
     // 2026-09-30(발행글 대조: "시드니 하버 브리지까지의 이동은 차량으로 약 38분"(실제는 브리지에서 페더데일로 가는 38분),
     // "Sydney Tower Eye … 대중교통으로 12분이면 도착"(실제는 타워에서 차이나타운 12분) — 도착 표현인데 출발 구간): 스팟이 하나이고
     // 도착 단서(까지·도착·접근)만 있으면 그 스팟으로 *들어오는* 구간, 출발 단서(다음·이후·출발·다른)만 있으면 *나가는* 구간과 대조한다.
     if (mentioned.length === 1) {
-      const arrival = /(까지|도착|접근)/.test(sentence);
-      const departure = /(다음|이후|출발|다른)/.test(sentence);
+      // "이후"는 순서 표현이라 출발 단서가 아니다(회귀: "이후 차로 37분 거리의 수바-배즈바스 비치로 이동해"는 도착 구간).
+      // "N분 거리의 X"·"X(으)로 이동/향"도 X로 들어오는 구간이다.
+      const arrival = /(까지|도착|접근|(으)?로\s*(이동|향)|분\s*거리의)/.test(sentence);
+      const departure = /(다음|출발|다른)/.test(sentence);
       if (arrival && !departure) relevant = legs.filter((l) => l.to === mentioned[0]);
       else if (departure && !arrival) relevant = legs.filter((l) => l.from === mentioned[0]);
     }
     // 2026-09-30(초안: "Sage Health Spa … 이곳은 차로 이동 시 37분", "산토니뇨 성당 … 대중교통을 이용해 29분" — 둘 다 그
     // 장소에서 *다음으로* 가는 구간인데 그 장소까지 가는 시간처럼 읽힘; Pass 5가 잡았으나 가드에 되돌려짐): 스팟이 하나뿐이고
     // 방향 단서(다음·이후·다른·출발·까지·부터·에서)가 없는 "수단+N분" 문장은 방향이 모호하므로 삭제.
-    if (mentioned.length === 1 && !/(다음|이후|다른|출발|까지|부터|에서)/.test(sentence) && [...sentence.matchAll(occurrence)].length) return null;
+    if (mentioned.length === 1 && !/(다음|이후|다른|출발|까지|부터|에서|(으)?로\s*(이동|향)|분\s*거리의)/.test(sentence) && [...sentence.matchAll(occurrence)].length) return null;
     for (const m of sentence.matchAll(occurrence)) {
       const mode = TRANSPORT_WORD_TO_MODE[m[1]];
       const minutes = Number(m[2]);
