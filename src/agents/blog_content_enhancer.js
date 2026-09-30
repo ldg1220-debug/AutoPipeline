@@ -477,7 +477,7 @@ const FORBIDDEN_SECTION_PATTERN = /숙소|가격대|예산|비용\s*산정|경�
 // 섹션도 제거한다 — 가격 비교를 부르는 각도인데 가격 데이터는 없다. 경제 글의 "금리 비교" 같은 제목은 건드리지
 // 않도록 trip_data가 있을 때만 적용.
 // D-111: 액티비티·야시장·주의사항 각도는 trip_data에 근거가 없어 호핑투어·야시장·지프니·여행 보험 같은 창작이 붙는다.
-const TRAVEL_BANNED_ANGLE_PATTERN = /패키지|개별\s*예약|자유\s*여행\s*vs|\bvs\b|항공|비행기|여행사|비교|액티비티|야시장|주의\s*사항|유의\s*사항|준비물|꿀팁/i;
+const TRAVEL_BANNED_ANGLE_PATTERN = /패키지|개별\s*예약|자유\s*여행\s*vs|\bvs\b|항공|비행기|여행사|비교|액티비티|야시장|주의\s*사항|유의\s*사항|준비물|꿀팁|놓치기|놓치지|꼭\s*알아야|알아두면/i;
 
 function sanitizeOutlineForbidden(outline, tripData = null) {
   const isBanned = (h) => FORBIDDEN_SECTION_PATTERN.test(h ?? '') ||
@@ -928,7 +928,7 @@ function stripWrongDayMentions(text, tripData) {
 // 게이트②④: "오전 9시"·"오후 3시"·"저녁 7시" 같은 시각 표현은 trip_data에 없다
 // (있는 건 구간 이동 "분"뿐) — LLM이 지어낸 시각이 섞이면 안 되므로 문장째 삭제.
 // D-110: "저녁에는 Cabana Restaurant에서 식사…"처럼 시각 없이 끼니·시간대를 못박는 문장도 데이터에 없다.
-const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}|(^|[\s,])(아침|점심|저녁|밤)(에는|엔)\s|해가\s*(지기\s*전|질\s*무렵)|일몰|석양|야경/;
+const TIME_OF_DAY_PATTERN = /(오전|오후|저녁|새벽)\s*\d{1,2}\s*시|\d{1,2}:\d{2}|(^|[\s,])(아침|점심|저녁|밤)(에는|엔)\s|해가\s*(지기\s*전|질\s*무렵)|해질녘|일몰|석양|노을|황혼|야경/;
 function stripTimeOfDayMentions(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
   const r = rewriteSentences(text, (x) => (TIME_OF_DAY_PATTERN.test(x) ? null : x));
@@ -1704,6 +1704,18 @@ function dropOrphanParagraphs(text, tripData = null) {
     }
     return out.join(' ');
   }).filter((p) => p.trim());
+  // D-112: 이름 문장이 지워져 본문이 사라진 "**스팟 — 소제목**" 문단(다음 문단이 그 스팟을 말하지 않거나 끝)은 삭제하고,
+  // 섹션 첫 문단이 "현재까지도/오늘날/여전히…"로 시작하는데 스팟 이름이 없으면 주어를 잃은 파편이므로 삭제한다.
+  if (spotNames.length) {
+    const BOLD_ONLY = /^\s*\*\*[^*]+\*\*\s*$/;
+    for (let i = paragraphs.length - 1; i >= 0; i--) {
+      if (!BOLD_ONLY.test(paragraphs[i])) continue;
+      const mention = spotNames.find((n) => paragraphs[i].includes(n));
+      const next = paragraphs[i + 1];
+      if (!next || BOLD_ONLY.test(next) || (mention && !next.includes(mention))) { removed += 1; paragraphs.splice(i, 1); }
+    }
+    if (paragraphs[0] && /^\s*(현재까지도?|지금까지도?|오늘날|여전히|당시에?는?)\s/.test(paragraphs[0]) && !hasSpot(paragraphs[0])) { removed += 1; paragraphs.shift(); }
+  }
   // 2026-09-29(초안: 맛집 섹션 중간의 "세련된 인테리어와 함께 다양한 음료를 즐길 수 있어…" — 어느 가게인지 없음):
   // 스팟 소개형 섹션(문단 4개 이상)에서 첫·마지막(도입·맺음)이 아닌 중간 문단이 스팟 이름도 숫자도 없으면
   // 이름 문단이 지워진 파편이므로 삭제.
@@ -1899,6 +1911,10 @@ function stripUngroundedClaims(text, tripData) {
     for (const m of sentence.matchAll(INVENTED)) if (!names.includes(m[0].replace(/\s+/g, ' '))) return null;
     if (/(하루에?|일)\s*약?\s*\d+(\s*[~\-]\s*\d+)?\s*시간\s*(의|정도|가량)?\s*(일정|동안|소요)/.test(sentence)) return null;
     if (/연중\s*내내|일\s*년\s*내내/.test(sentence)) return null;
+    // D-112: 데이터에 없는 풍경 묘사·예약/운행 단정
+    if (/하얀\s*모래|새하얀|맑고\s*푸른|에메랄드|푸른\s*바다/.test(sentence)) return null;
+    if (/예약(은|이)?\s*(필수|꽉|마감)|미리\s*예약|예약해\s*두|예고\s*없이|시간이\s*변동/.test(sentence)) return null;
+    if (/이동하는\s*동안[^.]*(감상|풍경|즐)/.test(sentence)) return null;
     if (/이동\s*시간이\s*(길지\s*않|짧)/.test(sentence)) return null;
     if (/(해변가|바닷가|해안가)에?\s*위치|바다\s*(풍경|전망|뷰)/.test(sentence)) return null;
     if (/(주요\s*)?(관광지|명소|장소)\s*(\d+)\s*곳/.test(sentence)) {
