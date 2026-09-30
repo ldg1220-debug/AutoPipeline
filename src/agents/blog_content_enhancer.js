@@ -1571,7 +1571,21 @@ function dropOrphanParagraphs(text, tripData = null) {
       }
     }
   }
-  if (removed) logger.warn(`[blog_content_enhancer] 주어 없는 파편 ${removed}개 삭제`);
+  // 2026-09-30(초안: 앞 문단이 지워진 뒤 "이어서 Sage Health Spa…", "다음으로, 마젤란의 십자가는…"처럼 순서
+  // 연결어만 남음): 그 문단보다 앞에 스팟 이름이 나온 문단이 하나도 없으면 연결어가 가리킬 앞 내용이 없으므로,
+  // 문장은 살리고 연결어만 뗀다.
+  if (spotNames.length) {
+    const CONNECTOR = /^(\s*)(이어서|다음으로|그다음(?:으로)?|그리고|또한|한편)[,\s]+/;
+    let spotSeenBefore = false;
+    for (let i = 0; i < paragraphs.length; i++) {
+      if (!spotSeenBefore && CONNECTOR.test(paragraphs[i])) {
+        paragraphs[i] = paragraphs[i].replace(CONNECTOR, '$1');
+        removed += 1;
+      }
+      if (hasSpot(paragraphs[i])) spotSeenBefore = true;
+    }
+  }
+  if (removed) logger.warn(`[blog_content_enhancer] 주어 없는 파편·끊긴 연결어 ${removed}개 정리`);
   return paragraphs.join('\n\n');
 }
 
