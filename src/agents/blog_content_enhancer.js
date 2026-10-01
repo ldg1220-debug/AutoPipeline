@@ -1655,7 +1655,7 @@ function dropOrphanParagraphs(text, tripData = null) {
   // 2026-09-29(초안 대조: "스페인 식민 통치 시기에 건설된 이 요새는…" — 이름 문장이 지워져 주어가 없는데
   // "이곳/이 레스토랑"으로 시작하지 않아 통과): 시작 위치와 무관하게 "이 (요새|성당|십자가|…)은/는" 같은 지시
   // 명사구가 있고 그 문장·바로 앞 문장에 스팟 이름이 없으면 주어 없는 파편으로 본다.
-  const PLACE_NOUN = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크';
+  const PLACE_NOUN = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크|음식점|숙소|호텔|마켓|박물관|장소|곳';
   const SUBJECTLESS_START = new RegExp(`^\\s*(이곳|이 (${PLACE_NOUN})|평점\\s*\\d|★\\s*\\d)`);
   // 2026-09-30(초안: "관광객들은 이곳에서 필리핀의 역사를 느낄 수 있으며, 평점 4.4점…" — 문장 시작이 아니어서 통과): "이곳"도 위치 무관.
   const DEMONSTRATIVE_ANYWHERE = new RegExp(`이곳(은|이|에서|의|을)|이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
@@ -1686,7 +1686,17 @@ function dropOrphanParagraphs(text, tripData = null) {
       const demIdx = demMatch ? demMatch.index : -1;
       const spotIdxs = spotNames.map((n) => sent.indexOf(n)).filter((i) => i >= 0);
       const firstSpotIdx = spotIdxs.length ? Math.min(...spotIdxs) : -1;
-      const antecedentMissing = demIdx >= 0 && !spotSeenInParagraph && (firstSpotIdx === -1 || firstSpotIdx > demIdx);
+      let antecedentMissing = demIdx >= 0 && !spotSeenInParagraph && (firstSpotIdx === -1 || firstSpotIdx > demIdx);
+      // 2026-10-01(세부 초안: "마젤란의 십자가… 이곳은 평점…. 이 음식점은 평점 4.6점… 이 숙소는 평점 4.6점…" — 음식점·숙소 이름
+      // 문장이 지워졌는데 같은 문단에 다른 종류(명소) 스팟이 있어 통과): "이 음식점/숙소/스파/카페"는 같은 종류의 스팟이
+      // 앞(같은 문단의 남은 문장)에 있어야 가리킬 대상이 있다.
+      const kindDem = sent.match(/이\s*(음식점|식당|레스토랑|숙소|호텔|스파|카페)(은|는|이|가|에서|의)/);
+      if (kindDem && !antecedentMissing && tripData?.spots?.length) {
+        const wantKind = { 음식점: '식사', 식당: '식사', 레스토랑: '식사', 숙소: '숙소', 호텔: '숙소', 스파: '스파', 카페: '카페' }[kindDem[1]];
+        const sameKindNames = tripData.spots.filter((sp) => inferSpotKind(sp) === wantKind || (wantKind === '식사' && sp.category === '음식점')).map((sp) => sp.name);
+        const beforeText = out.join(' ') + ' ' + sent.slice(0, kindDem.index);
+        if (!sameKindNames.some((n) => n && beforeText.includes(n))) antecedentMissing = true;
+      }
       // 2026-09-30(초안: 섹션이 "요새 내부의 전시물과 건축 양식은…"으로 시작 — 요새 이름 문단이 지워졌는데 "이곳/이 요새"가
       // 아니라 명사로 바로 시작해 통과): 섹션 맨 앞 문장이 장소 명사로 시작하는데 앞에 스팟 이름이 없으면 파편이다.
       const bareNounLead = pi === 0 && out.length === 0 && NOUN_START.test(sent) && !hasSpot(sent);
@@ -1965,6 +1975,9 @@ function stripUngroundedClaims(text, tripData) {
     for (const m of sentence.matchAll(INVENTED)) if (!names.includes(m[0].replace(/\s+/g, ' '))) return null;
     if (/(하루에?|일)\s*약?\s*\d+(\s*[~\-]\s*\d+)?\s*시간\s*(의|정도|가량)?\s*(일정|동안|소요)/.test(sentence)) return null;
     if (/연중\s*내내|일\s*년\s*내내/.test(sentence)) return null;
+    // 2026-10-01(세부 초안: "이 코스는 특히 가족 여행에 적합한 일정… 다양한 연령층", "자연 속에서 여유를 즐길 수 있는 장소(도교 사원)"): 대상 적합성·자연 묘사는 데이터에 없다.
+    if (/(가족|연령층|커플|부모|아이|어린이|신혼)[^.]*(적합|어울|안성맞춤|추천|함께하는|즐거운)/.test(sentence)) return null;
+    if (/자연\s*(속|의\s*아름다움|미)/.test(sentence)) return null;
     // 2026-10-01(작업지시서 §4): "…까지 대중교통과 차량을 이용해 이동"처럼 한 구간에 두 수단을 섞은 문장은 실제 구간 수단과 일치할 수 없다.
     if (/(대중교통|차량|도보|버스|지하철)(과|와)\s*(대중교통|차량|도보|버스|지하철)(을|를)\s*(이용|활용)[^.]*이동/.test(sentence)) return null;
     // D-112: 데이터에 없는 풍경 묘사·예약/운행 단정
