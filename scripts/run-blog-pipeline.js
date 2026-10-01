@@ -620,6 +620,11 @@ async function checkAndPromptMissingLinks(selectedItems) {
 async function main() {
   const start = Date.now();
   logger.info('[blog:pipeline] ===== 블로그 파이프라인 시작 =====');
+  // D-113: .env가 안 읽히면(다른 폴더에서 실행·파일 없음) 키 없이 빈 초안 → QA 반려 → 재작성이 돌며 원인이 가려진다. 즉시 중단.
+  if (!config.openai?.apiKey) {
+    console.error('[blog:pipeline] 중단: OPENAI_API_KEY가 없습니다. 프로젝트 폴더(AutoPipeline)의 .env 파일과 현재 위치를 확인하세요. (메뉴 8번 = 환경변수 확인)');
+    process.exit(1);
+  }
   if (forceKeyword) logger.info(`[blog:pipeline] --force-keyword: "${forceKeyword}" (카테고리: ${forceCategory})`);
 
   // Part 1: Keyword Miner
