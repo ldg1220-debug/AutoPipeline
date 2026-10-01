@@ -782,7 +782,7 @@ function stripProximityClaims(text, tripData) {
 // 여행을 계획할 수 있다"처럼 비교 대상 없는 독립 부사 "보다 + 명사를" 문장은 비문 파편이라 삭제.
 function stripFillerAdvice(text) {
   if (!text) return text;
-  const MISSED = /(놓치(는|기 쉬운|지 말아야 (할|하는))|간과(하기 쉬운|하는|되기 쉬운))\s*(부분|점|포인트|장소|곳|몇 가지)?/;
+  const MISSED = /(놓치(는|기 쉬운|지 말아야 (할|하는))|간과(하기 쉬운|하는|되기 쉬운|할 수 있는|할 만한))\s*(부분|점|포인트|장소|곳|몇 가지)?/;
   const TRANSIT_ADVICE = /대중교통(을|의)\s*(적극(적으로)?\s*)?(활용|이용하여|이용해)|대중교통(을|의)\s*적극/;
   const BARE_BODA = /(^|\s)보다\s+[가-힣]{1,8}(을|를)\s/;
   // 2026-09-30(Cowork 지시서): "방문 전 각 장소의 운영 정보를 확인하여 … 추천한다/좋다" 류 상투 안내 문장 삭제 —
