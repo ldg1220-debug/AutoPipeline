@@ -1767,6 +1767,60 @@ function dropOrphanParagraphs(text, tripData = null) {
   return paragraphs.join('\n\n');
 }
 
+// 2026-10-01(작업지시서 "종류별 코드 소개 블록"): 장소 종류별(명소·섬/해변·식사·스파) 순위를 trip_data 값만으로, 고정 문장 틀로 만든다.
+// 형용사·분위기·메뉴 묘사 없음. 해당 종류가 없으면 줄 생략, 줄이 2개 미만이면 섹션 생략. 마지막 줄에 평점 출처를 글 전체에서 한 번만 밝힌다.
+function buildKindBlocksBody(tripData) {
+  const spots = tripData?.spots ?? [];
+  if (spots.length < 4) return '';
+  const byDay = groupSpotsByDay(spots);
+  const fmt = (sp) => {
+    const parts = [];
+    if (typeof sp.rating === 'number') parts.push(`★${sp.rating}`);
+    if (typeof sp.reviewCount === 'number') parts.push(`리뷰 ${sp.reviewCount.toLocaleString()}`);
+    parts.push(`${sp.day ?? 1}일차`);
+    return `${sp.name}(${parts.join(' · ')})`;
+  };
+  const byReviews = (a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+  const ofKinds = (kinds) => spots.filter((sp) => kinds.includes(inferSpotKind(sp)));
+  const lines = [];
+
+  const sights = ofKinds(['명소', '유적', '사원·성당', '시장']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
+  if (sights.length >= 2) {
+    lines.push(`리뷰가 가장 많은 명소는 ${fmt(sights[0])}입니다. 뒤를 이어 ${sights.slice(1).map(fmt).join(', ')} 순입니다.`);
+  }
+
+  const islands = ofKinds(['섬']);
+  const beaches = ofKinds(['해변']);
+  if (islands.length || beaches.length) {
+    const describe = (sp) => {
+      const list = byDay.get(sp.day ?? 1) ?? [];
+      const i = list.indexOf(sp);
+      const prev = i > 0 ? list[i - 1] : null;
+      return prev && (prev.toNextMode === 'boat' || isIslandName(sp.name)) ? `${sp.name}(${sp.day ?? 1}일차, ${prev.name}에서 배편)` : `${sp.name}(${sp.day ?? 1}일차)`;
+    };
+    const bits = [];
+    if (islands.length) bits.push(`섬은 ${islands.map(describe).join(', ')}`);
+    if (beaches.length) bits.push(`해변은 ${beaches.map((sp) => `${sp.name}(${sp.day ?? 1}일차)`).join(', ')}`);
+    lines.push(`${bits.join(', ')}입니다.`);
+  }
+
+  const meals = ofKinds(['식사', '카페']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
+  if (meals.length >= 2) lines.push(`리뷰가 많은 식사 장소 ${meals.length}곳은 ${meals.map(fmt).join(', ')}입니다.`);
+
+  const spas = ofKinds(['스파']).filter((sp) => typeof sp.rating === 'number')
+    .sort((a, b) => b.rating - a.rating || byReviews(a, b)).slice(0, 3);
+  if (spas.length >= 2) lines.push(`평점이 높은 스파는 ${spas.map(fmt).join(', ')} 순입니다.`);
+
+  if (lines.length < 2) return '';
+  const src = String(tripData.ratingSource ?? '').trim();
+  if (src) {
+    const label = /google/i.test(src) ? 'Google 지도' : /kakao/i.test(src) ? '카카오맵' : src;
+    const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    lines.push(`평점·리뷰 수는 ${label} 기준입니다(조회일 ${today}).`);
+  }
+  return lines.join('\n\n');
+}
+
 // 2026-09-30(실행 로그 3회 연속: 아웃라인 변동으로 LLM 산문 섹션이 개요 하나뿐 — 본문 1,583/2,618/1,605자):
 // LLM 산문이 얇게 나와도 글이 최소한의 읽을거리를 갖도록, trip_data 값만으로 "코스 한눈에 보기" 섹션을 코드로
 // 만든다. 지어낼 여지가 없고(숫자·이름만), 게이트를 거치지 않는 코드 생성 블록이다. 끄려면 이 함수가 ''를 반환하게.
@@ -1911,6 +1965,8 @@ function stripUngroundedClaims(text, tripData) {
     for (const m of sentence.matchAll(INVENTED)) if (!names.includes(m[0].replace(/\s+/g, ' '))) return null;
     if (/(하루에?|일)\s*약?\s*\d+(\s*[~\-]\s*\d+)?\s*시간\s*(의|정도|가량)?\s*(일정|동안|소요)/.test(sentence)) return null;
     if (/연중\s*내내|일\s*년\s*내내/.test(sentence)) return null;
+    // 2026-10-01(작업지시서 §4): "…까지 대중교통과 차량을 이용해 이동"처럼 한 구간에 두 수단을 섞은 문장은 실제 구간 수단과 일치할 수 없다.
+    if (/(대중교통|차량|도보|버스|지하철)(과|와)\s*(대중교통|차량|도보|버스|지하철)(을|를)\s*(이용|활용)[^.]*이동/.test(sentence)) return null;
     // D-112: 데이터에 없는 풍경 묘사·예약/운행 단정
     if (/하얀\s*모래|새하얀|맑고\s*푸른|에메랄드|푸른\s*바다/.test(sentence)) return null;
     if (/예약(은|이)?\s*(필수|꽉|마감)|미리\s*예약|예약해\s*두|예고\s*없이|시간이\s*변동/.test(sentence)) return null;
@@ -2284,6 +2340,12 @@ async function enhanceBlogDraft(content) {
   if (glanceBody && !finalSections.some((sec) => /한눈에/.test(sec.heading ?? ''))) {
     const overviewIdx = finalSections.findIndex((sec) => /개요|소개/.test(sec.heading ?? ''));
     finalSections.splice(overviewIdx >= 0 ? overviewIdx + 1 : 0, 0, { level: 2, heading: '코스 한눈에 보기', body: glanceBody });
+  }
+  // 종류별 순위 블록(코드 생성) — 한눈에 보기 바로 뒤, 일자 카드 앞.
+  const kindBody = buildKindBlocksBody(tripData);
+  if (kindBody && !finalSections.some((sec) => /종류별/.test(sec.heading ?? ''))) {
+    const glanceIdx = finalSections.findIndex((sec) => /한눈에/.test(sec.heading ?? ''));
+    finalSections.splice(glanceIdx >= 0 ? glanceIdx + 1 : 0, 0, { level: 2, heading: '종류별 장소 순위', body: kindBody });
   }
   if (tripData?.spots?.length) {
     const numeric = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;

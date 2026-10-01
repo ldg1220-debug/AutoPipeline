@@ -302,7 +302,8 @@ function buildTldrBulletsFromTripData(tripData) {
 
   // ratingSource(2026-09-15 확인 필드, 예: "Google"/"Kakao")가 있으면 평점 옆에 출처
   // 표기 — 이전 지시서 지적("무표기가 제일 위험", B-4) 대응. 없으면 생략.
-  const sourceSuffix = tripData.ratingSource ? `, ${tripData.ratingSource}` : '';
+  // 2026-10-01: 항목마다 ", google"을 붙이지 않는다 — 출처는 "종류별 장소 순위" 섹션에서 글 전체에 한 번만 밝힌다.
+  const sourceSuffix = '';
   const route = spots
     .map((s) => {
       const ratingPart = (typeof s.rating === 'number' && typeof s.reviewCount === 'number')
@@ -367,8 +368,7 @@ function formatToNext(spot, straightLine) {
 
 function formatRating(spot, ratingSource = null) {
   if (typeof spot.rating !== 'number') return '-';
-  const sourceSuffix = ratingSource ? `, ${ratingSource}` : '';
-  const reviewPart = typeof spot.reviewCount === 'number' ? ` (${spot.reviewCount.toLocaleString()}${sourceSuffix})` : (ratingSource ? ` (${ratingSource})` : '');
+  const reviewPart = typeof spot.reviewCount === 'number' ? ` (${spot.reviewCount.toLocaleString()})` : '';
   return `★${spot.rating}${reviewPart}`;
 }
 
