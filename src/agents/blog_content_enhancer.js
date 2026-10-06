@@ -1858,7 +1858,7 @@ function buildCourseGlanceBody(tripData) {
     list.slice(0, -1).forEach((sp, i) => {
       if (isBoatLeg(sp, list[i + 1])) { boatCount += 1; return; }
       if (typeof sp.toNextMinutes !== 'number') return;
-      legCount += 1; totalMin += sp.toNextMinutes;
+      if (tripData.distanceSource !== 'straight') { legCount += 1; totalMin += sp.toNextMinutes; }
       const key = sp.toNextMode ?? null;
       byMode.set(key, (byMode.get(key) ?? 0) + 1);
     });
@@ -1905,8 +1905,9 @@ function buildCodeFaqs(tripData, keyword) {
   const spots = tripData?.spots ?? [];
   if (!spots.length) return [];
   const faqs = [];
-  const totalMin = spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
-  const legCount = spots.filter((x) => typeof x.toNextMinutes === 'number').length;
+  const straightFaq = tripData.distanceSource === 'straight';
+  const totalMin = straightFaq ? 0 : spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
+  const legCount = straightFaq ? 0 : spots.filter((x) => typeof x.toNextMinutes === 'number').length;
   if (typeof tripData.totalDistanceKm === 'number') {
     faqs.push({
       q: `${keyword} 코스의 총 이동 거리는?`,
@@ -2361,6 +2362,11 @@ async function enhanceBlogDraft(content) {
   const origSectionCount = finalSections.length; // 아래 삭제 후에도 FAQ의 capped 인덱스를 유지
   // "코스 한눈에 보기"는 삭제·정리 게이트를 다 통과한 뒤 코드가 직접 끼워 넣는다(개요 바로 뒤).
   const glanceBody = buildCourseGlanceBody(tripData);
+  // D-122: LLM 아웃라인이 같은 제목("코스 한눈에 보기")을 만들면 그 LLM 섹션은 버리고 코드 블록만 쓴다.
+  if (glanceBody) {
+    const llmIdx = finalSections.findIndex((sec) => /한눈에/.test(sec.heading ?? ''));
+    if (llmIdx >= 0) finalSections.splice(llmIdx, 1);
+  }
   if (glanceBody && !finalSections.some((sec) => /한눈에/.test(sec.heading ?? ''))) {
     const overviewIdx = finalSections.findIndex((sec) => /개요|소개/.test(sec.heading ?? ''));
     finalSections.splice(overviewIdx >= 0 ? overviewIdx + 1 : 0, 0, { level: 2, heading: '코스 한눈에 보기', body: glanceBody });

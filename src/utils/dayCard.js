@@ -54,13 +54,13 @@ export function inferSpotKind(spot) {
   return null;
 }
 
-export function buildDaySubtitle(daySpots) {
+export function buildDaySubtitle(daySpots, straight = false) {
   const kinds = [];
   for (const sp of daySpots) {
     const k = inferSpotKind(sp);
     if (k && !kinds.includes(k)) kinds.push(k);
   }
-  const total = dayLegMinutes(daySpots);
+  const total = straight ? 0 : dayLegMinutes(daySpots);
   const kindPart = kinds.join(' · ');
   const movePart = total > 0 ? `(이동 ${total}분)` : '';
   return [kindPart, movePart].filter(Boolean).join(' ');
@@ -70,9 +70,12 @@ export function buildDayPoints(tripData, day) {
   const byDay = groupByDay(tripData.spots);
   const daySpots = byDay.get(day) ?? [];
   const hasBoat = daySpots.slice(0, -1).some((sp, i) => isBoatLeg(sp, daySpots[i + 1]));
-  const legs = daySpots.slice(0, -1).filter((sp, i) => typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, daySpots[i + 1]));
-  const total = dayLegMinutes(daySpots);
-  const totals = [...byDay.values()].map(dayLegMinutes);
+  // D-122: 직선거리(distanceSource 'straight') 코스는 구간 시간·수단이 추정값이라 표의 "다음 이동"을 "-"로 두는데,
+  // 부제·포인트가 같은 분을 쓰면 서로 어긋난다(도쿄 초안) — 시간 기반 문구를 모두 생략한다.
+  const straight = tripData.distanceSource === 'straight';
+  const legs = straight ? [] : daySpots.slice(0, -1).filter((sp, i) => typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, daySpots[i + 1]));
+  const total = straight ? 0 : dayLegMinutes(daySpots);
+  const totals = straight ? [0] : [...byDay.values()].map(dayLegMinutes);
   const points = [];
   if (hasBoat) points.push('섬은 배로 이동합니다. 배편 시간은 현지에서 확인하세요.');
   if (byDay.size > 1 && total > 0 && total === Math.max(...totals) && totals.filter((t) => t === total).length === 1) {
@@ -109,5 +112,5 @@ export function dayCardPlainText(tripData, day) {
   const rows = daySpots.map((sp, i) =>
     `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${modeLabel(sp.toNextMode)} ${sp.toNextMinutes}분` : '—') : '—'}`
   );
-  return [buildDaySubtitle(daySpots), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
+  return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight'), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }

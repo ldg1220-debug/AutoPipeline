@@ -16,6 +16,7 @@
  *   - appUrl을 글당 1회 링크.
  *   - API 실패 시 throw하지 않고 스킵한다 (파이프라인 전체를 막지 않음).
  */
+import { inferSpotKind } from '../utils/dayCard.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -172,7 +173,7 @@ function regionMaxDays(region) {
 }
 
 /** trip_data.style로 내려보낼 "city"|"resort"|null — 본문 구성·제목 패턴을 다르게 할 때 사용(§2·§3). */
-function regionStyle(region) {
+export function regionStyle(region) {
   return regionStyleByName.get(region) ?? regionStyleByParentSample.get(region) ?? null;
 }
 
@@ -396,6 +397,15 @@ const ALL_PARENTS = [...domesticParents, ...overseasParents];
 // D-118(작업지시서 AU453E1): 코스 데이터가 못 받치는 주제형 키워드 — 지역 매칭이 안 되면 LLM 호출 전에 스킵한다.
 export const TOPIC_KEYWORD_PATTERN = /축제|페스티벌|단풍|벚꽃|불꽃|야경\s*명소|가볼\s*만한\s*곳|카페|맛집/;
 
+// D-122: trip_data로 확인할 수 없는 주제 — 지역이 있어도 항상 스킵(예: "부산 가을 축제").
+export const UNVERIFIABLE_TOPIC_PATTERN = /축제|페스티벌|단풍|벚꽃|불꽃|야경/;
+// 주제어 → 코스에 그 종류의 스팟이 3곳 이상 있어야 하는 키워드(예: "도쿄 카페 추천" → 카페 3곳).
+const THEME_SPOT_RULES = [
+  { word: /카페/, label: '카페', match: (sp) => inferSpotKind(sp) === '카페' },
+  { word: /맛집/, label: '맛집(식사)', match: (sp) => inferSpotKind(sp) === '식사' },
+  { word: /온천/, label: '온천', match: (sp) => /온천|onsen|spa|스파/i.test(sp.name ?? '') },
+];
+
 export function looksLikeTravelKeyword(keyword) {
   if (!keyword) return false;
   if (TOPIC_KEYWORD_PATTERN.test(keyword)) return true; // 카테고리가 economy로 가지 않게 travel 우선
@@ -453,9 +463,16 @@ export async function attachTripData(keywordData) {
 
   const rawResponses = {};
   const updated = [];
+  let themeSkipped = false;
 
   for (const item of contents) {
     const region = extractRegion(item.keyword ?? '');
+    if (region && UNVERIFIABLE_TOPIC_PATTERN.test(item.keyword ?? '')) {
+      const msg = '주제(축제·단풍·벚꽃·야경 등)는 코스 데이터로 확인할 수 없음 — 현재 미지원(도시+일수 형태로: 예) 통영 1박 2일)';
+      logger.warn(`[tradule_source] "${item.keyword}" → ${msg} → LLM 호출 없이 스킵`);
+      updated.push({ ...item, skip_reason: msg });
+      continue;
+    }
     if (!region && TOPIC_KEYWORD_PATTERN.test(item.keyword ?? '')) {
       const msg = '코스 데이터가 없는 주제형 키워드 — 현재 미지원(도시+일수 형태로: 예) 통영 1박 2일)';
       logger.warn(`[tradule_source] "${item.keyword}" → ${msg} → LLM 호출 없이 스킵`);
@@ -692,6 +709,19 @@ export async function attachTripData(keywordData) {
       updated.push({ ...item, skip_reason: '일자 간 도시 변경 의심 (좌표 이동거리 초과)' });
       continue;
     }
+
+    for (const rule of THEME_SPOT_RULES) {
+      if (!rule.word.test(item.keyword ?? '')) continue;
+      const n = cleanSpots.filter(rule.match).length;
+      if (n < 3) {
+        const msg = `주제어(${rule.label})에 맞는 스팟 ${n}곳 — 코스와 주제 불일치`;
+        logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${msg} → 스킵`);
+        updated.push({ ...item, skip_reason: msg });
+        themeSkipped = true;
+        break;
+      }
+    }
+    if (themeSkipped) { themeSkipped = false; continue; }
 
     updated.push({
       ...item,

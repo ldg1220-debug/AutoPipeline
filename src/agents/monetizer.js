@@ -671,7 +671,7 @@ const DAY_HEADING_PATTERN = /(\d+)\s*일차/;
 function buildDayCardHtml(tripData, day, narrativeHtml) {
   const daySpots = (tripData.spots ?? []).filter((sp) => (sp.day ?? 1) === day).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   if (daySpots.length === 0) return '';
-  const subtitle = buildDaySubtitle(daySpots);
+  const subtitle = buildDaySubtitle(daySpots, tripData.distanceSource === 'straight');
   const straightLine = isStraightLineDistance(tripData);
   const rows = daySpots.map((sp, idx) => {
     const isLast = idx === daySpots.length - 1;
@@ -883,7 +883,8 @@ async function monetizeBlogDraft(content) {
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
   // 출처를 밝힌다 — 지어낸 주장이 아니라 실제 검색 결과에 근거했음을 투명하게 보여준다.
-  const sourcesHtml = (content.fact_check?.sources?.length)
+  // D-122: 지원금·제도 고지는 경제 글용 — 트레쥴 코스 글에는 붙이지 않는다.
+  const sourcesHtml = (content.fact_check?.sources?.length && !content.trip_data?.spots?.length)
     ? `<div class="fact-sources"><p>※ 이 글의 지원금·제도 관련 내용은 아래 출처를 참고해 작성했으며, ` +
       `정확한 조건은 공식 채널에서 다시 확인하세요.</p><ul>` +
       content.fact_check.sources.slice(0, 3).map((s) =>

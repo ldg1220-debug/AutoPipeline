@@ -334,6 +334,10 @@ async function publishPost(page, content, blogName, context) {
     ?? blog_draft?.sections?.map((s) => `<h2>${s.heading}</h2><p>${s.body}</p>`).join('\n')
     ?? '';
   html = injectYouTubeEmbed(html, youtube_url);
+  // D-122: 티스토리는 HTML로 넣은 data: URI 이미지를 제거해 빈칸이 된다(인포카드). 빈 이미지로 발행하지 않고 블록을 뺀다.
+  const beforeLen = html.length;
+  html = html.replace(/(<div class="(?:info-card-wrap|blog-img-wrap)">\s*)?<img\b[^>]*?src="data:image\/[^"]+"[^>]*>(\s*<\/div>)?/g, '');
+  if (html.length !== beforeLen) logger.warn('[blog_publisher] data: URI 이미지 블록(인포카드) 제거 후 발행 — 티스토리가 data: 이미지를 지원하지 않음');
 
   // 본문 주입 (TinyMCE API 우선 — 소스 모드 불필요)
   // TinyMCE API 시도 전 에디터 초기화 대기

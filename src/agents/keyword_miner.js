@@ -6,7 +6,7 @@ import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import { fetchMonthlyVolumeMap } from '../utils/naverSearchAd.js';
-import { REGION_TREE, extractRegion } from './tradule_source.js';
+import { REGION_TREE, extractRegion, regionStyle } from './tradule_source.js';
 import { REGION_PROFILES, isValidCombo } from '../data/regionProfiles.js';
 import db from '../db/db.js';
 
@@ -35,12 +35,9 @@ export function isBlacklisted(keyword) {
 
 // ── 여행 채널 전환: 시드를 트레쥴 지역 트리 × 코스 패턴에서 생성 ───────────────
 // (기존 경제·부동산·뷰티 하드코딩 시드는 채널 전환 후에도 남아있었음 — 여기서 대체)
-const TRAVEL_SEED_PATTERNS = [
-  '{지역} 1박2일 코스',
-  '{지역} 당일치기',
-  '{지역} 여행 코스',
-  '{지역} 가볼만한곳',
-];
+const TRAVEL_SEED_PATTERNS = ['{지역} 여행 코스', '{지역} {n}박{m}일', '{지역} {n}박{m}일']; // 개수 계산용 — 실제 생성은 아래 generateTravelSeeds
+// D-122(작업지시서 AUAB5B1): 트레쥴이 코스를 주는 것이 검증된 지역만 시드로 쓴다 — 프로파일 등록 지역 + 아래 검증 지역.
+const TRAVEL_SEED_EXTRA_REGIONS = ['시드니', '세부', '코타키나발루'];
 
 /** 오늘의 1년 중 며칠째인지 (지역 로테이션 오프셋으로 사용). */
 function dayOfYear(date = new Date()) {
@@ -86,22 +83,28 @@ export function generateTravelSeeds(count = 30) {
   const deprioritized = rotated.filter((r) => usedRegions.has(r));
   const orderedRegions = [...prioritized, ...deprioritized];
 
-  const regionsNeeded = Math.ceil(count / TRAVEL_SEED_PATTERNS.length);
-  const pickedRegions = orderedRegions.slice(0, regionsNeeded);
+  const regionsNeeded = Math.ceil(count / 3);
 
-  // A-2: REGION_PROFILES로 지역×일정 조합을 필터한다 (예: "오사카 당일치기" 자체를 생성하지 않음)
+  // D-122: 시드 지역은 트레쥴 지원 + 검증된 지역만, 패턴은 "{지역} 여행 코스" + "{지역} N박N+1일"(도시형 1~4박, 휴양형 2~6박).
+  // "가볼만한곳·당일치기·카페거리·맛집 코스"는 코스 데이터와 맞지 않아 제외.
+  const eligible = orderedRegions.filter((r) => REGION_PROFILES[r] || TRAVEL_SEED_EXTRA_REGIONS.includes(r));
+  const pickedRegions = eligible.slice(0, regionsNeeded);
   const seeds = [];
+  const dayIdx = dayOfYear();
   for (const region of pickedRegions) {
-    if (!REGION_PROFILES[region]) {
-      logger.info(`[sanity] 프로파일 미등록 지역: ${region} — 테이블 추가 검토`);
+    const resort = regionStyle(region) === 'resort';
+    const [minN, maxN] = resort ? [2, 6] : [1, 4];
+    const validNights = [];
+    for (let n = minN; n <= maxN; n++) {
+      const prof = REGION_PROFILES[region]; // 프로파일의 min/maxDays는 "박" 단위
+      if (!prof || (n >= prof.minDays && n <= prof.maxDays)) validNights.push(n);
     }
-    for (const pattern of TRAVEL_SEED_PATTERNS) {
-      const patternKey = pattern.replace('{지역} ', ''); // DAY_PATTERNS 키와 맞춤 (예: "당일치기", "1박2일 코스")
-      if (!isValidCombo(region, patternKey)) {
-        logger.info(`[sanity] 비현실적 조합 차단: "${region} ${patternKey}"`);
-        continue;
-      }
-      seeds.push(pattern.replace('{지역}', region));
+    seeds.push(`${region} 여행 코스`);
+    // 매일 다른 일정이 나오도록 일자 기준 로테이션으로 2개 선택
+    for (let k = 0; k < Math.min(2, validNights.length); k++) {
+      const n = validNights[(dayIdx + k) % validNights.length];
+      const kw = `${region} ${n}박${n + 1}일`;
+      if (!seeds.includes(kw)) seeds.push(kw);
     }
   }
 
