@@ -40,8 +40,6 @@ const TRAVEL_SEED_PATTERNS = [
   '{지역} 당일치기',
   '{지역} 여행 코스',
   '{지역} 가볼만한곳',
-  '{지역} 카페거리',
-  '{지역} 맛집 코스',
 ];
 
 /** 오늘의 1년 중 며칠째인지 (지역 로테이션 오프셋으로 사용). */
@@ -257,7 +255,14 @@ async function applySearchVolumeGate(candidates) {
       passed.map((c) => `${c.keyword}(${c.search_volume ?? '?'})`).join(', '));
   }
 
-  return passed;
+  // D-117: 트레쥴 코스는 카페·맛집·축제·단풍 같은 주제 전용 데이터가 아니다 — 이런 키워드로 글을 만들면 관광지 코스가 카페 글 제목으로
+  // 나가는 불일치(예: "도쿄 카페 추천" → 스카이트리·디즈니랜드 8곳)가 생긴다. 채굴 결과에서 제외.
+  const UNSUPPORTED_TOPIC = /카페|맛집|축제|단풍|벚꽃|야시장|빵집|디저트|술집|바\s*추천/;
+  const supported = passed.filter((c) => !UNSUPPORTED_TOPIC.test(c.keyword));
+  if (supported.length !== passed.length) {
+    logger.info(`[keyword_miner] 코스 데이터가 못 받치는 주제어 키워드 ${passed.length - supported.length}개 제외: ${passed.filter((c) => UNSUPPORTED_TOPIC.test(c.keyword)).map((c) => c.keyword).join(', ')}`);
+  }
+  return supported;
 }
 
 export function classifyCategory(keyword) {
