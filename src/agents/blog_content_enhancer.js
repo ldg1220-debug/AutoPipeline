@@ -1102,6 +1102,16 @@ function correctLegTransportMentions(text, tripData) {
   return result;
 }
 
+// D-120: 같은 도시를 한 달 뒤 다시 쓸 때 "지금 계절"의 관점을 반영한다. 날씨·기온·꽃·단풍·행사 같은 사실은 trip_data에 없으므로 쓰지 않는다.
+function currentSeasonKR() {
+  const m = new Date(Date.now() + 9 * 3600 * 1000).getUTCMonth() + 1;
+  return m >= 3 && m <= 5 ? '봄' : m >= 6 && m <= 8 ? '여름' : m >= 9 && m <= 11 ? '가을' : '겨울';
+}
+function seasonNote(tripData) {
+  if (!tripData?.spots?.length) return '';
+  return `\n\n【계절 관점】 지금은 ${currentSeasonKR()}입니다. 도입·개요에서 "${currentSeasonKR()}에 이 코스를 간다면"이라는 관점으로 쓰되, 날씨·기온·꽃·단풍·행사·일몰 시각 등 trip_data에 없는 사실은 절대 쓰지 마세요(계절 단어만 일반 표현으로).`;
+}
+
 async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', tripData = null) {
   const template = await loadPrompt('blog_pass2_outline.md');
   const today    = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 기준
@@ -1120,7 +1130,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     trip_spots:           spotsForPrompt.length ? JSON.stringify(spotsForPrompt) : '[]',
     transport_summary:    summarizeTransportModes(tripData),
     region_style:         tripData?.style ?? '',
-  }) + benchmarkCtx;
+  }) + benchmarkCtx + seasonNote(tripData);
   await throttle(2000);
   let outline = await callGPT4oMini(prompt);
   // 2026-09-29(작업지시서 "검수가 트레쥴 숫자를 지웁니다" §5-①): 아웃라인 섹션
@@ -1243,7 +1253,7 @@ async function pass3Body(keyword, section, targetReader, outlineContext, isFirst
     first_section_note: isFirstSection
       ? `【검색엔진 노출 — 이 섹션은 글의 첫 번째 섹션입니다】\n첫 1~2문장 안에 키워드("${keyword}")의 핵심 단어를 자연스럽게 포함하세요. 다만 제목을 그대로 반복하거나 "OOO, 대중교통으로 즐기는 OOO"처럼 뻔한 수식어 패턴으로 시작하지 마세요 — 바로 실질적인 내용(핵심 사실 하나)으로 시작하세요. 이동수단 단어(대중교통/차량/도보 등)는 위 trip_data에 실제 근거가 있을 때만 쓰세요.`
       : '',
-  });
+  }) + (isFirstSection ? seasonNote(tripData) : '');
   await throttle(2000);
   // 본문은 자유 텍스트 반환 (JSON 아님)
   return callGPT4o(prompt, false);

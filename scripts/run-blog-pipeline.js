@@ -728,7 +728,9 @@ async function main() {
   rawKeywords = [...pinned, ...rest];
 
   const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
-  const postLimit = Math.min(targetCount, rawKeywords.length);
+  // D-120: 자동 모드는 후보를 넉넉히 뽑아 두고, 트레쥴 데이터 부족으로 스킵되면 다음 후보로 넘어간다(Part 1.7 이후 targetCount로 자름).
+  const candidateExtra = (singleMode || forceKeyword) ? 0 : 4;
+  const postLimit = Math.min(targetCount + candidateExtra, rawKeywords.length);
   rawKeywords = rawKeywords.slice(0, postLimit);
   logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 목표:${postsPerDay}개×${fetchMultiplier})`);
 
@@ -1005,6 +1007,10 @@ async function main() {
       }
     }
     contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+    if (!singleMode && !forceKeyword && contentData.contents.length > targetCount) {
+      logger.info(`[blog:pipeline] Part 1.7: 후보 ${contentData.contents.length}개 중 앞의 ${targetCount}개만 진행 (스킵 대비 여분 제외)`);
+      contentData.contents = contentData.contents.slice(0, targetCount);
+    }
     logger.info(`[blog:pipeline] Part 1.7 완료. 진행 대상: ${contentData.contents.length}개`);
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 1.7 Tradule Source 실패 (계속 진행, trip_data 없이): ${err.message}`);

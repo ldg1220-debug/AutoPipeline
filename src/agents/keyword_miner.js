@@ -329,8 +329,8 @@ function scoreKeywords(allSuggestions) {
 }
 
 function filterNewKeywords(scored) {
-  // 90일 이상 지난 'used' 키워드는 재사용 허용 (콘텐츠 갱신 효과)
-  const REUSE_DAYS = 90;
+  // D-120: 30일 이상 지난 'used' 키워드는 재사용 허용 — 같은 도시를 지금 계절에 맞춰 다시 쓴다(기존 90일).
+  const REUSE_DAYS = 30;
   const cutoff = new Date(Date.now() - REUSE_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const stmt = db.prepare('SELECT status, used_at FROM keywords WHERE keyword = ?');
 
@@ -363,7 +363,7 @@ function filterNewKeywords(scored) {
     const row = stmt.get(keyword);
     if (!row) return true;                                           // 신규
     if (row.status === 'pending') return false;                     // 이미 대기 중
-    if (row.status === 'used' && row.used_at && row.used_at < cutoff) return true; // 90일+ 재사용
+    if (row.status === 'used' && row.used_at && row.used_at < cutoff) return true; // 30일+ 재사용
     return false;
   });
 }
@@ -470,7 +470,7 @@ function saveKeywords(keywords) {
     INSERT OR IGNORE INTO keywords (keyword, category, score, commercial, sources)
     VALUES (@keyword, @category, @score, @commercial, @sources)
   `);
-  // 90일 지나 재사용되는 키워드는 status를 pending으로 리셋
+  // 30일 지나 재사용되는 키워드는 status를 pending으로 리셋
   const resetReuse = db.prepare(`
     UPDATE keywords SET status='pending', used_at=NULL, created_at=datetime('now','localtime')
     WHERE keyword=@keyword AND status='used'
