@@ -393,8 +393,12 @@ const ALL_PARENTS = [...domesticParents, ...overseasParents];
  * LLM이 "30대 직장인, 재테크 관심자" 식으로 드리프트). 지역명이 있으면 travel로
  * 자동 판정해 이 경로 자체를 막는다.
  */
+// D-118(작업지시서 AU453E1): 코스 데이터가 못 받치는 주제형 키워드 — 지역 매칭이 안 되면 LLM 호출 전에 스킵한다.
+export const TOPIC_KEYWORD_PATTERN = /축제|페스티벌|단풍|벚꽃|불꽃|야경\s*명소|가볼\s*만한\s*곳|카페|맛집/;
+
 export function looksLikeTravelKeyword(keyword) {
   if (!keyword) return false;
+  if (TOPIC_KEYWORD_PATTERN.test(keyword)) return true; // 카테고리가 economy로 가지 않게 travel 우선
   if (extractRegion(keyword)) return true;
   return ALL_PARENTS.some((p) => keyword.includes(p));
 }
@@ -452,6 +456,12 @@ export async function attachTripData(keywordData) {
 
   for (const item of contents) {
     const region = extractRegion(item.keyword ?? '');
+    if (!region && TOPIC_KEYWORD_PATTERN.test(item.keyword ?? '')) {
+      const msg = '코스 데이터가 없는 주제형 키워드 — 현재 미지원(도시+일수 형태로: 예) 통영 1박 2일)';
+      logger.warn(`[tradule_source] "${item.keyword}" → ${msg} → LLM 호출 없이 스킵`);
+      updated.push({ ...item, skip_reason: msg });
+      continue;
+    }
     if (!region) {
       if (item.category === 'travel') {
         // 2026-09-23(작업지시서 "물어놓고 스킵하면 안 됩니다" §5): "지역 매칭 실패"
