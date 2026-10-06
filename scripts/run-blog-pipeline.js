@@ -661,13 +661,15 @@ async function main() {
     rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
 
     // 신규 키워드가 목표치에 못 미치면 DB pending으로 채움
-    if (rawKeywords.length < targetCount) {
-      const need = targetCount - rawKeywords.length;
+    // D-121: 스킵 대비 여분 후보(candidateExtra)까지 DB pending으로 채운다.
+    const fillTarget = targetCount + ((singleMode || forceKeyword) ? 0 : 4);
+    if (rawKeywords.length < fillTarget) {
+      const need = fillTarget - rawKeywords.length;
       const existingKws = new Set(rawKeywords.map((k) => (k.keyword ?? k).toLowerCase()));
       // 여행 채널 전환 이전(경제·부동산·뷰티 등)에 쌓인 DB pending 잔여물이 계속 섞여 나오는
       // 문제 방지 — category = 'travel'인 것만 보충 대상으로 삼는다.
       const dbKeywords = db
-        .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' ORDER BY score DESC LIMIT ?`)
+        .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' AND keyword NOT LIKE '%<%' AND keyword NOT LIKE '%N박M일%' ORDER BY score DESC LIMIT ?`)
         .all(need * 2);  // 중복 제거 여분 확보
       const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
       if (fillKws.length > 0) {
