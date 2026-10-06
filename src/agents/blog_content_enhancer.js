@@ -1814,7 +1814,8 @@ function buildKindBlocksBody(tripData) {
     lines.push(`${bits.join(', ')}입니다.`);
   }
 
-  const meals = ofKinds(['식사', '카페']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
+  // D-119: 카페는 표에서 '카페'로 표기되므로 "식사 장소" 줄에 섞지 않는다(통영 초안: 카페 배양장이 식사 장소로 표기됨).
+  const meals = ofKinds(['식사']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
   if (meals.length >= 2) lines.push(`리뷰가 많은 식사 장소 ${meals.length}곳은 ${meals.map(fmt).join(', ')}입니다.`);
 
   const spas = ofKinds(['스파']).filter((sp) => typeof sp.rating === 'number')
