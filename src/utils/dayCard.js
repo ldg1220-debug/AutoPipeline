@@ -48,7 +48,9 @@ export function inferSpotKind(spot) {
   if (/park|공원|파크/i.test(n)) return '공원';
   if (/temple|사원|성당|church|[가-힣]사(\s|$)/i.test(n)) return '사원·성당';
   if (/market|시장/i.test(n)) return '시장';
-  if (/fort|요새|[가-힣]성(\s|$)|궁/i.test(n)) return '유적';
+  if (/fort|요새|[가-힣]성(\s|$)|(^|\s)성$|castle|궁/i.test(n)) return '유적';
+  if (/스튜디오|디즈니|랜드|테마파크|universal|resort\s*land/i.test(n)) return '테마파크';
+  if (/전망대|타워|tower|동물원|수족관|아쿠아리움|해유관|박물관|미술관|museum|zoo/i.test(n)) return '명소';
   if (/호텔|hotel|resort|리조트/i.test(n)) return '숙소';
   if (spot.category === '관광지') return '명소';
   return null;

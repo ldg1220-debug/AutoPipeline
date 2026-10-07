@@ -676,7 +676,7 @@ function buildDayCardHtml(tripData, day, narrativeHtml) {
   const rows = daySpots.map((sp, idx) => {
     const isLast = idx === daySpots.length - 1;
     const next = isLast ? '—' : (isBoatLeg(sp, daySpots[idx + 1]) ? '배편 (시간 미확인)' : formatToNext(sp, straightLine));
-    return `<tr><td>${idx + 1}</td><td>${sp.name}</td><td>${inferSpotKind(sp) ?? '—'}</td><td>${typeof sp.rating === 'number' ? formatRating(sp, tripData.ratingSource) : '평점 정보 없음'}</td><td>${next}</td></tr>`;
+    return `<tr><td>${idx + 1}</td><td>${sp.name}</td><td>${inferSpotKind(sp) ?? '—'}</td><td>${typeof sp.rating === 'number' ? formatRating(sp, tripData.ratingSource) : '평점 정보 없음'}</td>${straightLine ? '' : `<td>${next}</td>`}</tr>`;
   }).join('\n');
   const points = buildDayPoints(tripData, day);
   const dayMapUrl = tripData.dayImageUrls?.[day - 1];
@@ -686,7 +686,7 @@ function buildDayCardHtml(tripData, day, narrativeHtml) {
   return (
     mapHtml +
     (subtitle ? `<p style="margin:0 0 10px;color:#64748b;font-size:14px">${subtitle}</p>\n` : '') +
-    `<div class="timeline-table"><table>\n<thead><tr><th>순서</th><th>장소</th><th>종류</th><th>평점 (리뷰)</th><th>다음 이동</th></tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table></div>\n` +
+    `<div class="timeline-table"><table>\n<thead><tr><th>순서</th><th>장소</th><th>종류</th><th>평점 (리뷰)</th>${straightLine ? '' : '<th>다음 이동</th>'}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table></div>\n` +
     (points.length ? `<p style="margin:10px 0 14px;line-height:1.9"><b>이 날의 포인트</b> — ${points.join(' ')}</p>\n` : '') +
     (narrativeHtml ? `<p style="margin:0 0 14px;line-height:1.9">${narrativeHtml}</p>\n` : '')
   );

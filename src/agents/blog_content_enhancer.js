@@ -1318,6 +1318,8 @@ function buildTripDataFactsBlock(tripData) {
       const next = daySpots[i + 1];
       if (next && isBoatLeg(s, next)) {
         dayLines.push(`  → ${s.name} → ${next.name} : 배편 (시간 미확인 — 차·도보로 쓰지 말 것)`);
+      } else if (next && tripData.distanceSource === 'straight') {
+        dayLines.push(`  → ${s.name} → ${next.name} (이동 시간·수단은 직선거리 추정이라 쓰지 말 것)`);
       } else if (next && typeof s.toNextMinutes === 'number') {
         const mode = MODE_KR[s.toNextMode] ?? s.toNextMode ?? '이동';
         dayLines.push(`  → ${s.name} → ${next.name} : ${mode} ${s.toNextMinutes}분`);
@@ -1329,7 +1331,7 @@ function buildTripDataFactsBlock(tripData) {
   // 2026-09-29(실행 로그 4건 연속: Pass 5가 "총 이동거리 N km는 트레쥴 API에 제공되지 않는
   // 검증 불가 수치"라며 삭제): 총 거리·총 이동시간이 이 블록에 없어서 검수자가 실제 값을
   // 모르는 수치로 오판했다. 트레쥴이 준 totalDistanceKm와 구간 합계를 명시한다.
-  const totalMin = tripData.spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
+  const totalMin = tripData.distanceSource === 'straight' ? 0 : tripData.spots.reduce((sum, x) => sum + (typeof x.toNextMinutes === 'number' ? x.toNextMinutes : 0), 0);
   // 2026-09-29(로그: Pass 5가 "일차별 이동 거리는 API에서 제공되지 않아 검증 불가"라며 삭제): 일차별
   // 거리(dayTotals)도 사실 블록에 넣는다. dayTotals는 배열([{day, distanceKm}]) 또는 day 키 객체 둘 다 올 수 있다.
   const dayKmParts = [];
@@ -1865,7 +1867,7 @@ function buildCourseGlanceBody(tripData) {
   }
   const modeText = [...byMode].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${MODE_KR[m] ?? '이동'} ${n}구간`).join(' · ');
   let p1 = `이 코스는 총 ${spots.length}곳, ${byDay.size}일 일정입니다.`;
-  if (typeof tripData.totalDistanceKm === 'number') p1 += ` 총 이동 거리는 ${tripData.totalDistanceKm}km입니다.`;
+  if (typeof tripData.totalDistanceKm === 'number') p1 += tripData.distanceSource === 'straight' ? ` 장소 간 직선거리 기준 약 ${tripData.totalDistanceKm}km입니다.` : ` 총 이동 거리는 ${tripData.totalDistanceKm}km입니다.`;
   if (legCount > 0) p1 += ` 이동 구간 ${legCount}개의 시간을 합치면 약 ${(totalMin / 60).toFixed(1)}시간(${totalMin}분)이고, 수단은 ${modeText} 순으로 많습니다.`;
   if (boatCount > 0) p1 += ` 섬으로 가는 ${boatCount}개 구간은 배를 타며 시간은 확인되지 않아 합계에서 뺐습니다.`;
   paras.push(p1);
@@ -1911,7 +1913,7 @@ function buildCodeFaqs(tripData, keyword) {
   if (typeof tripData.totalDistanceKm === 'number') {
     faqs.push({
       q: `${keyword} 코스의 총 이동 거리는?`,
-      a: `${tripData.totalDistanceKm}km입니다.${totalMin > 0 ? ` 이동 합계는 약 ${(totalMin / 60).toFixed(1)}시간(구간 ${legCount}개)입니다.` : ''}`,
+      a: `${straightFaq ? '직선거리 기준 ' : ''}${tripData.totalDistanceKm}km입니다.${totalMin > 0 ? ` 이동 합계는 약 ${(totalMin / 60).toFixed(1)}시간(구간 ${legCount}개)입니다.` : ''}`,
     });
   }
   const beaches = spots.filter((x) => inferSpotKind(x) === '해변');
@@ -1990,6 +1992,11 @@ function stripUngroundedClaims(text, tripData) {
     // 2026-10-01(세부 초안: "이 코스는 특히 가족 여행에 적합한 일정… 다양한 연령층", "자연 속에서 여유를 즐길 수 있는 장소(도교 사원)"): 대상 적합성·자연 묘사는 데이터에 없다.
     if (/(가족|연령층|커플|부모|아이|어린이|신혼)[^.]*(적합|어울|안성맞춤|추천|함께하는|즐거운)/.test(sentence)) return null;
     if (/자연\s*(속|의\s*아름다움|미)/.test(sentence)) return null;
+    // D-125: 계절 관점 프롬프트가 날씨 서술로 새는 것(오사카 초안 "선선한 날씨 덕분에")·독자 페르소나("20대 후반의 직장인")·가족 대상 인기 서술 삭제.
+    if (/날씨|선선|쾌적|기온|서늘|무더|일교차/.test(sentence)) return null;
+    if (/\d{2}대[^.]*(직장인|여행자|독자)|직장인/.test(sentence)) return null;
+    if (/(가족|아이|어린이)[^.]*(인기|교육|좋)/.test(sentence)) return null;
+    if (/\d{1,2}세기/.test(sentence)) return null;
     // 2026-10-01(작업지시서 §4): "…까지 대중교통과 차량을 이용해 이동"처럼 한 구간에 두 수단을 섞은 문장은 실제 구간 수단과 일치할 수 없다.
     if (/(대중교통|차량|도보|버스|지하철)(과|와)\s*(대중교통|차량|도보|버스|지하철)(을|를)\s*(이용|활용)[^.]*이동/.test(sentence)) return null;
     // D-112: 데이터에 없는 풍경 묘사·예약/운행 단정
@@ -2006,6 +2013,17 @@ function stripUngroundedClaims(text, tripData) {
     return sentence;
   });
   if (r.removed) logger.warn(`[blog_content_enhancer] 데이터에 없는 사실 주장 감지 → 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
+// D-125: 직선거리(distanceSource 'straight') 코스는 구간 이동 시간·수단이 직선거리÷고정속도 추정값이다 — 글에 이동 시간 서술이 나오면 사실처럼 읽히므로 삭제한다.
+function stripStraightLineTimeClaims(text, tripData) {
+  if (!text || tripData?.distanceSource !== 'straight') return text;
+  const r = rewriteSentences(text, (sentence) => {
+    const hasTime = /\d+\s*분|\d+\s*시간/.test(sentence);
+    return hasTime && /(이동|소요|걸리|걸어|도보|차량|차로|대중교통|버스|지하철|거리)/.test(sentence) ? null : sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 직선거리 코스의 추정 이동시간 서술 감지 → 문장 ${r.removed}개 삭제`);
   return r.text;
 }
 
@@ -2029,6 +2047,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripUnsourcedMoney(sanitized);
   sanitized = stripFirstPersonExperienceClaims(sanitized);
   sanitized = stripUngroundedClaims(sanitized, tripData);
+  sanitized = stripStraightLineTimeClaims(sanitized, tripData);
   return sanitized;
 }
 
@@ -2052,6 +2071,9 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
 
   const newSections = await Promise.all(sections.map(async (section) => {
     if (!failedSet.has(section.heading)) return section;
+    // D-125: 코드 생성 섹션(한눈에 보기·종류별 순위)은 LLM으로 재생성하지 않는다(오사카·삿포로 초안: 재생성이 코드 블록을 LLM 문단으로 덮어씀).
+    if (/한눈에/.test(section.heading ?? '')) return { ...section, body: buildCourseGlanceBody(tripData) || section.body };
+    if (/종류별\s*장소/.test(section.heading ?? '')) return section;
     const dayMatch = (section.heading ?? '').match(DAY_SECTION_PATTERN);
     let newBody;
     if (dayMatch && tripData?.spots?.length) {
