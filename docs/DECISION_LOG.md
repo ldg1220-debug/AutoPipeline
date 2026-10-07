@@ -2084,3 +2084,10 @@
   (2) "식사 및 카페 추천" 헤딩인데 코스에 카페 0곳, "스트리트 푸드가 즐비·퓨전 요리", "안내 책자나 오디오 가이드를 활용", "가을 여행자에게 알맞은 선택", "가족 단위 여행객들도 즐길 수 있는".
 - **결정**: 지시어 명사에 성·타워·전망대·빌딩·상점가·거리·신사·절 추가, 데이터에 없는 연도(4자리 과거 연도·20XX~20XX년 당시)·벚꽃/단풍/사계절·가이드·계절 적합성·스트리트 푸드/퓨전 문장 삭제, 카페/스파·온천 헤딩인데 해당 종류 스팟이 없으면 섹션 제거.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`
+
+### D-127: API 사용량 기록 · 키워드 1개 주제 묶기 생략 · 초안 모드 썸네일 생략
+- **배경**: 청구서 없이 어떤 호출이 비용을 쓰는지 알 수 없고, 로그상 불필요한 호출이 확인됨(키워드 1개인데 topic_grouper가 gpt-4o-mini+gpt-4o 2회, 초안 생성(메뉴 4)에서도 쓰이지 않는 DALL-E 3 썸네일).
+- **결정**: (1) `src/utils/apiUsage.js` — axios 전역 인터셉터로 OpenAI(chat·image·embedding)·Gemini 호출을 모델별 횟수·토큰으로 집계, 실행 종료 시 콘솔 요약 + `output/api_usage/usage_YYYYMMDD.jsonl` 누적. 금액은 계산하지 않음(단가 변동).
+  (2) 파이프라인 Part 1.5: 키워드 1개면 주제 묶기 LLM 호출 생략. (3) `--draft-only`는 썸네일(DALL-E·HTML·Pexels)을 생성하지 않는다 — 교체용 HTML에 필요한 인포카드·섹션 이미지는 유지(메뉴 4), 이미지 전부 생략은 메뉴 3.
+- **미실행/주의**: 인터셉터는 `axios.post`(기본 인스턴스)를 쓰는 호출만 집계한다(`axios.create` 인스턴스·fetch는 미집계). 첫 실행에서 요약이 비면 알려주세요.
+- **관련 파일**: `src/utils/apiUsage.js`, `scripts/run-blog-pipeline.js`, `src/agents/blog_asset_builder.js`

@@ -20,6 +20,7 @@ import { attachTripData, looksLikeTravelKeyword } from '../src/agents/tradule_so
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
+import { installApiUsageTracking } from '../src/utils/apiUsage.js';
 import db from '../src/db/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -72,6 +73,9 @@ const forceCategory = forceCatIdx !== -1
 // monetized_{date}.json까지만 만든다 — cli.js 대화형 런처의 "초안만 만들기" 기본값용
 // (지시서 2026-09-16 §4: "기본값을 초안만으로 두세요 — 실수로 발행되는 것보다 낫다").
 const draftOnly = args.includes('--draft-only');
+// D-127: 호출별 사용량 기록 + 초안 모드에서는 쓰이지 않는 썸네일(DALL-E) 생성을 건너뛴다.
+installApiUsageTracking(args.filter((a) => a.startsWith('--')).join(' ') || 'blog');
+if (draftOnly) process.env.AP_SKIP_THUMBNAIL = '1';
 // --no-assets: Part 3(썸네일 이미지 생성·정보카드·사진 검색)를 건너뛴다 — 본문 게이트만 반복 테스트할 때 이미지 생성 비용을 아끼려는 용도.
 // 결과 HTML엔 이미지·정보카드가 없다(발행용이 아님).
 const noAssets = args.includes('--no-assets');
@@ -753,9 +757,11 @@ async function main() {
     process.exit(0);
   }
 
-  // Part 1.5: Topic Grouper — 유사 주제 키워드 묶기
+  // Part 1.5: Topic Grouper — 유사 주제 키워드 묶기 (D-127: 키워드 1개면 묶을 대상이 없어 LLM 호출 2회를 생략)
   try {
-    const grouped = await groupSimilarTopics(contentData);
+    const grouped = contentData.contents.length <= 1
+      ? (logger.info('[blog:pipeline] Part 1.5: 키워드 1개 — 주제 묶기 생략(LLM 호출 없음)'), contentData)
+      : await groupSimilarTopics(contentData);
     Object.assign(contentData, grouped);
     logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
   } catch (err) {

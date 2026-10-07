@@ -712,8 +712,10 @@ async function buildAssets(content, sharedGlobalIds = null) {
     info_stats:  [],
   };
 
+  // D-127: --draft-only(교체용 HTML 확인)에서는 썸네일이 쓰이지 않으므로 DALL-E·HTML·Pexels 썸네일 단계를 모두 건너뛴다.
+  const skipThumb = process.env.AP_SKIP_THUMBNAIL === '1';
   // 1. 썸네일 — DALL-E 3 우선, 실패 시 Pexels 폴백
-  if (config.openai.apiKey) {
+  if (config.openai.apiKey && !skipThumb) {
     try {
       await throttle(1000);
       const thumbPath = path.join(assetDir, 'thumbnail.jpg');
@@ -744,7 +746,7 @@ async function buildAssets(content, sharedGlobalIds = null) {
   }
 
   // 2.5. 썸네일 폴백 1단계 — DALL-E 실패 시 HTML/CSS+Playwright로 무료 렌더링 (자가 검수 포함)
-  if (!result.thumbnail) {
+  if (!result.thumbnail && !skipThumb) {
     try {
       const htmlThumbPath = path.join(assetDir, 'thumbnail.jpg');
       result.thumbnail = await generateHtmlThumbnailWithReview(content, htmlThumbPath);
@@ -756,7 +758,7 @@ async function buildAssets(content, sharedGlobalIds = null) {
   }
 
   // 3. 썸네일 폴백 2단계 — HTML 렌더링도 실패 시 Pexels 사진으로 대체
-  if (!result.thumbnail && config.pexels.apiKey) {
+  if (!result.thumbnail && config.pexels.apiKey && !skipThumb) {
     try {
       // 전역 Set(포스트 간 중복 방지) + 현재 포스트 body_images ID 합산
       const excludedIds = sharedGlobalIds ?? new Set();
