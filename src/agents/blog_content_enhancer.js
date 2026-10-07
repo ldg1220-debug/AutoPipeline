@@ -1106,6 +1106,46 @@ function correctLegTransportMentions(text, tripData) {
   return result;
 }
 
+// D-129(오사카 2박3일 초안: "우메다 스카이빌딩 … 평점 4.1점, 리뷰 43,748개" — 실제 우메다는 4.4·43,698, 4.1·43,748은 쓰텐카쿠 값): 같은 문단에서 가장 최근에 언급된
+// 장소의 평점·리뷰 수와 다른 수치가 서술되면(이름 문장 삭제·LLM 혼동으로 숫자가 다른 장소에 붙음) 그 문장을 삭제한다. 문장 안에서는 숫자 바로 앞에 나온 장소를 기준으로 본다.
+function stripMismatchedSpotStats(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const spots = tripData.spots.filter((sp) => sp.name);
+  // 긴 이름 우선 매칭("신사이바시스지 상점가" 등)
+  const names = [...spots].sort((a, b) => b.name.length - a.name.length);
+  const digits = (v) => Number(String(v).replace(/,/g, ''));
+  let removed = 0;
+  const paragraphs = text.split(/\n{2,}/).map((para) => {
+    let current = null;
+    const sents = para.split(/(?<=[.!?])\s+/);
+    const kept = [];
+    for (const sent of sents) {
+      // 문장 안에서 이름·수치를 위치순으로 훑는다.
+      const events = [];
+      for (const sp of names) {
+        let from = 0; let idx;
+        while ((idx = sent.indexOf(sp.name, from)) !== -1) { events.push({ pos: idx, spot: sp }); from = idx + sp.name.length; }
+      }
+      for (const m of sent.matchAll(/(?:평점\s*|★\s*)(\d(?:\.\d)?)\s*점?/g)) events.push({ pos: m.index, kind: 'rating', val: Number(m[1]) });
+      for (const m of sent.matchAll(/리뷰\s*([\d,]+)\s*개?/g)) events.push({ pos: m.index, kind: 'review', val: digits(m[1]) });
+      events.sort((a, b) => a.pos - b.pos);
+      let cur = current; let bad = false;
+      for (const ev of events) {
+        if (ev.spot) { cur = ev.spot; continue; }
+        if (!cur) continue;
+        if (ev.kind === 'rating' && (typeof cur.rating !== 'number' || cur.rating !== ev.val)) bad = true;
+        if (ev.kind === 'review' && (typeof cur.reviewCount !== 'number' || cur.reviewCount !== ev.val)) bad = true;
+      }
+      current = cur;
+      if (bad) { removed += 1; continue; }
+      kept.push(sent);
+    }
+    return kept.join(' ');
+  }).filter((p) => p.trim());
+  if (removed) logger.warn(`[blog_content_enhancer] 다른 장소의 평점·리뷰 수가 붙은 문장 ${removed}개 삭제`);
+  return paragraphs.join('\n\n');
+}
+
 // D-120: 같은 도시를 한 달 뒤 다시 쓸 때 "지금 계절"의 관점을 반영한다. 날씨·기온·꽃·단풍·행사 같은 사실은 trip_data에 없으므로 쓰지 않는다.
 function currentSeasonKR() {
   const m = new Date(Date.now() + 9 * 3600 * 1000).getUTCMonth() + 1;
@@ -2001,6 +2041,9 @@ function stripUngroundedClaims(text, tripData) {
     if (/\d{2}대[^.]*(직장인|여행자|독자)|직장인/.test(sentence)) return null;
     if (/(가족|아이|어린이)[^.]*(인기|교육|좋)/.test(sentence)) return null;
     if (/\d{1,2}세기/.test(sentence)) return null;
+    // D-129: 가족·커플 등 대상 언급(무조건)·운영 시간/정보 확인 권유·"교육적"·데이터에 없는 외관/분위기 형용사 삭제.
+    if (/가족|어린이|커플|연인|부모님/.test(sentence)) return null;
+    if (/(운영\s*(시간|정보))[^.]*확인|교육적|현지인|웅장|화려|독특한|멋진|아름다운|발길을\s*끄/.test(sentence)) return null;
     // D-126(오사카 2박3일 초안): 데이터에 없는 연도·역사 서술("1583년에 도요토미 히데요시에 의해", "2023~2024년 당시")·벚꽃/단풍 시즌·가이드 권유·계절 적합성 서술 삭제.
     if (/\b1\d{3}년|\b20\d{2}\s*[~\-]\s*20\d{2}년|20\d{2}년\s*당시/.test(sentence)) return null;
     if (/벚꽃|단풍|꽃\s*시즌|사계절/.test(sentence)) return null;
@@ -2062,6 +2105,7 @@ function applyContentGatesFor(text, tripData, keyword) {
   sanitized = stripFirstPersonExperienceClaims(sanitized);
   sanitized = stripUngroundedClaims(sanitized, tripData);
   sanitized = stripStraightLineTimeClaims(sanitized, tripData);
+  sanitized = stripMismatchedSpotStats(sanitized, tripData);
   return sanitized;
 }
 
