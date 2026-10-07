@@ -480,7 +480,11 @@ const FORBIDDEN_SECTION_PATTERN = /숙소|가격대|예산|비용\s*산정|경�
 const TRAVEL_BANNED_ANGLE_PATTERN = /패키지|개별\s*예약|자유\s*여행\s*vs|\bvs\b|항공|비행기|여행사|비교|액티비티|야시장|주의\s*사항|유의\s*사항|준비물|꿀팁|놓치기|놓치지|꼭\s*알아야|알아두면/i;
 
 function sanitizeOutlineForbidden(outline, tripData = null) {
-  const isBanned = (h) => FORBIDDEN_SECTION_PATTERN.test(h ?? '') ||
+  // D-126: 코스에 카페가 없는데 "식사 및 카페 추천"처럼 카페를 내세운 섹션은 제거(오사카 2박3일 초안).
+  const hasKind = (kind) => (tripData?.spots ?? []).some((sp) => inferSpotKind(sp) === kind);
+  const themeMismatch = (h) => Boolean(tripData?.spots?.length) && (
+    (/카페/.test(h ?? '') && !hasKind('카페')) || (/스파|온천/.test(h ?? '') && !hasKind('스파')));
+  const isBanned = (h) => FORBIDDEN_SECTION_PATTERN.test(h ?? '') || themeMismatch(h) ||
     (tripData?.spots?.length && TRAVEL_BANNED_ANGLE_PATTERN.test(h ?? ''));
   const sections = (outline.sections ?? []).filter((s) => !isBanned(s.heading));
   if (sections.length !== (outline.sections ?? []).length) {
@@ -1667,7 +1671,7 @@ function dropOrphanParagraphs(text, tripData = null) {
   // 2026-09-29(초안 대조: "스페인 식민 통치 시기에 건설된 이 요새는…" — 이름 문장이 지워져 주어가 없는데
   // "이곳/이 레스토랑"으로 시작하지 않아 통과): 시작 위치와 무관하게 "이 (요새|성당|십자가|…)은/는" 같은 지시
   // 명사구가 있고 그 문장·바로 앞 문장에 스팟 이름이 없으면 주어 없는 파편으로 본다.
-  const PLACE_NOUN = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크|음식점|숙소|호텔|마켓|박물관|장소|곳';
+  const PLACE_NOUN = '요새|성당|십자가|신전|시장|리조트|사원|공원|레스토랑|식당|스파|카페|해변|섬|테마파크|음식점|숙소|호텔|마켓|박물관|장소|곳|성|타워|전망대|빌딩|상점가|거리|신사|절';
   const SUBJECTLESS_START = new RegExp(`^\\s*(이곳|이 (${PLACE_NOUN})|평점\\s*\\d|★\\s*\\d)`);
   // 2026-09-30(초안: "관광객들은 이곳에서 필리핀의 역사를 느낄 수 있으며, 평점 4.4점…" — 문장 시작이 아니어서 통과): "이곳"도 위치 무관.
   const DEMONSTRATIVE_ANYWHERE = new RegExp(`이곳(은|이|에서|의|을)|이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
@@ -1990,13 +1994,19 @@ function stripUngroundedClaims(text, tripData) {
     if (/(하루에?|일)\s*약?\s*\d+(\s*[~\-]\s*\d+)?\s*시간\s*(의|정도|가량)?\s*(일정|동안|소요)/.test(sentence)) return null;
     if (/연중\s*내내|일\s*년\s*내내/.test(sentence)) return null;
     // 2026-10-01(세부 초안: "이 코스는 특히 가족 여행에 적합한 일정… 다양한 연령층", "자연 속에서 여유를 즐길 수 있는 장소(도교 사원)"): 대상 적합성·자연 묘사는 데이터에 없다.
-    if (/(가족|연령층|커플|부모|아이|어린이|신혼)[^.]*(적합|어울|안성맞춤|추천|함께하는|즐거운)/.test(sentence)) return null;
+    if (/(가족|연령층|커플|부모|아이|어린이|신혼)[^.]*(적합|어울|안성맞춤|추천|함께하는|즐거운|즐길\s*수)/.test(sentence)) return null;
     if (/자연\s*(속|의\s*아름다움|미)/.test(sentence)) return null;
     // D-125: 계절 관점 프롬프트가 날씨 서술로 새는 것(오사카 초안 "선선한 날씨 덕분에")·독자 페르소나("20대 후반의 직장인")·가족 대상 인기 서술 삭제.
     if (/날씨|선선|쾌적|기온|서늘|무더|일교차/.test(sentence)) return null;
     if (/\d{2}대[^.]*(직장인|여행자|독자)|직장인/.test(sentence)) return null;
     if (/(가족|아이|어린이)[^.]*(인기|교육|좋)/.test(sentence)) return null;
     if (/\d{1,2}세기/.test(sentence)) return null;
+    // D-126(오사카 2박3일 초안): 데이터에 없는 연도·역사 서술("1583년에 도요토미 히데요시에 의해", "2023~2024년 당시")·벚꽃/단풍 시즌·가이드 권유·계절 적합성 서술 삭제.
+    if (/\b1\d{3}년|\b20\d{2}\s*[~\-]\s*20\d{2}년|20\d{2}년\s*당시/.test(sentence)) return null;
+    if (/벚꽃|단풍|꽃\s*시즌|사계절/.test(sentence)) return null;
+    if (/안내\s*책자|오디오\s*가이드|가이드\s*투어/.test(sentence)) return null;
+    if (/(가을|봄|여름|겨울)\s*(여행자|여행)[^.]*(알맞|적합|좋|어울)/.test(sentence)) return null;
+    if (/즐비|스트리트\s*푸드|퓨전/.test(sentence)) return null;
     // 2026-10-01(작업지시서 §4): "…까지 대중교통과 차량을 이용해 이동"처럼 한 구간에 두 수단을 섞은 문장은 실제 구간 수단과 일치할 수 없다.
     if (/(대중교통|차량|도보|버스|지하철)(과|와)\s*(대중교통|차량|도보|버스|지하철)(을|를)\s*(이용|활용)[^.]*이동/.test(sentence)) return null;
     // D-112: 데이터에 없는 풍경 묘사·예약/운행 단정
