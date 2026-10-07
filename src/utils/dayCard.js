@@ -54,7 +54,17 @@ export function inferSpotKind(spot) {
   return null;
 }
 
-export function buildDaySubtitle(daySpots, straight = false) {
+// D-123(트레쥴 #295 facilityDay): 시설 하나가 하루를 쓰는 날(USJ·디즈니랜드 등)은 1곳이어도 정상이다.
+export function isFacilityDay(tripData, day, daySpots) {
+  if (!daySpots || daySpots.length !== 1) return false;
+  if (daySpots[0].facilityDay === true) return true;
+  const dt = tripData?.dayTotals;
+  const entry = Array.isArray(dt) ? (dt.find((e) => e?.day === day) ?? dt[day - 1]) : dt?.[day] ?? dt?.[String(day)];
+  return entry?.facilityDay === true;
+}
+
+export function buildDaySubtitle(daySpots, straight = false, facility = false) {
+  if (facility && daySpots[0]) return `종일 일정 — ${daySpots[0].name}`;
   const kinds = [];
   for (const sp of daySpots) {
     const k = inferSpotKind(sp);
@@ -69,6 +79,7 @@ export function buildDaySubtitle(daySpots, straight = false) {
 export function buildDayPoints(tripData, day) {
   const byDay = groupByDay(tripData.spots);
   const daySpots = byDay.get(day) ?? [];
+  if (isFacilityDay(tripData, day, daySpots)) return ['하루를 온전히 쓰는 곳이라 다른 일정을 넣지 않았습니다.'];
   const hasBoat = daySpots.slice(0, -1).some((sp, i) => isBoatLeg(sp, daySpots[i + 1]));
   // D-122: 직선거리(distanceSource 'straight') 코스는 구간 시간·수단이 추정값이라 표의 "다음 이동"을 "-"로 두는데,
   // 부제·포인트가 같은 분을 쓰면 서로 어긋난다(도쿄 초안) — 시간 기반 문구를 모두 생략한다.
@@ -112,5 +123,5 @@ export function dayCardPlainText(tripData, day) {
   const rows = daySpots.map((sp, i) =>
     `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${modeLabel(sp.toNextMode)} ${sp.toNextMinutes}분` : '—') : '—'}`
   );
-  return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight'), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
+  return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', isFacilityDay(tripData, day, daySpots)), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }

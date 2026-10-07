@@ -78,8 +78,8 @@ async function main() {
     }
     if (item.confirm) {
       const ok = await ask(`"${item.label}"${value ? ` (${value})` : ''} 을(를) 실행합니다. 계속할까요? (Y/n, Enter=예) `);
-      // Enter만 치면 Yes(기본값). n/no/아니오/취소만 취소한다.
-      if (/^(n|no|아니오|아니|취소)$/i.test(ok)) { console.log('취소했습니다.'); continue; }
+      // D-123: Y·y·예·Enter만 진행, 그 외 입력은 전부 취소(키워드를 확인 칸에 잘못 입력해도 실행되지 않게).
+      if (!/^(y|yes|예|네|ㅇ)?$/i.test(ok.trim())) { console.log('취소했습니다.'); continue; }
     }
     console.log(`\n▶ ${item.label}${value ? ` — ${value}` : ''}\n`);
     const code = await run(item.build(value));

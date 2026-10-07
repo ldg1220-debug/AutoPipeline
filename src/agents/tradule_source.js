@@ -406,6 +406,16 @@ const THEME_SPOT_RULES = [
   { word: /온천/, label: '온천', match: (sp) => /온천|onsen|spa|스파/i.test(sp.name ?? '') },
 ];
 
+/** 주제어(카페·맛집·온천) 키워드면 코스에 그 종류 스팟이 3곳 이상인지 확인 — 부족하면 사유 문자열, 아니면 null. */
+function themeMismatchReason(keyword, spots) {
+  for (const rule of THEME_SPOT_RULES) {
+    if (!rule.word.test(keyword ?? '')) continue;
+    const n = (spots ?? []).filter(rule.match).length;
+    if (n < 3) return `주제어(${rule.label})에 맞는 스팟 ${n}곳 — 코스와 주제 불일치`;
+  }
+  return null;
+}
+
 export function looksLikeTravelKeyword(keyword) {
   if (!keyword) return false;
   if (TOPIC_KEYWORD_PATTERN.test(keyword)) return true; // 카테고리가 economy로 가지 않게 travel 우선
@@ -639,6 +649,7 @@ export async function attachTripData(keywordData) {
     let ratedCount = 0;
     const attemptLog = [];
     let sawSparse = false;
+    let themeSkipReason = null;
     let sparseAtRequested = null; // 사용자가 요청한 일수 자체가 희소 코스인 경우의 일자별 스팟 수
     const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
@@ -652,7 +663,17 @@ export async function attachTripData(keywordData) {
       // 스팟이 2곳 미만인 날이 있거나 요청한 일수만큼 날이 채워지지 않으면 "희소 코스"로 보고, 일수를 줄여 재시도한다.
       const perDay = new Map();
       for (const sp of agencyFiltered) perDay.set(sp.day ?? 1, (perDay.get(sp.day ?? 1) ?? 0) + 1);
-      const sparse = d > 1 && (perDay.size < d || [...perDay.values()].some((n) => n < 2));
+      // D-123(AUA3DE1 §2-1): 주제 판정을 일자 판정보다 먼저 — "도쿄 카페 추천"이 일자 사유로 스킵되고 facilityDay 예외가 들어가면 통과하는 재발 방지.
+      const themeReason = themeMismatchReason(item.keyword, agencyFiltered);
+      if (themeReason) { themeSkipReason = themeReason; break; }
+      // D-123(AUA3DE1 §2): facilityDay(시설 하나가 하루를 쓰는 날, 트레쥴 #295)는 1곳이어도 희소 판정에서 제외한다.
+      const dtRaw = attempt?.dayTotals;
+      const facilityDays = new Set();
+      for (const sp of agencyFiltered) if (sp.facilityDay === true) facilityDays.add(sp.day ?? 1);
+      for (const e of (Array.isArray(dtRaw) ? dtRaw : Object.entries(dtRaw ?? {}).map(([k, v]) => ({ day: Number(k), ...v })))) {
+        if (e?.facilityDay === true && typeof e.day === 'number') facilityDays.add(e.day);
+      }
+      const sparse = d > 1 && (perDay.size < d || [...perDay.entries()].some(([day, n]) => n < 2 && !(n === 1 && facilityDays.has(day))));
       if (sparse) sawSparse = true;
       // 2026-09-30(사용자 지적: "시드니 5박6일 요청했는데 1박2일"): 요청한 일수의 코스가 희소(하루 1곳 이하인 날)이면 조용히 더 짧은
       // 코스로 바꿔 발행하지 말고, 이유를 알리고 스킵한다. (평점 있는 스팟 부족으로 일수를 줄이는 기존 재시도와는 별개.)
@@ -677,6 +698,11 @@ export async function attachTripData(keywordData) {
         cleanSpots = agencyFiltered;
         ratedCount = ratedSpots.length;
       }
+    }
+    if (themeSkipReason) {
+      logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${themeSkipReason} → 스킵`);
+      updated.push({ ...item, skip_reason: themeSkipReason });
+      continue;
     }
     if (sparseAtRequested) {
       const msg = `${startDays}일 코스가 일자별 ${sparseAtRequested}곳으로 하루 1곳 이하인 날이 있어 요청한 일수로 만들 수 없음(트레쥴 일자 분배 문제)`;

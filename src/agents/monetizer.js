@@ -11,7 +11,7 @@ import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../u
 import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 import { isOverseasRegion, extractRegion } from './tradule_source.js';
 import { splitKeywordPhrases } from './blog_content_enhancer.js';
-import { buildDayPoints, buildDaySubtitle, inferSpotKind, dayLegMinutes, isBoatLeg } from '../utils/dayCard.js';
+import { buildDayPoints, buildDaySubtitle, isFacilityDay, inferSpotKind, dayLegMinutes, isBoatLeg } from '../utils/dayCard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -671,7 +671,7 @@ const DAY_HEADING_PATTERN = /(\d+)\s*일차/;
 function buildDayCardHtml(tripData, day, narrativeHtml) {
   const daySpots = (tripData.spots ?? []).filter((sp) => (sp.day ?? 1) === day).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   if (daySpots.length === 0) return '';
-  const subtitle = buildDaySubtitle(daySpots, tripData.distanceSource === 'straight');
+  const subtitle = buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', isFacilityDay(tripData, day, daySpots));
   const straightLine = isStraightLineDistance(tripData);
   const rows = daySpots.map((sp, idx) => {
     const isLast = idx === daySpots.length - 1;

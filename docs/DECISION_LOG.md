@@ -2053,3 +2053,9 @@
   (6) 자동 시드: 프로파일 등록 지역 + 시드니·세부·코타키나발루만, 패턴은 "{지역} 여행 코스" + "{지역} N박N+1일"(도시형 1~4박, 휴양형 2~6박, 프로파일 min/maxDays 범위, 일자 기준 2개 로테이션). 가볼만한곳·당일치기 제외. 검색량 기준 300 유지, 미달 시 DB pending 보충(a8ca39f).
 - **미처리/한계**: factSearch 출처 필터는 trip_data 글에서 출처 박스 자체를 막는 것으로 대체. 인포카드는 자동 발행 글에서 이제 빠짐(업로드 경로 미구현 — 이전 업로드 타임아웃). 1곳 날 예외(facilityDay)는 트레쥴 제공 후.
 - **관련 파일**: `src/agents/tradule_source.js`, `src/agents/keyword_miner.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`, `src/agents/blog_publisher.js`, `src/utils/dayCard.js`
+
+### D-123: facilityDay 예외 · 주제 판정을 일자 판정보다 먼저 · 확인 프롬프트 엄격화 (작업지시서 AUA3DE1)
+- **결정**: (1) 트레쥴 #295의 facilityDay(스팟 또는 dayTotals 항목)가 true인 날은 1곳이어도 희소 코스 판정에서 제외. 일자 카드 부제 "종일 일정 — {시설명}", 포인트 "하루를 온전히 쓰는 곳이라 다른 일정을 넣지 않았습니다."(이동 문구 없음).
+  (2) 주제어(카페·맛집·온천) 일치 검사를 일자 분배 검사보다 먼저 실행 — facilityDay 예외로 "도쿄 카페 추천"이 통과해 /274가 재발하는 것을 막는다. (3) 메뉴 [확인 필요] 항목(5·6·9)의 확인은 Y·y·예·Enter만 진행, 그 외 입력은 취소("취소했습니다").
+- **미확인**: 1곳짜리 날이 enhancer·QA의 다른 규칙(일자 섹션 최소 분량·썸 섹션)을 건드리는지는 실데이터(오사카 1박2일)로 확인 필요.
+- **관련 파일**: `src/agents/tradule_source.js`, `src/utils/dayCard.js`, `src/agents/monetizer.js`, `scripts/menu.js`, `docs/work-orders/2026-10-06_facility-day-exception.md`
