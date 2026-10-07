@@ -8,7 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
-import { inferSpotKind, isBoatLeg, isIslandName } from '../utils/dayCard.js';
+import { inferSpotKind, isBoatLeg, isIslandName, isFacilityDay } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -1147,6 +1147,50 @@ function stripMismatchedSpotStats(text, tripData) {
 }
 
 // D-120: 같은 도시를 한 달 뒤 다시 쓸 때 "지금 계절"의 관점을 반영한다. 날씨·기온·꽃·단풍·행사 같은 사실은 trip_data에 없으므로 쓰지 않는다.
+// D-130(AUTOPI1 §2): 창작을 문장 패턴으로 하나씩 막지 않고 원칙으로 막는다 — LLM 본문 섹션(개요·장소별 상세 등, FAQ·코드 블록 제외)에서
+// ① 스팟 이름도 숫자도 없는 문장은 삭제, ② 스팟 이름이 있어도 묘사 형용사만 있고 숫자가 없으면 삭제.
+const DESCRIPTIVE_PATTERN = /바삭|부드러운|웅장|화려|독특|멋진|아름다운|젊은|인기가\s*(많|높)|유명|특별한|다양한|맛볼|즐길\s*수|매력|만끽|풍경|전망을\s*감상/;
+function stripUngroundedSentences(text, tripData) {
+  if (!text || !tripData?.spots?.length) return text;
+  const names = tripData.spots.map((sp) => sp.name).filter(Boolean);
+  const r = rewriteSentences(text, (sentence) => {
+    const hasName = names.some((n) => sentence.includes(n));
+    const hasNumber = /\d/.test(sentence);
+    if (!hasName && !hasNumber) return null;
+    if (hasName && !hasNumber && DESCRIPTIVE_PATTERN.test(sentence)) return null;
+    return sentence;
+  });
+  if (r.removed) logger.warn(`[blog_content_enhancer] 스팟 이름·숫자 없는 문장/묘사만 있는 문장 ${r.removed}개 삭제`);
+  return r.text;
+}
+
+// D-130: 장소별 한 줄 정리 — 스팟마다 한 줄, 데이터만(종류·평점·리뷰·일차·다음 이동).
+function buildSpotLinesBody(tripData) {
+  const spots = tripData?.spots ?? [];
+  if (spots.length < 4) return '';
+  const byDay = groupSpotsByDay(spots);
+  const straight = tripData.distanceSource === 'straight';
+  const lines = [];
+  for (const day of [...byDay.keys()].sort((a, b) => a - b)) {
+    const list = byDay.get(day);
+    const facility = isFacilityDay(tripData, day, list);
+    list.forEach((sp, i) => {
+      const parts = [inferSpotKind(sp) ?? '장소'];
+      parts.push(typeof sp.rating === 'number' ? `★${sp.rating}` : '평점 정보 없음');
+      if (typeof sp.reviewCount === 'number') parts.push(`리뷰 ${sp.reviewCount.toLocaleString()}`);
+      parts.push(facility ? `${day}일차 종일 일정` : `${day}일차 ${i === 0 ? '첫 장소' : `${i + 1}번째`}`);
+      const next = list[i + 1];
+      if (facility) { /* 이동 없음 */ }
+      else if (!next) parts.push('그날 마지막 장소');
+      else if (isBoatLeg(sp, next)) parts.push(`다음: ${next.name}까지 배편`);
+      else if (!straight && typeof sp.toNextMinutes === 'number') parts.push(`다음: ${next.name}까지 ${MODE_KR[sp.toNextMode] ?? '이동'} ${sp.toNextMinutes}분`);
+      else parts.push(`다음: ${next.name}`);
+      lines.push(`· ${sp.name} — ${parts.join(' · ')}`);
+    });
+  }
+  return lines.join('\n\n');
+}
+
 function currentSeasonKR() {
   const m = new Date(Date.now() + 9 * 3600 * 1000).getUTCMonth() + 1;
   return m >= 3 && m <= 5 ? '봄' : m >= 6 && m <= 8 ? '여름' : m >= 9 && m <= 11 ? '가을' : '겨울';
@@ -1432,17 +1476,17 @@ function tripFactValueSet(tripData) {
 }
 /** 검수 후 트레쥴 사실값이 사라졌으면 true. */
 function lostTripFacts(beforeSections, afterSections, tripData) {
-  const before = countFactNumbers(beforeSections);
-  const after = countFactNumbers(afterSections);
-  if (after >= before) return false;
+  const beforeCnt = countFactNumbers(beforeSections);
+  const afterCnt = countFactNumbers(afterSections);
+  if (afterCnt >= beforeCnt) return false;
   if (!tripData?.spots?.length) return true;
   const facts = tripFactValueSet(tripData);
-  const remain = new Map();
-  for (const t of collectFactTokens(afterSections)) remain.set(t, (remain.get(t) ?? 0) + 1);
-  for (const t of collectFactTokens(beforeSections)) {
-    const n = remain.get(t) ?? 0;
-    if (n > 0) { remain.set(t, n - 1); continue; }
-    if (facts.has(t) || facts.has(String(Number(t)))) return true; // 사라진 숫자가 사실값
+  // D-130(AUTOPI1 §4): 멀티셋이 아니라 집합으로 비교한다 — 같은 값이 두 곳에 있었는데 한 곳(오귀속된 곳)만 고친 교정은 허용하고,
+  // 사실값이 본문에서 완전히 사라졌을 때만 되돌린다(Pass 5가 우메다에 붙은 쓰텐카쿠 값 4.1·43,748을 바로잡았는데 개수 감소로 되돌려진 사고).
+  const after = new Set(collectFactTokens(afterSections));
+  for (const t of new Set(collectFactTokens(beforeSections))) {
+    if (after.has(t)) continue;
+    if (facts.has(t) || facts.has(String(Number(t)))) return true; // 사실값이 통째로 사라짐
   }
   return false;
 }
@@ -2131,7 +2175,7 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
     if (!failedSet.has(section.heading)) return section;
     // D-125: 코드 생성 섹션(한눈에 보기·종류별 순위)은 LLM으로 재생성하지 않는다(오사카·삿포로 초안: 재생성이 코드 블록을 LLM 문단으로 덮어씀).
     if (/한눈에/.test(section.heading ?? '')) return { ...section, body: buildCourseGlanceBody(tripData) || section.body };
-    if (/종류별\s*장소/.test(section.heading ?? '')) return section;
+    if (/종류별\s*장소|장소별\s*한\s*줄/.test(section.heading ?? '')) return section;
     const dayMatch = (section.heading ?? '').match(DAY_SECTION_PATTERN);
     let newBody;
     if (dayMatch && tripData?.spots?.length) {
@@ -2139,7 +2183,7 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
     } else {
       const sectionTripData = sliceTripDataForSection(tripData, section);
       newBody = await pass3Body(keyword, section, targetReader, outlineContext, false, sectionTripData);
-      newBody = applyContentGatesFor(newBody, tripData, keyword);
+      newBody = stripUngroundedSentences(applyContentGatesFor(newBody, tripData, keyword), tripData);
     }
     // 순손실 방지: 재생성이 원본보다 짧으면 원본을 유지한다.
     if ((newBody?.length ?? 0) < (section.body?.length ?? 0)) {
@@ -2410,7 +2454,7 @@ async function enhanceBlogDraft(content) {
       const gatedRest = rest ? applyContentGates(rest) : '';
       return { ...s, body: gatedRest ? `${list}\n\n${gatedRest}` : list };
     }
-    return { ...s, body: applyContentGates(s.body) };
+    return { ...s, body: stripUngroundedSentences(applyContentGates(s.body), tripData) };
   });
   const finalFaqSectionsRaw = faqSections.map((f) => ({
     ...f,
@@ -2456,6 +2500,13 @@ async function enhanceBlogDraft(content) {
   if (kindBody && !finalSections.some((sec) => /종류별/.test(sec.heading ?? ''))) {
     const glanceIdx = finalSections.findIndex((sec) => /한눈에/.test(sec.heading ?? ''));
     finalSections.splice(glanceIdx >= 0 ? glanceIdx + 1 : 0, 0, { level: 2, heading: '종류별 장소 순위', body: kindBody });
+  }
+  // D-130: 장소별 한 줄 정리(코드 블록) — 마지막 일자 카드 뒤, 장소별 상세 앞.
+  const spotLinesBody = buildSpotLinesBody(tripData);
+  if (spotLinesBody && !finalSections.some((sec) => /장소별\s*한\s*줄/.test(sec.heading ?? ''))) {
+    let lastDay = -1;
+    finalSections.forEach((sec, idx) => { if (DAY_SECTION_PATTERN.test(sec.heading ?? '')) lastDay = idx; });
+    finalSections.splice(lastDay >= 0 ? lastDay + 1 : finalSections.length, 0, { level: 2, heading: '장소별 한 줄 정리', body: spotLinesBody });
   }
   if (tripData?.spots?.length) {
     const numeric = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
