@@ -791,7 +791,7 @@ function stripFillerAdvice(text) {
   const BARE_BODA = /(^|\s)보다\s+[가-힣]{1,8}(을|를)\s/;
   // 2026-09-30(Cowork 지시서): "방문 전 각 장소의 운영 정보를 확인하여 … 추천한다/좋다" 류 상투 안내 문장 삭제 —
   // 어느 글에나 붙는 일반 권유이고 데이터가 없다. (코드가 만드는 카드·한눈에 보기의 "방문 전 현장 상황 확인" 문장은 이 게이트를 거치지 않는다.)
-  const VISIT_CHECK = /(방문\s*(하기\s*)?전|가기\s*전|여행\s*(을\s*떠나기\s*)?전)[^.!?]*(확인|알아보|조사|숙지|파악)[^.!?]*(추천|권장|권하|좋|바람직|중요|필요|하세요|해\s*두|것이다|한다)/;
+  const VISIT_CHECK = /(방문\s*(하기\s*)?전|가기\s*전|여행\s*(을\s*떠나기\s*)?전)[^.!?]*(확인|알아보|조사|숙지|파악)[^.!?]*(추천|권장|권하|좋|바람직|중요|필요|하세요|해\s*두|것이다|한다|있다|된다|원활)/;
   let removedMissed = false;
   const r = rewriteSentences(text, (sentence) => {
     if (MISSED.test(sentence)) { removedMissed = true; return null; }
@@ -1676,7 +1676,7 @@ function dropOrphanParagraphs(text, tripData = null) {
   // 2026-09-30(초안: "관광객들은 이곳에서 필리핀의 역사를 느낄 수 있으며, 평점 4.4점…" — 문장 시작이 아니어서 통과): "이곳"도 위치 무관.
   const DEMONSTRATIVE_ANYWHERE = new RegExp(`이곳(은|이|에서|의|을)|이 (${PLACE_NOUN})(은|는|이|가|에서|의)`);
   const MOVE_START = /^\s*(차로|차량으로|도보로|대중교통으로)\s*이동/;
-  const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서|의|\\s*내부|\\s*안)`);
+  const NOUN_START = new RegExp(`^\\s*(${PLACE_NOUN})(을|를|은|는|이|가|에서|의|에는|에도|\\s*내부|\\s*안)`);
   let removed = 0;
   // 2026-09-29(초안: "세부 5박 7일 여행 코스에서 주목할 만한 장소들의 평점과 특징" — 마침표 없는 제목 반복 조각):
   // 문장 종결(., !, ?, 다, 요) 없이 끝나는 짧은 문단은 제목을 되풀이한 조각이라 삭제(목록·표·HTML 제외).
@@ -1715,7 +1715,7 @@ function dropOrphanParagraphs(text, tripData = null) {
       }
       // 2026-09-30(초안: 섹션이 "요새 내부의 전시물과 건축 양식은…"으로 시작 — 요새 이름 문단이 지워졌는데 "이곳/이 요새"가
       // 아니라 명사로 바로 시작해 통과): 섹션 맨 앞 문장이 장소 명사로 시작하는데 앞에 스팟 이름이 없으면 파편이다.
-      const bareNounLead = pi === 0 && out.length === 0 && NOUN_START.test(sent) && !hasSpot(sent);
+      const bareNounLead = out.length === 0 && NOUN_START.test(sent) && !hasSpot(sent); // D-128: 문단 첫머리 어디서나(오사카 초안: 도톤보리 이름 문단이 지워진 뒤 "거리에는…"으로 시작)
       const subjectless = spotNames.length && (
         bareNounLead ||
         antecedentMissing ||
@@ -2007,6 +2007,10 @@ function stripUngroundedClaims(text, tripData) {
     if (/안내\s*책자|오디오\s*가이드|가이드\s*투어/.test(sentence)) return null;
     if (/(가을|봄|여름|겨울)\s*(여행자|여행)[^.]*(알맞|적합|좋|어울)/.test(sentence)) return null;
     if (/즐비|스트리트\s*푸드|퓨전/.test(sentence)) return null;
+    // D-128: 건물 높이 등 데이터에 없는 수치("지상 173미터")·혼잡도 조언·독자 유형 적합성("도시 탐방을 선호하는 여행자에게 적합") 삭제.
+    if (/\d[\d,]*\s*(미터|m)(?![a-zA-Z])|높이/.test(sentence)) return null;
+    if (/혼잡/.test(sentence)) return null;
+    if (/(여행자|독자|사람|이들)[^.]*(에게|들에게)[^.]*(적합|알맞|어울|인기가\s*많)/.test(sentence)) return null;
     // 2026-10-01(작업지시서 §4): "…까지 대중교통과 차량을 이용해 이동"처럼 한 구간에 두 수단을 섞은 문장은 실제 구간 수단과 일치할 수 없다.
     if (/(대중교통|차량|도보|버스|지하철)(과|와)\s*(대중교통|차량|도보|버스|지하철)(을|를)\s*(이용|활용)[^.]*이동/.test(sentence)) return null;
     // D-112: 데이터에 없는 풍경 묘사·예약/운행 단정
