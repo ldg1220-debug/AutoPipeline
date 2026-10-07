@@ -1149,19 +1149,32 @@ function stripMismatchedSpotStats(text, tripData) {
 // D-120: 같은 도시를 한 달 뒤 다시 쓸 때 "지금 계절"의 관점을 반영한다. 날씨·기온·꽃·단풍·행사 같은 사실은 trip_data에 없으므로 쓰지 않는다.
 // D-130(AUTOPI1 §2): 창작을 문장 패턴으로 하나씩 막지 않고 원칙으로 막는다 — LLM 본문 섹션(개요·장소별 상세 등, FAQ·코드 블록 제외)에서
 // ① 스팟 이름도 숫자도 없는 문장은 삭제, ② 스팟 이름이 있어도 묘사 형용사만 있고 숫자가 없으면 삭제.
-const DESCRIPTIVE_PATTERN = /바삭|부드러운|웅장|화려|독특|멋진|아름다운|젊은|인기가\s*(많|높)|유명|특별한|다양한|맛볼|즐길\s*수|매력|만끽|풍경|전망을\s*감상/;
+const DESCRIPTIVE_PATTERN = /바삭|부드러운|웅장|화려|독특|멋진|아름다운|젊은|인기가\s*(많|높)|유명|특별한|다양한|맛볼|즐길\s*수|매력|만끽|풍경|전경|전망을\s*감상|감상할|접근할|쉽게|관찰|랜드마크|자랑|의미\s*있는|역사적|건축적|즐기기에|좋은\s*곳|좋다|좋습니다/;
+const STAT_PATTERN = /(평점\s*\d(?:\.\d)?\s*점?|리뷰\s*[\d,]+\s*개?|★\s*\d(?:\.\d)?)/g;
 function stripUngroundedSentences(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
   const names = tripData.spots.map((sp) => sp.name).filter(Boolean);
+  let trimmed = 0;
   const r = rewriteSentences(text, (sentence) => {
     const hasName = names.some((n) => sentence.includes(n));
     const hasNumber = /\d/.test(sentence);
     if (!hasName && !hasNumber) return null;
     if (hasName && !hasNumber && DESCRIPTIVE_PATTERN.test(sentence)) return null;
+    // D-131: 평점·리뷰 수 뒤에 묘사가 이어지는 문장("…리뷰 100,359개로 역사와 자연을 동시에 느낄 수 있는 장소다")은 사실 부분만 남긴다.
+    if (hasNumber && DESCRIPTIVE_PATTERN.test(sentence)) {
+      let lastEnd = -1;
+      for (const m of sentence.matchAll(STAT_PATTERN)) lastEnd = m.index + m[0].length;
+      if (lastEnd > 0) {
+        const head = sentence.slice(0, lastEnd);
+        const rest = sentence.slice(lastEnd);
+        if (!/\d/.test(rest) && !DESCRIPTIVE_PATTERN.test(head)) { trimmed += 1; return `${head.trimEnd()}${/개$|점$/.test(head.trimEnd()) ? '입니다.' : '.'}`; }
+      }
+      return null;
+    }
     return sentence;
   });
-  if (r.removed) logger.warn(`[blog_content_enhancer] 스팟 이름·숫자 없는 문장/묘사만 있는 문장 ${r.removed}개 삭제`);
-  return r.text;
+  if (r.removed || trimmed) logger.warn(`[blog_content_enhancer] 스팟 이름·숫자 없는/묘사 문장 ${r.removed}개 삭제, 묘사 꼬리 ${trimmed}개 제거`);
+  return r.text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // D-130: 장소별 한 줄 정리 — 스팟마다 한 줄, 데이터만(종류·평점·리뷰·일차·다음 이동).
@@ -1185,10 +1198,10 @@ function buildSpotLinesBody(tripData) {
       else if (isBoatLeg(sp, next)) parts.push(`다음: ${next.name}까지 배편`);
       else if (!straight && typeof sp.toNextMinutes === 'number') parts.push(`다음: ${next.name}까지 ${MODE_KR[sp.toNextMode] ?? '이동'} ${sp.toNextMinutes}분`);
       else parts.push(`다음: ${next.name}`);
-      lines.push(`· ${sp.name} — ${parts.join(' · ')}`);
+      lines.push(`- ${sp.name} — ${parts.join(' · ')}`);
     });
   }
-  return lines.join('\n\n');
+  return lines.join('\n');
 }
 
 function currentSeasonKR() {
@@ -2122,9 +2135,14 @@ function stripStraightLineTimeClaims(text, tripData) {
   if (!text || tripData?.distanceSource !== 'straight') return text;
   const r = rewriteSentences(text, (sentence) => {
     const hasTime = /\d+\s*분|\d+\s*시간/.test(sentence);
-    return hasTime && /(이동|소요|걸리|걸어|도보|차량|차로|대중교통|버스|지하철|거리)/.test(sentence) ? null : sentence;
+    if (hasTime && /(이동|소요|걸리|걸어|도보|차량|차로|대중교통|버스|지하철|거리)/.test(sentence)) return null;
+    // D-131: 직선거리 코스는 이동 수단도 추정값 — "대중교통으로 이동한다"·"도보로 쉽게 접근" 같은 수단 서술 삭제.
+    if (/(대중교통|차량|도보|버스|지하철|택시)(으)?로|걸어서|접근/.test(sentence)) return null;
+    // 거리는 직선거리 기준임을 밝힌다.
+    if (/이동\s*거리/.test(sentence) && /\d\s*km/.test(sentence) && !/직선/.test(sentence)) return sentence.replace(/(총\s*)?이동\s*거리/, '장소 간 직선거리 기준 총 이동 거리');
+    return sentence;
   });
-  if (r.removed) logger.warn(`[blog_content_enhancer] 직선거리 코스의 추정 이동시간 서술 감지 → 문장 ${r.removed}개 삭제`);
+  if (r.removed) logger.warn(`[blog_content_enhancer] 직선거리 코스의 추정 이동시간·수단 서술 감지 → 문장 ${r.removed}개 삭제`);
   return r.text;
 }
 
