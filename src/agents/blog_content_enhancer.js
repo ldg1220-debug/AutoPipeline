@@ -8,7 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
-import { inferSpotKind, isBoatLeg, isIslandName, isFacilityDay } from '../utils/dayCard.js';
+import { inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, legModeKey, legModeLabel } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -1207,7 +1207,7 @@ function buildSpotLinesBody(tripData) {
       if (facility) { /* 이동 없음 */ }
       else if (!next) parts.push('그날 마지막 장소');
       else if (isBoatLeg(sp, next)) parts.push(`다음: ${next.name}까지 배편`);
-      else if (!straight && typeof sp.toNextMinutes === 'number') parts.push(`다음: ${next.name}까지 ${MODE_KR[sp.toNextMode] ?? '이동'} ${sp.toNextMinutes}분`);
+      else if (!straight && typeof sp.toNextMinutes === 'number') parts.push(`다음: ${next.name}까지 ${legModeLabel(sp)} ${sp.toNextMinutes}분`);
       else parts.push(`다음: ${next.name}`);
       lines.push(`- ${sp.name} — ${parts.join(' · ')}`);
     });
@@ -1394,7 +1394,7 @@ async function pass3Faq(keyword, faqItem, targetReader) {
 // 같은 "숫자 없는 글" 퇴행). Pass4/5 프롬프트에 trip_data 스팟 목록(평점·
 // 리뷰수·구간 이동시간)과 일자별 거리를 넣어 "이 값과 일치하는 숫자는 수정
 // 금지"를 명시한다.
-const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차', car_fallback: '차량 기준' };
 
 /** tripData.spots를 day→order 순으로 그룹화한다. 여러 곳에서 재사용. */
 function groupSpotsByDay(spots) {
@@ -1973,7 +1973,7 @@ function buildCourseGlanceBody(tripData) {
       if (isBoatLeg(sp, list[i + 1])) { boatCount += 1; return; }
       if (typeof sp.toNextMinutes !== 'number') return;
       if (tripData.distanceSource !== 'straight') { legCount += 1; totalMin += sp.toNextMinutes; }
-      const key = sp.toNextMode ?? null;
+      const key = legModeKey(sp);
       byMode.set(key, (byMode.get(key) ?? 0) + 1);
     });
   }

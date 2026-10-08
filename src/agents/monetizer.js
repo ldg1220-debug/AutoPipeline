@@ -362,7 +362,7 @@ function formatToNext(spot, straightLine) {
   // 추정값이라 TL;DR과 동일한 이유로 신뢰할 수 없음 — 표에서도 시간·이동수단 대신 "-"만 남긴다.
   if (straightLine) return '-';
   if (spot.toNextMinutes == null) return '-';
-  const mode = spot.toNextMode ? `${MODE_KR[spot.toNextMode] ?? spot.toNextMode} ` : '';
+  const mode = spot.toNextFallback === 'driving' ? '차량 기준 ' : (spot.toNextMode ? `${MODE_KR[spot.toNextMode] ?? spot.toNextMode} ` : '');
   return `${mode}${spot.toNextMinutes}분`;
 }
 

@@ -1,12 +1,20 @@
 // 일자 카드(표·부제·포인트) 공용 로직 — monetizer(렌더)와 qa_editor(글자수 계산)가 같이 쓴다.
 // 2026-09-29(작업지시서 "일자 카드 다듬기"): 카드 텍스트를 QA 글자수에 포함시키기 위해 분리.
 
-export const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차' };
+export const MODE_KR = { car: '차량', walk: '도보', transit: '대중교통', bus: '버스', train: '기차', car_fallback: '차량 기준' };
 
 // 트레쥴 v21(#286): 각 날 마지막 스팟은 toNextMode가 null(이전엔 "car"). null·undefined가 문자열로 새지 않게
 // 수단 라벨은 항상 이 함수로 만든다.
 export function modeLabel(mode) {
   return MODE_KR[mode] ?? (mode ? String(mode) : '이동');
+}
+
+// D-134(트레쥴 #298): 대중교통 경로가 없어 차량으로 대체한 구간(toNextFallback 'driving')은 "차량 기준"으로 표기하고 "대중교통"으로 쓰지 않는다.
+export function legModeKey(sp) {
+  return sp?.toNextFallback === 'driving' ? 'car_fallback' : (sp?.toNextMode ?? null);
+}
+export function legModeLabel(sp) {
+  return modeLabel(legModeKey(sp));
 }
 
 export function groupByDay(spots) {
@@ -95,7 +103,7 @@ export function buildDayPoints(tripData, day) {
     const carMin = legs.filter((l) => l.toNextMode === 'car').reduce((sum, l) => sum + l.toNextMinutes, 0);
     points.push(`이동이 가장 많은 날입니다(총 ${total}분).${carMin > 0 ? ` 차량 구간이 ${carMin}분 포함돼 있습니다.` : ''}`);
   } else if (legs.length === 1) {
-    const m = modeLabel(legs[0].toNextMode);
+    const m = legModeLabel(legs[0]);
     points.push(legs[0].toNextMinutes >= 30
       ? `이동은 한 번이지만 ${m} ${legs[0].toNextMinutes}분이라 시간을 넉넉히 잡으세요.`
       : `이동은 한 번(${m} ${legs[0].toNextMinutes}분)뿐이라 여유 있는 날입니다.`);
@@ -111,7 +119,7 @@ export function buildDayPoints(tripData, day) {
   }
   if (points.length === 0 && legs.length > 0) {
     const byMode = new Map();
-    for (const l of legs) byMode.set(l.toNextMode ?? null, (byMode.get(l.toNextMode ?? null) ?? 0) + l.toNextMinutes);
+    for (const l of legs) byMode.set(legModeKey(l), (byMode.get(legModeKey(l)) ?? 0) + l.toNextMinutes);
     const modeText = [...byMode].map(([m, min]) => `${modeLabel(m)} ${min}분`).join(' · ');
     points.push(`이동 ${legs.length}구간, 총 ${total}분(${modeText}).`);
   }
@@ -123,7 +131,7 @@ export function dayCardPlainText(tripData, day) {
   const daySpots = groupByDay(tripData?.spots).get(day) ?? [];
   if (!daySpots.length) return '';
   const rows = daySpots.map((sp, i) =>
-    `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${modeLabel(sp.toNextMode)} ${sp.toNextMinutes}분` : '—') : '—'}`
+    `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${legModeLabel(sp)} ${sp.toNextMinutes}분` : '—') : '—'}`
   );
   return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', isFacilityDay(tripData, day, daySpots)), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }

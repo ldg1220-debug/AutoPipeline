@@ -2140,3 +2140,11 @@
 - **결정**: 한 번의 실행에서 같은 지역은 1개만(앞선 후보 유지, 나머지는 다음 실행) — Part 1.7 후보 정리에서 적용(자동 모드 한정).
 - **이미 발행된 글**: /276·/277은 같은 지역 2건이므로 필요하면 하나를 비공개/삭제 판단(사용자). /277에는 개요 섹션이 "수치 없는 일반 섹션"으로 삭제되어 있음.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `scripts/run-blog-pipeline.js`
+
+### D-134: 트레쥴 #298(v32) 대응 — distanceSource "mixed"·구간별 toNextSource·차량 폴백 (작업지시서 AUTOPI2)
+- **계약**: distanceSource "route"|"straight"|"mixed", spots[i].toNextSource "route"|"straight"(그날 마지막엔 없음), toNextFallback "driving"(대중교통 실패를 차량으로 대체한 구간). 일본 코스(오사카·도쿄·나고야)도 이제 route.
+- **결정**: (1) 구간 정규화 `normalizeLegSources` — 직선거리 구간(toNextSource 'straight', 또는 구버전 응답에서 distanceSource 'straight')은 분·수단을 null로 비워 이후 단계(일자 카드·한눈에 보기·FAQ·구간 대조 게이트·사실 블록)가 "시간 없는 구간"으로 일관 처리. route 구간은 mixed여도 분 유지.
+  (2) 차량 폴백 구간은 toNextMode를 'car'로 고정하고 표기는 "차량 기준 N분"(표 "다음 이동", 포인트, 한 줄 정리, 한눈에 보기 수단 집계 "차량 기준 N구간"을 별도 집계) — "대중교통"으로 쓰지 않음.
+  (3) "직선거리 기준" 문구·직선거리 시간 삭제 게이트는 코스 전체가 straight일 때만(기존 `distanceSource === 'straight'` 조건 유지, mixed는 해당 없음).
+- **미검증**: 실제 v32 응답 필드명/값(toNextFallback 위치·값)은 지시서 기준. 도쿄는 짝 지시서 배포 후 확인. 섹션 풍부화(코드 블록 확대)는 지시서대로 보류, 다음 자동 발행 2~3편 후 판단.
+- **관련 파일**: `src/agents/tradule_source.js`, `src/utils/dayCard.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`, `docs/work-orders/2026-10-08_mixed-leg-source.md`

@@ -259,6 +259,21 @@ export async function fetchCourseBriefWithRetry(region, days) {
  * 리뷰 수가 적어 신뢰할 수 없는 평점을 null로 치환한다 (장소 자체는 코스에 유지).
  * 응답값만 쓰는 C-2 원칙을 지키면서, 신뢰도 낮은 값이 본문에 그대로 실리는 것만 막는다.
  */
+/**
+ * D-134(트레쥴 #298 v32): 구간 단위 출처. distanceSource는 "route" | "straight" | "mixed"이고 spots[i].toNextSource가 구간별 "route" | "straight"다.
+ * 직선거리 구간(toNextSource 'straight', 또는 toNextSource가 없는 구버전 응답에서 distanceSource가 'straight')은 분·수단이 추정값이라 null로 비워
+ * 이후 모든 단계가 "시간 없는 구간"으로 일관되게 다루게 한다(route 구간은 그대로 분 표기). toNextFallback 'driving'은 차량으로 대체한 구간(표기 "차량 기준").
+ */
+export function normalizeLegSources(spots, distanceSource) {
+  return (spots ?? []).map((sp) => {
+    const src = sp.toNextSource ?? (distanceSource === 'straight' ? 'straight' : 'route');
+    const out = { ...sp, toNextSource: sp.toNextSource ?? (sp.toNextMinutes == null && sp.toNextMode == null ? undefined : src) };
+    if (src === 'straight' && sp.toNextMinutes != null) { out.toNextMinutes = null; out.toNextMode = null; out.toNextSource = 'straight'; }
+    if (sp.toNextFallback === 'driving' && out.toNextSource !== 'straight') out.toNextMode = 'car'; // 차량 대체 구간 — 게이트가 "대중교통 N분"을 정답으로 보지 않게
+    return out;
+  });
+}
+
 export function sanitizeSpots(spots) {
   return (spots ?? []).map((spot) => {
     const reviewCount = spot.reviewCount ?? null;
@@ -520,7 +535,7 @@ export async function attachTripData(keywordData) {
           // (더 정확하고, 좌표·거리·appUrl·지도까지 붙는다).
           const liveProbe = await fetchCourseBriefWithRetry(webRegion, webDays);
           if (liveProbe && Array.isArray(liveProbe.spots)) {
-            const liveCleanSpots = filterTravelAgencySpots(filterUnratedSpots(sanitizeSpots(liveProbe.spots)));
+            const liveCleanSpots = filterTravelAgencySpots(filterUnratedSpots(normalizeLegSources(sanitizeSpots(liveProbe.spots), liveProbe.distanceSource)));
             if (liveCleanSpots.length >= MIN_SPOTS && !hasInterDayCityJump(liveCleanSpots)) {
               logger.info(`[tradule_source] "${item.keyword}" → 스냅샷엔 없었지만 라이브로는 지원됨(지역: ${webRegion}) → 트레쥴 데이터로 진행`);
               updated.push({
@@ -655,7 +670,7 @@ export async function attachTripData(keywordData) {
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
       const rawCount = Array.isArray(attempt?.spots) ? attempt.spots.length : 0;
-      const sanitized = Array.isArray(attempt?.spots) ? sanitizeSpots(attempt.spots) : [];
+      const sanitized = Array.isArray(attempt?.spots) ? normalizeLegSources(sanitizeSpots(attempt.spots), attempt.distanceSource) : [];
       const agencyFiltered = filterRegionSelfSpots(filterTravelAgencySpots(sanitized), region);
       const ratedSpots = filterUnratedSpots(agencyFiltered);
       const agencyDropped = sanitized.length - agencyFiltered.length;
