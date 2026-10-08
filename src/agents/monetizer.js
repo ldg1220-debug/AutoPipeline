@@ -712,7 +712,7 @@ function buildPlaceAffiliateLinks(tripData, slug) {
   for (const [day, list] of [...byDay.entries()].sort((a, b) => a[0] - b[0])) {
     if (count + reserveHotel >= MAX_AFFILIATE_LINKS_PER_POST) break;
     const facility = getFacilitySpot(tripData, day, list);
-    const island = list.find((sp) => isIslandName(sp.name) || /선착장/.test(sp.name ?? ''));
+    const island = list.find((sp) => isIslandName(sp.name)) ?? list.find((sp) => /선착장/.test(sp.name ?? '')); // 섬 이름이 검색어로 더 정확
     const entry = list.find((sp) => /전망대|수족관|아쿠아리움|타워|tower|동물원|테마파크/i.test(sp.name ?? ''));
     let target = null; let kind = null;
     if (facility) { target = facility; kind = 'ticket'; }

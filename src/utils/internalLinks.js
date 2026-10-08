@@ -104,21 +104,21 @@ async function rankRelatedCandidates(keyword, currentPostUrl, limit, category) {
          WHERE bp.status = 'published'
            AND bp.post_url IS NOT NULL
            AND (? IS NULL OR bp.post_url != ?)
-           AND bp.keyword != ?
+           AND REPLACE(bp.keyword, ' ', '') != ?
            AND k.category = ?
          ORDER BY bp.published_at DESC
          LIMIT 100`
-      ).all(currentPostUrl ?? null, currentPostUrl ?? null, keyword ?? '', category)
+      ).all(currentPostUrl ?? null, currentPostUrl ?? null, (keyword ?? '').replace(/\s/g, ''), category)
     : db.prepare(
         `SELECT keyword, title, post_url, published_at
          FROM blog_posts
          WHERE status = 'published'
            AND post_url IS NOT NULL
            AND (? IS NULL OR post_url != ?)
-           AND keyword != ?
+           AND REPLACE(keyword, ' ', '') != ?
          ORDER BY published_at DESC
          LIMIT 100`
-      ).all(currentPostUrl ?? null, currentPostUrl ?? null, keyword ?? '');
+      ).all(currentPostUrl ?? null, currentPostUrl ?? null, (keyword ?? '').replace(/\s/g, ''));
 
   // 카테고리 필터링 결과가 너무 적으면(같은 카테고리 글이 아직 몇 편 안 됨) 관련 포스트
   // 블록 자체를 숨기는 게 낫다 — 억지로 다른 카테고리를 섞지 않는다.

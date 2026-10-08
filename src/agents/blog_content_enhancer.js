@@ -1241,21 +1241,32 @@ function buildOverviewBody(tripData, keyword) {
   if (spots.length < 4) return '';
   const byDay = groupSpotsByDay(spots);
   const days = [...byDay.keys()].sort((a, b) => a - b);
+  const dt = tripData.dayTotals;
+  const dayKm = (d) => {
+    const e = Array.isArray(dt) ? (dt.find((x) => x?.day === d) ?? dt[d - 1]) : dt?.[d] ?? dt?.[String(d)];
+    const km = typeof e === 'number' ? e : e?.distanceKm;
+    return typeof km === 'number' && km > 0 ? km : null;
+  };
   let p1 = `${keyword} 코스는 총 ${spots.length}곳, ${days.length}일 일정으로 구성됩니다.`;
   if (typeof tripData.totalDistanceKm === 'number') p1 += tripData.distanceSource === 'straight' ? ` 장소 간 직선거리 기준 약 ${tripData.totalDistanceKm}km입니다.` : ` 총 이동 거리는 ${tripData.totalDistanceKm}km입니다.`;
   const lines = days.map((d) => {
     const list = byDay.get(d);
     const fac = getFacilitySpot(tripData, d, list);
+    const top = [...list].filter((sp) => typeof sp.reviewCount === 'number').sort((x, y) => y.reviewCount - x.reviewCount)[0];
+    const topPart = top ? ` 이날 리뷰가 가장 많은 곳은 ${top.name}(리뷰 ${top.reviewCount.toLocaleString()})입니다.` : '';
     if (fac) {
       const comp = list.filter((sp) => sp !== fac);
-      return `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다${comp.length ? `(${comp.map((c) => c.name).join('·')} 동반)` : ''}.`;
+      return `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다${comp.length ? `(${comp.map((c) => c.name).join('·')} 동반)` : ''}.${topPart}`;
     }
     const first = list[0]; const last = list[list.length - 1];
+    const minutes = tripData.distanceSource === 'straight' ? 0 : list.slice(0, -1).reduce((sum, sp, i) => sum + (typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, list[i + 1]) ? sp.toNextMinutes : 0), 0);
+    const km = dayKm(d);
+    const stats = [`${list.length}곳`, minutes > 0 ? `이동 ${minutes}분` : null, km ? `${km}km` : null].filter(Boolean).join(', ');
     return list.length === 1
-      ? `${d}일차는 ${first.name} 한 곳입니다.`
-      : `${d}일차는 ${first.name}에서 시작해 ${last.name}에서 마칩니다(${list.length}곳).`;
+      ? `${d}일차는 ${first.name} 한 곳입니다.${topPart}`
+      : `${d}일차는 ${first.name}에서 시작해 ${last.name}에서 마칩니다(${stats}).${topPart}`;
   });
-  return [p1, lines.join(' ')].join('\n\n');
+  return [p1, ...lines].join('\n\n');
 }
 
 function currentSeasonKR() {
@@ -2597,8 +2608,8 @@ async function enhanceBlogDraft(content) {
   // D-139: LLM 개요가 게이트 뒤 350자 미만이면(토막난 문장만 남는 경우) 버리고 코드 개요로 대체한다.
   for (let i = finalSections.length - 1; i >= 0; i--) {
     const sec = finalSections[i];
-    if (tripData?.spots?.length && /개요|소개/.test(sec.heading ?? '') && !/한눈에/.test(sec.heading ?? '') && sec.generated !== 'code' && (sec.body ?? '').trim().length < 350) {
-      logger.warn(`[blog_content_enhancer] LLM 개요가 ${(sec.body ?? '').trim().length}자로 짧아 코드 개요로 대체: "${sec.heading}"`);
+    if (tripData?.spots?.length && /개요|소개/.test(sec.heading ?? '') && !/한눈에/.test(sec.heading ?? '') && sec.generated !== 'code' && buildOverviewBody(tripData, keyword)) {
+      logger.warn(`[blog_content_enhancer] LLM 개요(${(sec.body ?? '').trim().length}자)를 코드 개요로 대체: "${sec.heading}"`); // D-140: 일자 누락·수단 오기·경관/테마파크 창작이 반복돼 사실만 담은 코드 개요로 일원화
       finalSections.splice(i, 1);
     }
   }

@@ -13,6 +13,16 @@
 
 ---
 
+## 0-1. 배경 (이 세션이 처음 보는 경우)
+
+- 먼저 `git pull origin main` — 아래 코드는 `1f345cc`(D-137, `docs/work-orders/2026-10-08_tradule-funnel-affiliate.md`)에 이미 있습니다.
+- `1f345cc` 가 만든 것: `src/data/affiliateBrands.js`(승인 브랜드 표, 현재 **비어 있음**) + `monetizer.js` 의 장소 제휴 슬롯
+  - 시설 날(facilityDay) · 섬/선착장 · 전망대/수족관/테마파크 날 → 일자 카드 아래 "입장권/투어 확인" 1개 (kind: ticket · tour)
+  - 코스 한눈에 보기 아래 "{지역} 숙소 보기" 1개 (kind: hotel)
+  - 글당 최대 4개 · rel="nofollow sponsored" · 표가 비면 0개
+- 표 형식은 `affiliateBrands.js` 맨 위 주석 참고 (`{query}` 장소명 · `{query2}` tp.media 의 u= 안에 넣을 때 이중 인코딩 · `{region}` · `{subId}`)
+- 이번 작업은 **그 표에 Klook 을 채우는 것뿐**입니다.
+
 ## 1. 계정 상태 (Travelpayouts · marker 765548 · 프로젝트 "Tradule")
 
 ```
