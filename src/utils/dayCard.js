@@ -64,17 +64,26 @@ export function inferSpotKind(spot) {
   return null;
 }
 
-// D-123(트레쥴 #295 facilityDay): 시설 하나가 하루를 쓰는 날(USJ·디즈니랜드 등)은 1곳이어도 정상이다.
-export function isFacilityDay(tripData, day, daySpots) {
-  if (!daySpots || daySpots.length !== 1) return false;
-  if (daySpots[0].facilityDay === true) return true;
+// D-123/D-135(트레쥴 #295 facilityDay): 시설 하나가 하루를 쓰는 날(USJ·디즈니랜드 등). 동반 스팟(예: USJ + 해유관)이 있어도 시설 날로 취급한다.
+export function getFacilitySpot(tripData, day, daySpots) {
+  if (!daySpots?.length) return null;
+  const flagged = daySpots.find((sp) => sp.facilityDay === true);
+  if (flagged) return flagged;
   const dt = tripData?.dayTotals;
   const entry = Array.isArray(dt) ? (dt.find((e) => e?.day === day) ?? dt[day - 1]) : dt?.[day] ?? dt?.[String(day)];
-  return entry?.facilityDay === true;
+  if (entry?.facilityDay !== true) return null;
+  return daySpots.length === 1 ? daySpots[0] : [...daySpots].sort((x, y) => (y.reviewCount ?? 0) - (x.reviewCount ?? 0))[0];
+}
+export function isFacilityDay(tripData, day, daySpots) {
+  return Boolean(getFacilitySpot(tripData, day, daySpots));
 }
 
 export function buildDaySubtitle(daySpots, straight = false, facility = false) {
-  if (facility && daySpots[0]) return `종일 일정 — ${daySpots[0].name}`;
+  if (facility) {
+    const f = typeof facility === 'object' ? facility : daySpots[0];
+    const companions = daySpots.filter((sp) => sp !== f);
+    return `종일 일정 — ${f.name}${companions.length ? ` (+${companions.map((sp) => sp.name).join('·')})` : ''}`;
+  }
   const kinds = [];
   for (const sp of daySpots) {
     const k = inferSpotKind(sp);
@@ -89,14 +98,26 @@ export function buildDaySubtitle(daySpots, straight = false, facility = false) {
 export function buildDayPoints(tripData, day) {
   const byDay = groupByDay(tripData.spots);
   const daySpots = byDay.get(day) ?? [];
-  if (isFacilityDay(tripData, day, daySpots)) return ['하루를 온전히 쓰는 곳이라 다른 일정을 넣지 않았습니다.'];
+  const facilitySpot = getFacilitySpot(tripData, day, daySpots);
+  if (facilitySpot) {
+    const companions = daySpots.filter((sp) => sp !== facilitySpot);
+    if (!companions.length) return ['하루를 온전히 쓰는 곳이라 다른 일정을 넣지 않았습니다.'];
+    const fi = daySpots.indexOf(facilitySpot);
+    const parts = companions.map((c) => {
+      const ci = daySpots.indexOf(c);
+      const viaFacility = ci === fi + 1 && typeof facilitySpot.toNextMinutes === 'number' && !isBoatLeg(facilitySpot, c);
+      return viaFacility ? `${c.name}은 ${legModeLabel(facilitySpot)} ${facilitySpot.toNextMinutes}분 거리라 마치고 들를 수 있습니다.` : `${c.name}도 같은 날 일정에 포함돼 있습니다.`;
+    });
+    return [`${facilitySpot.name}에서 하루 대부분을 보내는 날입니다. ${parts.join(' ')}`];
+  }
   const hasBoat = daySpots.slice(0, -1).some((sp, i) => isBoatLeg(sp, daySpots[i + 1]));
   // D-122: 직선거리(distanceSource 'straight') 코스는 구간 시간·수단이 추정값이라 표의 "다음 이동"을 "-"로 두는데,
   // 부제·포인트가 같은 분을 쓰면 서로 어긋난다(도쿄 초안) — 시간 기반 문구를 모두 생략한다.
   const straight = tripData.distanceSource === 'straight';
   const legs = straight ? [] : daySpots.slice(0, -1).filter((sp, i) => typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, daySpots[i + 1]));
   const total = straight ? 0 : dayLegMinutes(daySpots);
-  const totals = straight ? [0] : [...byDay.values()].map(dayLegMinutes);
+  // 시설 날은 "이동이 가장 많은 날" 판정에서 제외한다.
+  const totals = straight ? [0] : [...byDay.entries()].filter(([d, l]) => !getFacilitySpot(tripData, d, l)).map(([, l]) => dayLegMinutes(l));
   const points = [];
   if (hasBoat) points.push('섬은 배로 이동합니다. 배편 시간은 현지에서 확인하세요.');
   if (byDay.size > 1 && total > 0 && total === Math.max(...totals) && totals.filter((t) => t === total).length === 1) {
@@ -133,5 +154,5 @@ export function dayCardPlainText(tripData, day) {
   const rows = daySpots.map((sp, i) =>
     `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${legModeLabel(sp)} ${sp.toNextMinutes}분` : '—') : '—'}`
   );
-  return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', isFacilityDay(tripData, day, daySpots)), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
+  return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', getFacilitySpot(tripData, day, daySpots)), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }

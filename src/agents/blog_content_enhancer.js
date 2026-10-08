@@ -8,7 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
-import { inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, legModeKey, legModeLabel } from '../utils/dayCard.js';
+import { inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -1197,14 +1197,14 @@ function buildSpotLinesBody(tripData) {
   const lines = [];
   for (const day of [...byDay.keys()].sort((a, b) => a - b)) {
     const list = byDay.get(day);
-    const facility = isFacilityDay(tripData, day, list);
+    const facilitySpot = getFacilitySpot(tripData, day, list);
     list.forEach((sp, i) => {
       const parts = [inferSpotKind(sp) ?? '장소'];
       parts.push(typeof sp.rating === 'number' ? `★${sp.rating}` : '평점 정보 없음');
       if (typeof sp.reviewCount === 'number') parts.push(`리뷰 ${sp.reviewCount.toLocaleString()}`);
-      parts.push(facility ? `${day}일차 종일 일정` : `${day}일차 ${i === 0 ? '첫 장소' : `${i + 1}번째`}`);
+      parts.push(sp === facilitySpot ? `${day}일차 종일 일정` : (facilitySpot ? `${day}일차 동반 방문` : `${day}일차 ${i === 0 ? '첫 장소' : `${i + 1}번째`}`));
       const next = list[i + 1];
-      if (facility) { /* 이동 없음 */ }
+      if (sp === facilitySpot && !next) { /* 이동 없음 */ }
       else if (!next) parts.push('그날 마지막 장소');
       else if (isBoatLeg(sp, next)) parts.push(`다음: ${next.name}까지 배편`);
       else if (!straight && typeof sp.toNextMinutes === 'number') parts.push(`다음: ${next.name}까지 ${legModeLabel(sp)} ${sp.toNextMinutes}분`);

@@ -2148,3 +2148,10 @@
   (3) "직선거리 기준" 문구·직선거리 시간 삭제 게이트는 코스 전체가 straight일 때만(기존 `distanceSource === 'straight'` 조건 유지, mixed는 해당 없음).
 - **미검증**: 실제 v32 응답 필드명/값(toNextFallback 위치·값)은 지시서 기준. 도쿄는 짝 지시서 배포 후 확인. 섹션 풍부화(코드 블록 확대)는 지시서대로 보류, 다음 자동 발행 2~3편 후 판단.
 - **관련 파일**: `src/agents/tradule_source.js`, `src/utils/dayCard.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`, `docs/work-orders/2026-10-08_mixed-leg-source.md`
+
+### D-135: 동반이 있는 시설 날 카드 (작업지시서 AUTOPI3)
+- **확인(Cowork HTML 대조)**: 오사카 이동 분 복귀·직선거리 문구 없음, 도쿄 "차량 기준 7/12/19분"·"차량 기준 3구간"·3일차 종일 일정, 세부 배 구간 유지, Pass 5 되돌림 없음, 3편 첫 시도 QA 통과.
+- **결함**: 오사카 3일차(USJ + 해유관)가 시설 날로 처리되지 않아 포인트가 "이동은 한 번(차량 기준 17분)뿐이라 여유 있는 날입니다".
+- **결정**: `facilityDay` 스팟이 있으면 동반 스팟이 있어도 시설 날(`getFacilitySpot`). 부제 "종일 일정 — {시설} (+{동반})", 포인트 "{시설}에서 하루 대부분을 보내는 날입니다. {동반}은 {수단} N분 거리라 마치고 들를 수 있습니다."(시설 바로 다음 동반이면 구간 사용, 아니면 "같은 날 일정에 포함"), 동반 없으면 기존 문구.
+  "이동이 가장 많은 날"·"여유 있는 날" 판정에서 시설 날 제외, 장소별 한 줄 정리는 시설 스팟 "종일 일정"·동반 "동반 방문".
+- **관련 파일**: `src/utils/dayCard.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`, `docs/work-orders/2026-10-08_facility-day-companion-card.md`
