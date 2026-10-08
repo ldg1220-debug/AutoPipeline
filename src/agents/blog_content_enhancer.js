@@ -1176,7 +1176,14 @@ function stripUngroundedSentences(text, tripData) {
         const rest = sentence.slice(lastEnd);
         const restCore = rest.replace(/^[로으을를은는이가과와도,\s]+/, '').replace(/[.!?\s]+$/, '');
         const restHasFact = /\d/.test(rest) || names.some((n) => rest.includes(n));
-        if (!restHasFact && restCore.length > 10 && !DESCRIPTIVE_PATTERN.test(head)) { trimmed += 1; return `${head.trimEnd()}${/개$|점$/.test(head.trimEnd()) ? '입니다.' : '.'}`; }
+        if (!restHasFact && restCore.length > 10 && !DESCRIPTIVE_PATTERN.test(head)) {
+          trimmed += 1;
+          // D-136: 괄호 안에서 잘렸으면("도쿄 스카이트리(평점 4.4, 리뷰 120,381개 …") 괄호를 닫고 "입니다"를 붙이지 않는다(PM 검수: "리뷰 120,381개입니다" 문법 오류).
+          const h = head.trimEnd();
+          const open = (h.match(/\(/g) ?? []).length - (h.match(/\)/g) ?? []).length;
+          if (open > 0) return `${h}${')'.repeat(open)}.`;
+          return `${h}${/개$|점$/.test(h) ? '입니다.' : '.'}`;
+        }
         if (DESCRIPTIVE_PATTERN.test(sentence) && !restHasFact) return null;
       } else if (DESCRIPTIVE_PATTERN.test(sentence)) {
         return null;

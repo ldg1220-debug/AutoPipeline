@@ -1100,6 +1100,11 @@ async function main() {
             const candidates = (c.blog_draft?.sections ?? []).filter((sec) => !/\d+\s*일차|한눈에|종류별\s*장소|장소별\s*한\s*줄/.test(sec.heading ?? ''));
             const shortest = candidates.sort((a, b) => (a.body?.length ?? 0) - (b.body?.length ?? 0))[0];
             if (shortest) failedHeadings = [shortest.heading];
+            // D-136: 창작 차단으로 LLM 산문 섹션이 전부 사라진 코스 글(오사카 2913자)은 전체 재작성(gpt-4o 7회) 대신 "장소별 상세" 섹션 하나를 새로 만들어 채운다.
+            else if (c.trip_data?.spots?.length && c.blog_draft?.sections) {
+              c.blog_draft.sections.push({ level: 2, heading: '장소별 상세', body: '' });
+              failedHeadings = ['장소별 상세'];
+            }
           }
           if (failedHeadings.length > 0 || hasShortFaq) {
             partial.push({ content: c, failedHeadings, hasShortFaq });
