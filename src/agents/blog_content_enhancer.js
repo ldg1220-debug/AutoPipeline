@@ -2528,7 +2528,11 @@ async function enhanceBlogDraft(content) {
   }
   if (tripData?.spots?.length) {
     const numeric = /\d+(?:[.,]\d+)?\s*(?:km|m|분|시간|개|명|원|%|점|km²|층)?/g;
-    const isThin = (sec) => !DAY_SECTION_PATTERN.test(sec.heading ?? '') && ((sec.body ?? '').match(numeric) ?? []).length < 2;
+    // D-132: 게이트 삭제 후 거의 비어 버린 LLM 산문 섹션(150자 미만, 예: 식사 추천 88자)은 재생성해도 반려 루프만 돌므로 그대로 제거한다(코드 블록은 제외).
+    const CODE_HEAD = /한눈에|종류별\s*장소|장소별\s*한\s*줄/;
+    const isThin = (sec) => !DAY_SECTION_PATTERN.test(sec.heading ?? '') && (
+      ((sec.body ?? '').match(numeric) ?? []).length < 2 ||
+      (!CODE_HEAD.test(sec.heading ?? '') && (sec.body ?? '').trim().length < 150));
     for (let i = finalSections.length - 1; i >= 0; i--) {
       if (finalSections.length > 4 && isThin(finalSections[i])) {
         logger.warn(`[blog_content_enhancer] 수치 없는 일반 섹션 삭제: "${finalSections[i].heading}"`);

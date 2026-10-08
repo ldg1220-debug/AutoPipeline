@@ -536,6 +536,7 @@ async function runBlogLLMQA(content) {
   const promptKeyword = (draft.seo_keywords ?? []).join(' ') || content.keyword;
   const prompt =
     `당신은 한국 여행 블로그 SEO 전문가입니다. 아래 블로그 포스트 초안(섹션 전문)을 검수하고 JSON으로만 응답하세요.\n\n` +
+    `오늘 날짜: ${new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)} (KST) — 본문의 조회일·날짜가 이 날짜 이전이면 정상이므로 "미래 날짜"로 지적하지 마세요.\n` +
     `키워드: ${promptKeyword}\n` +
     `제목: ${draft.title ?? ''}\n` +
     `메타 설명: ${draft.meta_description ?? ''}\n` +
@@ -594,11 +595,13 @@ function validateBlogStructure(content) {
     }
   }
 
+  // D-132: 코스 데이터(trip_data) 글은 사실 블록(일자 카드·한눈에 보기·종류별 순위·한 줄 정리)이 가치를 주고 LLM 산문은 창작 차단 게이트로 짧아지므로 섹션 최소를 200자로 낮춘다(전체 3000자 기준은 유지).
+  const minSectionChars = (content.trip_data?.spots?.length ?? 0) > 0 ? 200 : BLOG_MIN_SECTION_CHARS;
   const shortSections = sections.filter(
-    (s) => !CODE_GENERATED_SECTION_PATTERN.test(s.heading ?? '') && (s.body ?? '').length < BLOG_MIN_SECTION_CHARS
+    (s) => !CODE_GENERATED_SECTION_PATTERN.test(s.heading ?? '') && (s.body ?? '').length < minSectionChars
   );
   if (shortSections.length > 0) {
-    issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${BLOG_MIN_SECTION_CHARS}자)`);
+    issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${minSectionChars}자)`);
   }
 
   // 구체 수치 검사 — FAQ가 아닌 본문 섹션만 대상 (막연한 일반론 방어)

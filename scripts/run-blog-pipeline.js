@@ -759,8 +759,10 @@ async function main() {
 
   // Part 1.5: Topic Grouper — 유사 주제 키워드 묶기 (D-127: 키워드 1개면 묶을 대상이 없어 LLM 호출 2회를 생략)
   try {
-    const grouped = contentData.contents.length <= 1
-      ? (logger.info('[blog:pipeline] Part 1.5: 키워드 1개 — 주제 묶기 생략(LLM 호출 없음)'), contentData)
+    // D-132: 여행 키워드만이면 묶기를 생략한다 — 같은 지역 키워드는 Part 1.56(하루 1개)이 정리하고, 묶으면 "오키나와 4박5일 일정 & 오키나와 3박4일 & …"처럼 일수가 다른 키워드가 한 제목으로 합쳐져 SEO 키워드·일수 판정이 깨진다.
+    const allTravel = contentData.contents.length > 0 && contentData.contents.every((c) => c.category === 'travel');
+    const grouped = (contentData.contents.length <= 1 || allTravel)
+      ? (logger.info(`[blog:pipeline] Part 1.5: ${allTravel ? '여행 키워드만 — ' : '키워드 1개 — '}주제 묶기 생략(LLM 호출 없음)`), contentData)
       : await groupSimilarTopics(contentData);
     Object.assign(contentData, grouped);
     logger.info(`[blog:pipeline] Part 1.5 완료. ${grouped.original_count ?? '?'}개 → ${grouped.grouped_count ?? contentData.contents.length}개 포스트`);
