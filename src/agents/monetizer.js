@@ -696,7 +696,7 @@ function buildPlaceAffiliateLinks(tripData, slug) {
   const out = { byDay: new Map(), hotelHtml: '', count: 0 };
   if (!tripData?.spots?.length || APPROVED_AFFILIATE_BRANDS.length === 0) return out;
   const region = tripData.region ?? '';
-  const subId = (slug || region).replace(/[^a-zA-Z0-9가-힣_-]/g, '_').slice(0, 40);
+  const subId = `blog_${region}_${slug || ''}`.replace(/[^a-zA-Z0-9가-힣_-]/g, '_').slice(0, 60); // blog_{지역}_{slug} (eSIM 링크 규칙과 동일)
   const pick = (kind) => APPROVED_AFFILIATE_BRANDS.find((b) => b.kind === kind && (b.regions === '*' || (Array.isArray(b.regions) && b.regions.includes(region))));
   const mk = (b, query) => b.urlTemplate
     .replace(/\{query2\}/g, encodeURIComponent(encodeURIComponent(query)))

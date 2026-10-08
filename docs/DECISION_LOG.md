@@ -2180,3 +2180,12 @@
 - **결정**: 개요 섹션이 없으면 코드가 trip_data로 개요를 맨 앞에 만든다(`buildOverviewBody`, `generated:'code'`): "{키워드} 코스는 총 N곳, D일 일정…", 일자별 "N일차는 A에서 시작해 B에서 마칩니다(n곳)", 시설 날은 "하루 대부분을 보내는 날(동반)". 창작 없음.
   코드 개요는 QA 섹션 최소 글자와 재생성 대상에서 제외(generated 플래그).
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/qa_editor.js`, `scripts/run-blog-pipeline.js`
+
+### D-139: Klook 제휴 브랜드 등록 · 오사카 초안(17:11) 점검 — 술어 잃은 토막 문장·지시어 구간 오류
+- **Klook (작업지시서 AU8E8F1)**: `affiliateBrands.js`에 ticket·tour 두 항목(campaign_id=137, p=4110, regions '*'), u = Klook 검색 URL(`/ko/search/result/?query={장소명}`, 이중 인코딩), sub_id `blog_{지역}_{slug}`. hotel은 승인 브랜드 없어 비움.
+  **미확인**: 이 환경에서 klook.com이 봇 요청에 403(루트 페이지 포함)이라 검색 URL 200 여부를 확인하지 못함 — 브라우저에서 확인 후 안 열리면 u를 `https://www.klook.com/ko/`로 교체.
+- **초안 점검(트레쥴 코스 페이지 복구 확인)**: 트레쥴 CTA가 코스 한눈에 보기 아래·글 끝 두 곳에 `/course/오사카/3`(utm 포함)로 들어감 → 트레쥴 배포 완료. 시설 날 카드("종일 일정 — 유니버설 스튜디오 재팬 (+해유관)", 포인트, "차량 기준 17분")·한눈에 보기("차량 기준 1구간") 정상.
+- **결함**: (1) 개요가 "첫째 날에는 오사카 성(평점 4.4점, 리뷰 100,768개)."처럼 술어 없는 토막 — D-133 꼬리 절단이 "…에서 시작합니다" 같은 이동·방문 서술어까지 잘랐음. (2) "이곳까지는 대중교통을 이용해 약 25분" — 25분은 오니기리→우메다 구간인데 "이곳까지"(오니기리)로 서술.
+- **결정**: (1) 꼬리에 이동·방문 동사(시작·방문·이동·도착·마무리·들러·향·이어·거쳐·출발·둘러·찾)가 있으면 절단하지 않음. LLM 개요가 게이트 뒤 350자 미만이면 버리고 코드 개요(D-138)로 대체.
+  (2) "이곳/여기 까지·으로 + N분"은 직전에 언급된 장소로 들어오는 구간(앞 장소의 toNextMinutes)과 다르면 삭제.
+- **관련 파일**: `src/data/affiliateBrands.js`, `src/agents/monetizer.js`, `src/agents/blog_content_enhancer.js`, `docs/work-orders/2026-10-08_affiliate-brands-klook.md`

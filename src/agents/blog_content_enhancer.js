@@ -1142,6 +1142,16 @@ function stripMismatchedSpotStats(text, tripData) {
         const claimed = /테마파크/.test(sent) ? '테마파크' : (/음식점|식당/.test(sent) ? '식사' : null);
         if (claimed && kind !== claimed && /이곳|이\s*곳|(은|는)\s*(테마파크|음식점|식당)/.test(sent)) bad = true;
       }
+      // D-139: "이곳까지는 대중교통으로 약 25분" — 지시어 구간은 직전에 언급된 장소로 들어오는 구간(앞 장소의 toNextMinutes)과 같아야 한다(오사카 초안: 오니기리→우메다 25분을 "이곳까지"로 서술).
+      if (!bad && cur && !events.some((e) => e.spot) && /(이곳|여기)(까지|으로)/.test(sent)) {
+        const m = sent.match(/(\d+)\s*분/);
+        if (m) {
+          const list = spots.filter((x) => x.day === cur.day).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          const idx = list.findIndex((x) => x.name === cur.name);
+          const incoming = idx > 0 ? list[idx - 1].toNextMinutes : null;
+          if (Number(m[1]) !== incoming) bad = true;
+        }
+      }
       current = cur;
       if (bad) { removed += 1; continue; }
       kept.push(sent);
@@ -1176,7 +1186,9 @@ function stripUngroundedSentences(text, tripData) {
         const rest = sentence.slice(lastEnd);
         const restCore = rest.replace(/^[로으을를은는이가과와도,\s]+/, '').replace(/[.!?\s]+$/, '');
         const restHasFact = /\d/.test(rest) || names.some((n) => rest.includes(n));
-        if (!restHasFact && restCore.length > 10 && !DESCRIPTIVE_PATTERN.test(head)) {
+        // D-139: 서술어가 이동·방문 동작이면("…(평점 …)에서 시작합니다") 꼬리가 아니라 문장의 뼈대이므로 자르지 않는다(오사카 개요가 "첫째 날에는 오사카 성(평점 …)."처럼 술어 없는 토막이 됨).
+        const navRest = /시작|방문|이동|도착|마무리|마칩|들러|들르|향|이어|거쳐|출발|둘러|찾/.test(rest);
+        if (!restHasFact && !navRest && restCore.length > 10 && !DESCRIPTIVE_PATTERN.test(head)) {
           trimmed += 1;
           // D-136: 괄호 안에서 잘렸으면("도쿄 스카이트리(평점 4.4, 리뷰 120,381개 …") 괄호를 닫고 "입니다"를 붙이지 않는다(PM 검수: "리뷰 120,381개입니다" 문법 오류).
           const h = head.trimEnd();
@@ -2580,6 +2592,14 @@ async function enhanceBlogDraft(content) {
         logger.warn(`[blog_content_enhancer] 수치 없는 일반 섹션 삭제: "${finalSections[i].heading}"`);
         finalSections.splice(i, 1);
       }
+    }
+  }
+  // D-139: LLM 개요가 게이트 뒤 350자 미만이면(토막난 문장만 남는 경우) 버리고 코드 개요로 대체한다.
+  for (let i = finalSections.length - 1; i >= 0; i--) {
+    const sec = finalSections[i];
+    if (tripData?.spots?.length && /개요|소개/.test(sec.heading ?? '') && !/한눈에/.test(sec.heading ?? '') && sec.generated !== 'code' && (sec.body ?? '').trim().length < 350) {
+      logger.warn(`[blog_content_enhancer] LLM 개요가 ${(sec.body ?? '').trim().length}자로 짧아 코드 개요로 대체: "${sec.heading}"`);
+      finalSections.splice(i, 1);
     }
   }
   // D-138: 개요 섹션이 없으면(삭제됐거나 애초에 없음) 코드 개요를 맨 앞에 둔다.
