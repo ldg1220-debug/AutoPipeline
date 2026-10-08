@@ -1222,6 +1222,30 @@ function buildSpotLinesBody(tripData) {
   return lines.join('\n');
 }
 
+// D-138: LLM 개요가 창작 차단 후 "수치 없는 일반 섹션"으로 통째로 삭제되면(오사카 2박3일, 나고야 4박5일 /277) 글에 개요가 없고 전체가 2913자처럼 3000자 직전에서 반려된다.
+// 개요가 없을 때만 trip_data로 코드가 일자별 시작·마침 장소 개요를 만든다(창작 없음).
+function buildOverviewBody(tripData, keyword) {
+  const spots = tripData?.spots ?? [];
+  if (spots.length < 4) return '';
+  const byDay = groupSpotsByDay(spots);
+  const days = [...byDay.keys()].sort((a, b) => a - b);
+  let p1 = `${keyword} 코스는 총 ${spots.length}곳, ${days.length}일 일정으로 구성됩니다.`;
+  if (typeof tripData.totalDistanceKm === 'number') p1 += tripData.distanceSource === 'straight' ? ` 장소 간 직선거리 기준 약 ${tripData.totalDistanceKm}km입니다.` : ` 총 이동 거리는 ${tripData.totalDistanceKm}km입니다.`;
+  const lines = days.map((d) => {
+    const list = byDay.get(d);
+    const fac = getFacilitySpot(tripData, d, list);
+    if (fac) {
+      const comp = list.filter((sp) => sp !== fac);
+      return `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다${comp.length ? `(${comp.map((c) => c.name).join('·')} 동반)` : ''}.`;
+    }
+    const first = list[0]; const last = list[list.length - 1];
+    return list.length === 1
+      ? `${d}일차는 ${first.name} 한 곳입니다.`
+      : `${d}일차는 ${first.name}에서 시작해 ${last.name}에서 마칩니다(${list.length}곳).`;
+  });
+  return [p1, lines.join(' ')].join('\n\n');
+}
+
 function currentSeasonKR() {
   const m = new Date(Date.now() + 9 * 3600 * 1000).getUTCMonth() + 1;
   return m >= 3 && m <= 5 ? '봄' : m >= 6 && m <= 8 ? '여름' : m >= 9 && m <= 11 ? '가을' : '겨울';
@@ -2211,7 +2235,7 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
     if (!failedSet.has(section.heading)) return section;
     // D-125: 코드 생성 섹션(한눈에 보기·종류별 순위)은 LLM으로 재생성하지 않는다(오사카·삿포로 초안: 재생성이 코드 블록을 LLM 문단으로 덮어씀).
     if (/한눈에/.test(section.heading ?? '')) return { ...section, body: buildCourseGlanceBody(tripData) || section.body };
-    if (/종류별\s*장소|장소별\s*한\s*줄/.test(section.heading ?? '')) return section;
+    if (/종류별\s*장소|장소별\s*한\s*줄/.test(section.heading ?? '') || section.generated === 'code') return section;
     const dayMatch = (section.heading ?? '').match(DAY_SECTION_PATTERN);
     let newBody;
     if (dayMatch && tripData?.spots?.length) {
@@ -2557,6 +2581,11 @@ async function enhanceBlogDraft(content) {
         finalSections.splice(i, 1);
       }
     }
+  }
+  // D-138: 개요 섹션이 없으면(삭제됐거나 애초에 없음) 코드 개요를 맨 앞에 둔다.
+  if (tripData?.spots?.length && !finalSections.some((sec) => /개요|소개/.test(sec.heading ?? '') && !/한눈에/.test(sec.heading ?? ''))) {
+    const overviewBody = buildOverviewBody(tripData, keyword);
+    if (overviewBody) finalSections.unshift({ level: 2, heading: `${keyword} 코스 개요`, body: overviewBody, generated: 'code' });
   }
   const llmFaqs = finalFaqSectionsRaw
     .map((f, i) => ({ ...f, a: dropOrphanParagraphs(capped[origSectionCount + i], tripData) }))

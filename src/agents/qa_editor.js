@@ -598,7 +598,7 @@ function validateBlogStructure(content) {
   // D-132: 코스 데이터(trip_data) 글은 사실 블록(일자 카드·한눈에 보기·종류별 순위·한 줄 정리)이 가치를 주고 LLM 산문은 창작 차단 게이트로 짧아지므로 섹션 최소를 200자로 낮춘다(전체 3000자 기준은 유지).
   const minSectionChars = (content.trip_data?.spots?.length ?? 0) > 0 ? 200 : BLOG_MIN_SECTION_CHARS;
   const shortSections = sections.filter(
-    (s) => !CODE_GENERATED_SECTION_PATTERN.test(s.heading ?? '') && (s.body ?? '').length < minSectionChars
+    (s) => s.generated !== 'code' && !CODE_GENERATED_SECTION_PATTERN.test(s.heading ?? '') && (s.body ?? '').length < minSectionChars
   );
   if (shortSections.length > 0) {
     issues.push(`섹션 글자 수 미달: [${shortSections.map((s) => s.heading).join(', ')}] (최소 ${minSectionChars}자)`);

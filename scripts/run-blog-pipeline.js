@@ -1097,7 +1097,7 @@ async function main() {
           // 한 섹션만 다시 만든다(일자 카드·"코스 한눈에 보기" 같은 코드 생성 섹션 제외).
           const lengthOnly = (c.blog_qa?.issues ?? []).some((i) => i.includes('글 전체 분량 부족'));
           if (failedHeadings.length === 0 && !hasShortFaq && lengthOnly) {
-            const candidates = (c.blog_draft?.sections ?? []).filter((sec) => !/\d+\s*일차|한눈에|종류별\s*장소|장소별\s*한\s*줄/.test(sec.heading ?? ''));
+            const candidates = (c.blog_draft?.sections ?? []).filter((sec) => sec.generated !== 'code' && !/\d+\s*일차|한눈에|종류별\s*장소|장소별\s*한\s*줄/.test(sec.heading ?? ''));
             const shortest = candidates.sort((a, b) => (a.body?.length ?? 0) - (b.body?.length ?? 0))[0];
             if (shortest) failedHeadings = [shortest.heading];
             // D-136: 창작 차단으로 LLM 산문 섹션이 전부 사라진 코스 글(오사카 2913자)은 전체 재작성(gpt-4o 7회) 대신 "장소별 상세" 섹션 하나를 새로 만들어 채운다.
