@@ -1126,8 +1126,8 @@ function stripMismatchedSpotStats(text, tripData) {
         let from = 0; let idx;
         while ((idx = sent.indexOf(sp.name, from)) !== -1) { events.push({ pos: idx, spot: sp }); from = idx + sp.name.length; }
       }
-      for (const m of sent.matchAll(/(?:평점\s*|★\s*)(\d(?:\.\d)?)\s*점?/g)) events.push({ pos: m.index, kind: 'rating', val: Number(m[1]) });
-      for (const m of sent.matchAll(/리뷰\s*([\d,]+)\s*개?/g)) events.push({ pos: m.index, kind: 'review', val: digits(m[1]) });
+      for (const m of sent.matchAll(/(?:평점(?:은|이|를)?\s*|★\s*)(\d(?:\.\d)?)\s*점?/g)) events.push({ pos: m.index, kind: 'rating', val: Number(m[1]) });
+      for (const m of sent.matchAll(/리뷰(?:\s*수)?(?:는|가|를)?\s*([\d,]+)\s*개?/g)) events.push({ pos: m.index, kind: 'review', val: digits(m[1]) });
       events.sort((a, b) => a.pos - b.pos);
       let cur = current; let bad = false;
       for (const ev of events) {
@@ -1135,6 +1135,12 @@ function stripMismatchedSpotStats(text, tripData) {
         if (!cur) continue;
         if (ev.kind === 'rating' && (typeof cur.rating !== 'number' || cur.rating !== ev.val)) bad = true;
         if (ev.kind === 'review' && (typeof cur.reviewCount !== 'number' || cur.reviewCount !== ev.val)) bad = true;
+      }
+      // D-133: Tradule category(테마파크 등)를 LLM이 그대로 말하는데 우리가 추정한 종류와 다르면 삭제("히가시야마 동식물원 — 이곳은 테마파크로").
+      if (!bad && cur) {
+        const kind = inferSpotKind(cur);
+        const claimed = /테마파크/.test(sent) ? '테마파크' : (/음식점|식당/.test(sent) ? '식사' : null);
+        if (claimed && kind !== claimed && /이곳|이\s*곳|(은|는)\s*(테마파크|음식점|식당)/.test(sent)) bad = true;
       }
       current = cur;
       if (bad) { removed += 1; continue; }
@@ -1150,7 +1156,7 @@ function stripMismatchedSpotStats(text, tripData) {
 // D-130(AUTOPI1 §2): 창작을 문장 패턴으로 하나씩 막지 않고 원칙으로 막는다 — LLM 본문 섹션(개요·장소별 상세 등, FAQ·코드 블록 제외)에서
 // ① 스팟 이름도 숫자도 없는 문장은 삭제, ② 스팟 이름이 있어도 묘사 형용사만 있고 숫자가 없으면 삭제.
 const DESCRIPTIVE_PATTERN = /바삭|부드러운|웅장|화려|독특|멋진|아름다운|젊은|인기가\s*(많|높)|유명|특별한|다양한|맛볼|즐길\s*수|매력|만끽|풍경|전경|전망을\s*감상|감상할|접근할|쉽게|관찰|랜드마크|자랑|의미\s*있는|역사적|건축적|즐기기에|좋은\s*곳|좋다|좋습니다/;
-const STAT_PATTERN = /(평점\s*\d(?:\.\d)?\s*점?|리뷰\s*[\d,]+\s*개?|★\s*\d(?:\.\d)?)/g;
+const STAT_PATTERN = /(평점(?:은|이|를)?\s*\d(?:\.\d)?\s*점?|리뷰(?:\s*수)?(?:는|가|를)?\s*[\d,]+\s*개?|★\s*\d(?:\.\d)?)/g;
 function stripUngroundedSentences(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
   const names = tripData.spots.map((sp) => sp.name).filter(Boolean);
@@ -1160,16 +1166,21 @@ function stripUngroundedSentences(text, tripData) {
     const hasNumber = /\d/.test(sentence);
     if (!hasName && !hasNumber) return null;
     if (hasName && !hasNumber && DESCRIPTIVE_PATTERN.test(sentence)) return null;
-    // D-131: 평점·리뷰 수 뒤에 묘사가 이어지는 문장("…리뷰 100,359개로 역사와 자연을 동시에 느낄 수 있는 장소다")은 사실 부분만 남긴다.
-    if (hasNumber && DESCRIPTIVE_PATTERN.test(sentence)) {
+    // D-131/D-133: 평점·리뷰 수 뒤에 사실이 아닌 꼬리가 이어지는 문장은 사실 부분만 남긴다.
+    // (D-131은 묘사 단어 목록으로 판단했으나 "기술 혁신의 역사를 엿볼 수 있는", "후기를 남기고 있다"처럼 새 표현이 계속 나와 — 꼬리에 숫자·스팟 이름이 없고 실질 내용이 있으면 일괄 제거)
+    if (hasNumber) {
       let lastEnd = -1;
       for (const m of sentence.matchAll(STAT_PATTERN)) lastEnd = m.index + m[0].length;
       if (lastEnd > 0) {
         const head = sentence.slice(0, lastEnd);
         const rest = sentence.slice(lastEnd);
-        if (!/\d/.test(rest) && !DESCRIPTIVE_PATTERN.test(head)) { trimmed += 1; return `${head.trimEnd()}${/개$|점$/.test(head.trimEnd()) ? '입니다.' : '.'}`; }
+        const restCore = rest.replace(/^[로으을를은는이가과와도,\s]+/, '').replace(/[.!?\s]+$/, '');
+        const restHasFact = /\d/.test(rest) || names.some((n) => rest.includes(n));
+        if (!restHasFact && restCore.length > 10 && !DESCRIPTIVE_PATTERN.test(head)) { trimmed += 1; return `${head.trimEnd()}${/개$|점$/.test(head.trimEnd()) ? '입니다.' : '.'}`; }
+        if (DESCRIPTIVE_PATTERN.test(sentence) && !restHasFact) return null;
+      } else if (DESCRIPTIVE_PATTERN.test(sentence)) {
+        return null;
       }
-      return null;
     }
     return sentence;
   });

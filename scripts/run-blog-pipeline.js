@@ -1017,6 +1017,17 @@ async function main() {
       }
     }
     contentData.contents = contentData.contents.filter((c) => !c.skip_reason);
+    // D-133: 같은 지역 글은 한 번의 실행에 1개만(나고야 2박3일·4박5일이 같은 날 둘 다 발행돼 검색 경쟁) — 앞선 후보를 남기고 나머지는 다음 실행으로.
+    if (!singleMode && !forceKeyword) {
+      const seenRegion = new Set();
+      contentData.contents = contentData.contents.filter((c) => {
+        const r = c.trip_data?.region;
+        if (!r) return true;
+        if (seenRegion.has(r)) { logger.info(`[blog:pipeline] Part 1.7: "${c.keyword}" 제외 — 같은 실행에 이미 ${r} 글이 있어 다음 실행으로`); return false; }
+        seenRegion.add(r);
+        return true;
+      });
+    }
     if (!singleMode && !forceKeyword && contentData.contents.length > targetCount) {
       logger.info(`[blog:pipeline] Part 1.7: 후보 ${contentData.contents.length}개 중 앞의 ${targetCount}개만 진행 (스킵 대비 여분 제외)`);
       contentData.contents = contentData.contents.slice(0, targetCount);
