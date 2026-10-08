@@ -2162,3 +2162,13 @@
 - **결정**: (1) 잘린 머리에 열린 괄호가 있으면 닫고 "입니다"를 붙이지 않음. (2) 길이만 부족한데 부분 재생성할 LLM 산문 섹션이 없으면 "장소별 상세" 빈 섹션을 추가해 그 섹션만 채운다(전체 재작성 대신).
 - **미확인**: 오사카 재작성본의 QA 지적 "일부 장소의 리뷰 수가 본문과 장소별 한 줄 정리에서 일치하지 않음" — HTML 필요.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `scripts/run-blog-pipeline.js`
+
+### D-137: 블로그→트레쥴 코스 페이지 CTA 복구 · 장소 단위 제휴 슬롯 (작업지시서 AUTOPI4)
+- **현황**: 트레쥴 CTA는 TRADULE_LINK_PAUSED로 본문에 없고(링크가 course-open·planner라 로그인 독자의 계획 덮어쓰기 위험), 제휴는 글당 eSIM 2개뿐이며 쿠팡은 여행 글에 삽입되지 않음.
+- **결정**: (1) CTA 대상은 공개 코스 페이지 `/course/{지역}/{일수}`만(utm_source=maeilg&utm_medium=blog&utm_campaign={slug}), 위치 2곳 — 코스 한눈에 보기 바로 아래·글 끝. 발행 직전 링크를 확인해 200이 아니면 CTA를 넣지 않는다(HEAD, 405/501이면 GET) —
+  트레쥴 코스 페이지가 404인 동안(짝 지시서 §1 배포 전)은 자동으로 빠진다. 문구 "이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴". 예전 appUrl(course-open) 링크는 사용하지 않는다.
+  (2) 제휴: `src/data/affiliateBrands.js`에 승인 브랜드 표({brand, kind ticket|tour|hotel, regions, label, urlTemplate}) — 표가 비면 출력 없음(현재 비어 있음). 시설 날(facilityDay)·섬/선착장·전망대/수족관/타워/동물원/테마파크 날에는 일자 카드 아래 "입장권/투어 확인" 링크 1개,
+  지역 숙소 링크 1개는 코스 한눈에 보기 아래 "{지역} 숙소 보기", 글당 최대 4개(숙소 슬롯 우선 예약), 모두 rel="nofollow sponsored" + 제휴 링크 표기 + 기존 고지문 재사용. 쿠팡은 여행 글에서 계속 제외.
+- **필요한 사용자 작업**: Travelpayouts 승인 브랜드(예: 입장권·투어·숙소) 정보를 `affiliateBrands.js`에 채우기. 트레쥴 짝 지시서(404 수정) 배포.
+- **미검증**: 실제 트레쥴 코스 페이지 200 확인 경로는 이 환경에서 실행하지 못함(코드는 404/네트워크 오류 시 CTA 생략).
+- **관련 파일**: `src/agents/monetizer.js`, `src/data/affiliateBrands.js`, `docs/work-orders/2026-10-08_tradule-funnel-affiliate.md`

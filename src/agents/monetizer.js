@@ -11,7 +11,8 @@ import { findRelatedPosts, buildRelatedPostsHtml, RELATED_POSTS_CSS } from '../u
 import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 import { isOverseasRegion, extractRegion } from './tradule_source.js';
 import { splitKeywordPhrases } from './blog_content_enhancer.js';
-import { buildDayPoints, buildDaySubtitle, getFacilitySpot, inferSpotKind, dayLegMinutes, isBoatLeg } from '../utils/dayCard.js';
+import { buildDayPoints, buildDaySubtitle, getFacilitySpot, inferSpotKind, dayLegMinutes, isBoatLeg, isIslandName, groupByDay } from '../utils/dayCard.js';
+import { APPROVED_AFFILIATE_BRANDS, MAX_AFFILIATE_LINKS_PER_POST } from '../data/affiliateBrands.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -668,7 +669,69 @@ const SECTION_LABELS = ['① 핵심 정보', '② 자세히 보기', '③ 심층
 // 카드로 — (그날 지도) + 부제 + 표 + 데이터로 만든 "이 날의 포인트". 공용 로직은 utils/dayCard.js.
 const DAY_HEADING_PATTERN = /(\d+)\s*일차/;
 
-function buildDayCardHtml(tripData, day, narrativeHtml) {
+// ── D-137(AUTOPI4): 트레쥴 코스 페이지 CTA + 장소 단위 제휴 ─────────────────────────────
+// 트레쥴 CTA는 공개 코스 페이지(/course/{지역}/{일수})로만 연결한다(planner·course-open 금지 — 로그인 독자의 계획 덮어쓰기 위험).
+// 발행 직전 링크가 200이 아니면 CTA를 넣지 않는다(트레쥴 코스 페이지 404 회귀 동안 자동으로 빠짐).
+async function buildTraduleCoursePageUrl(tripData, slug) {
+  if (!tripData?.region || !tripData?.days) return null;
+  let origin = 'https://www.tradule.co.kr';
+  try { if (tripData.appUrl) origin = new URL(tripData.appUrl).origin; } catch { /* 기본값 */ }
+  const base = `${origin}/course/${encodeURIComponent(tripData.region)}/${tripData.days}`;
+  const url = `${base}?utm_source=maeilg&utm_medium=blog&utm_campaign=${encodeURIComponent(slug || tripData.region)}`;
+  for (const method of ['HEAD', 'GET']) {
+    try {
+      const res = await fetch(base, { method, redirect: 'follow', signal: AbortSignal.timeout(8000) });
+      if (res.status === 200) return url;
+      if (method === 'HEAD' && (res.status === 405 || res.status === 501)) continue;
+      logger.warn(`[monetizer] 트레쥴 코스 페이지 ${res.status} → CTA 생략: ${base}`);
+      return null;
+    } catch (err) {
+      if (method === 'GET') { logger.warn(`[monetizer] 트레쥴 코스 페이지 확인 실패 → CTA 생략: ${err.message}`); return null; }
+    }
+  }
+  return null;
+}
+
+function buildPlaceAffiliateLinks(tripData, slug) {
+  const out = { byDay: new Map(), hotelHtml: '', count: 0 };
+  if (!tripData?.spots?.length || APPROVED_AFFILIATE_BRANDS.length === 0) return out;
+  const region = tripData.region ?? '';
+  const subId = (slug || region).replace(/[^a-zA-Z0-9가-힣_-]/g, '_').slice(0, 40);
+  const pick = (kind) => APPROVED_AFFILIATE_BRANDS.find((b) => b.kind === kind && (b.regions === '*' || (Array.isArray(b.regions) && b.regions.includes(region))));
+  const mk = (b, query) => b.urlTemplate
+    .replace(/\{query2\}/g, encodeURIComponent(encodeURIComponent(query)))
+    .replace(/\{query\}/g, encodeURIComponent(query))
+    .replace(/\{region\}/g, encodeURIComponent(region))
+    .replace(/\{subId\}/g, encodeURIComponent(subId));
+  const link = (b, query, text) =>
+    `<a href="${mk(b, query)}" target="_blank" rel="nofollow sponsored noopener">${text}</a>`;
+  let count = 0;
+  const hotel = pick('hotel');
+  const reserveHotel = hotel ? 1 : 0;
+  const byDay = groupByDay(tripData.spots);
+  for (const [day, list] of [...byDay.entries()].sort((a, b) => a[0] - b[0])) {
+    if (count + reserveHotel >= MAX_AFFILIATE_LINKS_PER_POST) break;
+    const facility = getFacilitySpot(tripData, day, list);
+    const island = list.find((sp) => isIslandName(sp.name) || /선착장/.test(sp.name ?? ''));
+    const entry = list.find((sp) => /전망대|수족관|아쿠아리움|타워|tower|동물원|테마파크/i.test(sp.name ?? ''));
+    let target = null; let kind = null;
+    if (facility) { target = facility; kind = 'ticket'; }
+    else if (island) { target = island; kind = 'tour'; }
+    else if (entry) { target = entry; kind = 'ticket'; }
+    const brand = kind ? pick(kind) : null;
+    if (!brand) continue;
+    out.byDay.set(day, `<p style="margin:0 0 14px;font-size:14px">🎟 ${link(brand, target.name, `${target.name} ${brand.label ?? (kind === 'tour' ? '투어 확인' : '입장권 확인')}`)} <span style="color:#94a3b8">(제휴 링크)</span></p>\n`);
+    count += 1;
+  }
+  if (hotel && region) {
+    out.hotelHtml = `<p style="margin:0 0 14px;font-size:14px">🏨 ${link(hotel, region, `${region} 숙소 보기`)} <span style="color:#94a3b8">(제휴 링크)</span></p>`;
+    count += 1;
+  }
+  out.count = count;
+  return out;
+}
+
+function buildDayCardHtml(tripData, day, narrativeHtml, extraHtml = '') {
   const daySpots = (tripData.spots ?? []).filter((sp) => (sp.day ?? 1) === day).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   if (daySpots.length === 0) return '';
   const subtitle = buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', getFacilitySpot(tripData, day, daySpots));
@@ -688,7 +751,8 @@ function buildDayCardHtml(tripData, day, narrativeHtml) {
     (subtitle ? `<p style="margin:0 0 10px;color:#64748b;font-size:14px">${subtitle}</p>\n` : '') +
     `<div class="timeline-table"><table>\n<thead><tr><th>순서</th><th>장소</th><th>종류</th><th>평점 (리뷰)</th>${straightLine ? '' : '<th>다음 이동</th>'}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table></div>\n` +
     (points.length ? `<p style="margin:10px 0 14px;line-height:1.9"><b>이 날의 포인트</b> — ${points.join(' ')}</p>\n` : '') +
-    (narrativeHtml ? `<p style="margin:0 0 14px;line-height:1.9">${narrativeHtml}</p>\n` : '')
+    (narrativeHtml ? `<p style="margin:0 0 14px;line-height:1.9">${narrativeHtml}</p>\n` : '') +
+    extraHtml
   );
 }
 
@@ -700,7 +764,7 @@ function buildDayCardHtml(tripData, day, narrativeHtml) {
  * @param {string} catColor      - 카테고리 색상 hex
  * @param {Object} tripData      - 일자 카드 생성용(없으면 일반 렌더)
  */
-function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb', tripData = null) {
+function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb', tripData = null, extras = {}) {
   // 2026-09-29(§3): 같은 이미지는 글 안에서 1번만. 예전엔 섹션 인덱스에 맞는 이미지가
   // 없으면 bodyImages[i % length]로 순환해 같은 사진·지도가 여러 섹션에 반복됐다.
   const usedImageUrls = new Set();
@@ -740,7 +804,7 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         const idx = rawBody.indexOf('\n\n');
         const narrative = idx >= 0 ? rawBody.slice(idx + 2) : '';
         const narrativeHtml = narrative ? highlightKeywords(markdownToHtml(narrative), seoKeywords) : '';
-        contentHtml = buildDayCardHtml(tripData, Number(dayMatch[1]), narrativeHtml);
+        contentHtml = buildDayCardHtml(tripData, Number(dayMatch[1]), narrativeHtml, extras.dayAffiliate?.get(Number(dayMatch[1])) ?? '');
       } else {
         // 마크다운 → HTML 변환 후 키워드 하이라이트. ("핵심:" callout 상자는 2026-09-29 제거 —
         // 첫 문장을 그대로 복사해 한 섹션에 같은 내용이 반복됐다.)
@@ -755,7 +819,8 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         `</div>\n` +
         `${imageHtml}\n` +
         contentHtml +
-        `${affiliateHtml}`
+        `${affiliateHtml}` +
+        (/한눈에/.test(s.heading ?? '') ? (extras.afterGlanceHtml ?? '') : '')
       );
     })
     .join('\n\n');
@@ -878,7 +943,14 @@ async function monetizeBlogDraft(content) {
   }
 
   // ① 섹션 HTML (키워드 하이라이트 + 섹션 헤더 + 섹션별 이미지)
-  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data);
+  // D-137: 트레쥴 코스 페이지 CTA(200 확인된 경우만) + 장소 단위 제휴 링크(승인 브랜드 설정 시에만).
+  const traduleCourseUrl = await buildTraduleCoursePageUrl(content.trip_data, blog_draft.slug);
+  const traduleCtaLine = traduleCourseUrl
+    ? `<div class="tradule-cta"><a href="${traduleCourseUrl}" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a></div>`
+    : '';
+  const placeAff = buildPlaceAffiliateLinks(content.trip_data, blog_draft.slug);
+  const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
+    { dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
@@ -943,34 +1015,10 @@ async function monetizeBlogDraft(content) {
   // appUrl 링크를 전부 끈다(본문 중간·푸터 둘 다). 비로그인 독자는 영향 없지만, 로그인
   // 독자가 실제로 계획을 잃는 사고보다 링크 하나 며칠 빠지는 쪽이 낫다는 판단.
   // 트레쥴이 수정을 알려오면 이 스위치 하나만 false로 되돌리면 된다.
-  const TRADULE_LINK_PAUSED = true;
-  const effectiveAppUrl = TRADULE_LINK_PAUSED ? null : tripAppUrl;
-
-  // §6(지시서 2026-09-18): 배너 복구 시 같이 고칠 것 — utm 없이는 CTA 효과를 영원히
-  // 알 수 없다는 지적. appUrl(트레쥴 응답값)에 그대로 utm만 덧붙인다 — URL 자체를
-  // 지어내지 않음(C-2 원칙 유지).
-  const utmAppUrl = effectiveAppUrl
-    ? `${effectiveAppUrl}${effectiveAppUrl.includes('?') ? '&' : '?'}utm_source=blog&utm_medium=cta&utm_campaign=${encodeURIComponent(tripRegion)}`
-    : null;
-
-  // §3(지시서 2026-09-16): 진한 파란 그라데이션 박스가 광고 배너처럼 보인다는 피드백 —
-  // 제목·설명 줄 삭제, 패딩 32px→14px, 버튼→텍스트 링크로 슬림화. 본문 중간 CTA와
-  // 같은 모양(.tradule-cta)으로 통일해 일관성을 맞춘다. appUrl이 없으면(정지 상태 포함)
-  // 아무것도 넣을 말이 없으므로 블록 자체를 비운다 — 예전처럼 링크 없는 빈 박스를 남기지 않는다.
-  // §6(2026-09-18): 문구 교체 — "확인하기"는 무엇을 확인하는지 불명확하다는 지적.
-  const ctaBox = utmAppUrl
-    ? `<div class="tradule-cta"><a href="${utmAppUrl}" target="_blank" rel="noopener">` +
-      `내 일정으로 담아가기 →</a></div>`
-    : '';
-
-  // 본문 중간 CTA (C-1) — 코스 표(timelineHtml) 바로 아래 배치(§6: 위치 지적 반영).
-  // "글마다 배너 3개씩 도배 금지"(C-4) — 본문 1 + 푸터 1로 제한.
-  const midBodyCta = utmAppUrl
-    ? `<div class="tradule-cta">` +
-      `이 코스를 지도로 한눈에 보고 순서를 바꾸거나 장소를 추가하려면<br>` +
-      `<a href="${utmAppUrl}" target="_blank" rel="noopener"><strong>이 코스 지도로 보기 →</strong></a>` +
-      `</div>`
-    : '';
+  // D-137: 예전 CTA(course-open appUrl)는 로그인 독자의 계획 덮어쓰기 위험으로 중단 상태였다. 이제 공개 코스 페이지(/course/{지역}/{일수})로만 연결하며
+  // 글 중간(코스 한눈에 보기 아래)과 글 끝 두 곳에 같은 한 줄 CTA를 둔다. 링크가 200이 아니면 둘 다 생략된다.
+  const midBodyCta = '';
+  const ctaBox = traduleCtaLine;
 
   // hero 배너 (제목 + 메타설명)
   const heroHtml =
@@ -1000,6 +1048,7 @@ async function monetizeBlogDraft(content) {
     sectionsHtml,                                 // 섹션 본문
     travelpayoutsHtml,                            // 순위 5: 해외 코스 eSIM 제휴 (국내는 빈 문자열)
     travelpayoutsDisclosure,                      // 위 블록이 실제로 있을 때만 고지
+    placeAff.count > 0 && !travelpayoutsDisclosure ? TRAVELPAYOUTS_DISCLOSURE : '', // D-137: 장소 제휴 링크가 있을 때 고지
     adsenseSlot('mid_content'),
     conclusionAffiliate,
     faqHtml,
@@ -1017,7 +1066,7 @@ async function monetizeBlogDraft(content) {
     `<div class="mae-wrap">\n${innerHtml}\n</div>`,
   ].filter(Boolean).join('\n\n');
 
-  logger.info(`[monetizer] Monetized: ${keyword} (images: ${bodyImages.length}, affiliate links: ${Object.keys(affiliateMap).length})`);
+  logger.info(`[monetizer] Monetized: ${keyword} (images: ${bodyImages.length}, affiliate links: ${Object.keys(affiliateMap).length + placeAff.count})`);
 
   return {
     ...content,
