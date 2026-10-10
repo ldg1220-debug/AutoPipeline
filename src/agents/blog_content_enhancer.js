@@ -1166,6 +1166,7 @@ function stripMismatchedSpotStats(text, tripData) {
 // D-130(AUTOPI1 §2): 창작을 문장 패턴으로 하나씩 막지 않고 원칙으로 막는다 — LLM 본문 섹션(개요·장소별 상세 등, FAQ·코드 블록 제외)에서
 // ① 스팟 이름도 숫자도 없는 문장은 삭제, ② 스팟 이름이 있어도 묘사 형용사만 있고 숫자가 없으면 삭제.
 const DESCRIPTIVE_PATTERN = /바삭|부드러운|웅장|화려|독특|멋진|아름다운|젊은|인기가\s*(많|높)|유명|특별한|다양한|맛볼|즐길\s*수|매력|만끽|풍경|전경|전망을\s*감상|감상할|접근할|쉽게|관찰|랜드마크|자랑|의미\s*있는|역사적|건축적|즐기기에|좋은\s*곳|좋다|좋습니다/;
+const FLOW_PATTERN = /시작|방문(?!객)|이동|이후|다음|먼저|마지막|출발|도착|거쳐|향|들러|들르|둘러|마무리|마칩|이어|그\s*후|일차|첫째|둘째|셋째|넷째|다섯째|여섯째|일곱째|첫날|둘째\s*날|셋째\s*날|첫\s*번째|두\s*번째|세\s*번째|동선|코스/;
 const STAT_PATTERN = /(평점(?:은|이|를)?\s*\d(?:\.\d)?\s*점?|리뷰(?:\s*수)?(?:는|가|를)?\s*[\d,]+\s*개?|★\s*\d(?:\.\d)?)/g;
 function stripUngroundedSentences(text, tripData) {
   if (!text || !tripData?.spots?.length) return text;
@@ -1175,7 +1176,8 @@ function stripUngroundedSentences(text, tripData) {
     const hasName = names.some((n) => sentence.includes(n));
     const hasNumber = /\d/.test(sentence);
     if (!hasName && !hasNumber) return null;
-    if (hasName && !hasNumber && DESCRIPTIVE_PATTERN.test(sentence)) return null;
+    // D-141: 스팟 이름만 있고 숫자가 없는 문장은 이동·순서·방문 서술일 때만 유지한다(오사카 초안 "오사카 성은 일본 전국 시대의 상징적 유산으로, 그 아름다움과 규모에 감탄하는 방문객들이 많습니다" 같은 외부 지식·감상 문장은 데이터에 없음).
+    if (hasName && !hasNumber && (DESCRIPTIVE_PATTERN.test(sentence) || !FLOW_PATTERN.test(sentence))) return null;
     // D-131/D-133: 평점·리뷰 수 뒤에 사실이 아닌 꼬리가 이어지는 문장은 사실 부분만 남긴다.
     // (D-131은 묘사 단어 목록으로 판단했으나 "기술 혁신의 역사를 엿볼 수 있는", "후기를 남기고 있다"처럼 새 표현이 계속 나와 — 꼬리에 숫자·스팟 이름이 없고 실질 내용이 있으면 일괄 제거)
     if (hasNumber) {
