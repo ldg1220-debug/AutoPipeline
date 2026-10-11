@@ -2298,6 +2298,70 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
   };
 }
 
+// D-142(AU1F781): 코스 글(trip_data 있음)은 LLM 본문 생성(Pass 1~5)을 생략하고 코드 블록만으로 조립한다.
+// 스위치 COURSE_LLM_BODY=on 이면 기존 경로(비교용).
+function buildCourseTitle(tripData, keyword) {
+  const isAwkward = (n) => !n || n.length > 20 || (/[가-힣]/.test(n) && /[A-Za-z]{3,}/.test(n));
+  const famous = [...tripData.spots]
+    .filter((sp) => sp.category !== '숙소' && !isAwkward(sp.name))
+    .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
+  const km = typeof tripData.totalDistanceKm === 'number' ? ` ${tripData.totalDistanceKm}km` : '';
+  const pair = famous.slice(0, 2).sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
+  return famous.length >= 2
+    ? `${keyword} 코스 — ${tripData.spots.length}곳, ${pair[0].name}·${pair[1].name} 포함${km}`
+    : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선${km}`;
+}
+
+function buildCourseMeta(tripData, keyword) {
+  const reps = [...tripData.spots]
+    .filter((sp) => sp.category !== '숙소' && sp.name)
+    .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0))
+    .slice(0, 3).map((sp) => sp.name);
+  const km = typeof tripData.totalDistanceKm === 'number' ? `, 이동 합계 ${tripData.totalDistanceKm}km` : '';
+  return `${keyword} 코스 ${tripData.spots.length}곳${reps.length ? `(${reps.join('·')} 등)` : ''}, ${tripData.days ?? ''}일 일정${km}을 평점·리뷰 수와 함께 정리했습니다.`.replace(/, 일 일정/, '');
+}
+
+function assembleCourseDraft(content) {
+  const { keyword, blog_draft } = content;
+  const tripData = content.trip_data;
+  const sections = [];
+  const overview = buildOverviewBody(tripData, keyword);
+  if (overview) sections.push({ level: 2, heading: `${keyword} 코스 개요`, body: overview, generated: 'code' });
+  const glance = buildCourseGlanceBody(tripData);
+  if (glance) sections.push({ level: 2, heading: '코스 한눈에 보기', body: glance, generated: 'code' });
+  const kind = buildKindBlocksBody(tripData);
+  if (kind) sections.push({ level: 2, heading: '종류별 장소 순위', body: kind, generated: 'code' });
+  for (let d = 1; d <= (tripData.days ?? 0); d++) {
+    const body = buildDeterministicItineraryForDay(tripData, d);
+    if (body) sections.push({ level: 2, heading: `${d}일차 일정`, body, generated: 'code' });
+  }
+  const lines = buildSpotLinesBody(tripData);
+  if (lines) sections.push({ level: 2, heading: '장소별 한 줄 정리', body: lines, generated: 'code' });
+  const faq = buildCodeFaqs(tripData, keyword).map((cf) => ({ ...cf, generated: 'code' }));
+  const title = buildCourseTitle(tripData, keyword);
+  const wordCount = sections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자, 코드 조립)`);
+  return {
+    ...content,
+    blog_draft: {
+      ...blog_draft,
+      title,
+      slug: keyword.replace(/\s+/g, '-'),
+      meta_description: buildCourseMeta(tripData, keyword),
+      seo_keywords: blog_draft?.seo_keywords ?? splitKeywordPhrases(sanitizeDaysAgainstTripData(keyword, tripData, keyword)),
+      sections,
+      review_verdict: 'skipped',
+      review_issues: [],
+      target_reader: blog_draft?.target_reader ?? '',
+      faq,
+      affiliate_hooks: [],
+      json_ld: buildJsonLd(title, keyword, keyword.replace(/\s+/g, '-')),
+      youtube_embed: '{{YOUTUBE_EMBED}}',
+      word_count: wordCount,
+    },
+  };
+}
+
 async function enhanceBlogDraft(content) {
   const { keyword, category, shortform_script, blog_draft } = content;
 
@@ -2306,6 +2370,11 @@ async function enhanceBlogDraft(content) {
   if (hasBodyContent) {
     logger.info(`[blog_content_enhancer] Already enhanced, skipping: ${keyword}`);
     return content;
+  }
+
+  if (content.trip_data?.spots?.length && process.env.COURSE_LLM_BODY !== 'on') {
+    logger.info(`[blog_content_enhancer] 코스 글 — LLM 본문 생략 (COURSE_LLM_BODY=off): ${keyword}`);
+    return assembleCourseDraft(content);
   }
 
   // 벤치마크 룰 로드 (있으면 Pass1·2 프롬프트에 주입)
