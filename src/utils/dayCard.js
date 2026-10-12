@@ -51,6 +51,8 @@ export function inferSpotKind(spot) {
   if (spot.category === '카페') return '카페';
   if (spot.category === '숙소') return '숙소';
   // D-145(트레쥴 #305): category가 구체 값(스파·해변·섬·수족관·전망대…)이면 그대로 표시. 비었거나 '기타'일 때만 이름으로 추정.
+  // 트레쥴이 이름 일부("신사이바시"의 '신사')로 사원·성당을 잘못 매기는 경우(상점가·시장·거리)는 category를 믿지 않는다.
+  if (spot.category === '사원·성당' && /상점가|시장|거리|쇼핑|몰$/.test(spot.name ?? '')) return /시장/.test(spot.name) ? '시장' : '명소';
   if (TRADULE_KINDS.has(spot.category)) return spot.category;
   if (spot.category === '관광지') return '명소';
   const n = spot.name ?? '';

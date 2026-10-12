@@ -2060,7 +2060,9 @@ function buildCourseGlanceBody(tripData) {
 
   // 4) 구성 (종류별 곳 수)
   const kinds = new Map();
-  for (const sp of spots) { const k = inferSpotKind(sp); if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1); }
+  // D-146: 트레쥴 category가 세분화돼(전망대·명소/유적·수족관·동물원·공원·테마파크…) 구성 문장이 잘게 쪼개지므로 명소 계열은 "명소"로 합치고, 선착장은 뺀다.
+  const SIGHT_KINDS = new Set(['명소', '명소/유적', '유적', '전망대', '공원', '수족관', '동물원', '테마파크']);
+  for (const sp of spots) { let k = inferSpotKind(sp); if (k === '선착장') continue; if (SIGHT_KINDS.has(k)) k = '명소'; if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1); }
   if (kinds.size) paras.push('장소는 ' + [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}곳`).join(' · ') + '으로 구성돼 있습니다.');
 
   // 5) 평점 정보 없는 곳
@@ -2351,6 +2353,7 @@ function assembleCourseDraft(content) {
       meta_description: buildCourseMeta(tripData, keyword),
       seo_keywords: blog_draft?.seo_keywords ?? splitKeywordPhrases(sanitizeDaysAgainstTripData(keyword, tripData, keyword)),
       sections,
+      assembled: 'code', // D-146: 코드 조립 초안 표시 — QA 분량 기준·재생성 경로가 참조
       review_verdict: 'skipped',
       review_issues: [],
       target_reader: blog_draft?.target_reader ?? '',

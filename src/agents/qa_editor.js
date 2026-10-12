@@ -655,7 +655,8 @@ function validateBlogStructure(content) {
   // 2026-09-30(실측: 시드니 1박2일 12곳 — 첫 QA가 2,876자로 "최소 3000자 미달" 반려 → 헤딩 특정 불가로 파이프라인 전체를
   // 재실행(비용 2배)했고 재작성본은 오히려 더 짧은 2,199자로 통과): 2일 이하 코스는 스팟이 적어 사실만으로 채울 분량이
   // 원래 적다 — 최소 분량을 2400자로 낮춘다.
-  const minTotalChars = (content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS;
+  // D-146: 코드 조립 초안(blog_draft.assembled==='code')은 사실 블록만이라 분량이 원래 적다 — LLM으로 채우면 창작이 들어가므로 기준을 2000자로 낮춘다(서울 2박3일 실측: 분량 미달 → LLM "장소별 상세" 추가 → 주어 없는 문장·비문).
+  const minTotalChars = draft.assembled === 'code' ? 2000 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
   if (totalChars < minTotalChars) {
     issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${minTotalChars}자 — AdSense 콘텐츠 가치 기준)`);
   }

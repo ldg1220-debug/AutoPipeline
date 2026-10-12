@@ -1090,6 +1090,11 @@ async function main() {
         const partial = [];
         const needsFullRewrite = [];
         for (const c of rejectedItems) {
+          // D-146: 코드 조립 초안은 LLM 재생성/전체 재작성을 하지 않는다(같은 코드 조립이 반복되거나 창작 문장이 섞임) — 반려 사유만 남기고 제외.
+          if (c.blog_draft?.assembled === 'code') {
+            logger.warn(`[blog:pipeline] "${c.keyword}" 코드 조립 초안 QA 반려 — 재작성 생략: ${(c.blog_qa?.issues ?? []).join(' / ')}`);
+            continue;
+          }
           let failedHeadings = extractFailedHeadings(c.blog_qa?.issues);
           const hasShortFaq = (c.blog_qa?.issues ?? []).some((i) => i.includes('FAQ 답변 너무 짧음'));
           // 2026-09-30(Cowork 지시서): "글 전체 분량 부족"만으로 반려되면 문제 헤딩이 없어 전체 재작성(Pass1~5 재실행, 비용 2배)으로
