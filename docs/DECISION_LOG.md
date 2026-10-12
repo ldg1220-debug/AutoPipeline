@@ -2222,3 +2222,8 @@
 - **버린 대안**: 쿠팡 Open API 검색(키 미발급 — 실적 0원). 키가 생기면 같은 태그로 검색하도록 교체 가능.
 - **현재 상태**: 태그 항목이 아직 없어(예시 1개는 REPLACE_ME) 링크는 붙지 않는다. 동근님이 §5 품목 링크를 links.json에 추가해야 동작.
 - **관련 파일**: `src/utils/coupangTravel.js`, `src/agents/monetizer.js`, `src/agents/blog_asset_builder.js`, `data/coupang/links.json`
+
+### D-145: 트레쥴 category 확장(#305) 대응 — 종류는 category 우선, 이름 추정은 보조 (AU315D1)
+- **결정**: `inferSpotKind`가 트레쥴 category가 구체 값(스파·사원·성당·해변·선착장·섬·수족관·동물원·전망대·공원·명소/유적·테마파크·시장)이면 그대로 쓰고, 비었거나 '기타'일 때만 이름으로 추정. 종류별 순위의 명소 묶음에 명소/유적·전망대·공원·수족관·동물원·테마파크 추가(선착장은 섬·해변 줄에서 제외). 쿠팡 beach 태그는 category 해변·섬·선착장도 이름 패턴과 OR로 판정. 일자 부제·한 줄 정리·표가 모두 같은 함수를 쓰므로 함께 바뀐다.
+- **쿠팡 링크**: Cowork가 커밋한 10개(`1ad6a3d`) 반영 확인 — 예시 항목 삭제됨.
+- **관련 파일**: `src/utils/dayCard.js`, `src/agents/blog_content_enhancer.js`, `src/utils/coupangTravel.js`

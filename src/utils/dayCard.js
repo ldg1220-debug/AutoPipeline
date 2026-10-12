@@ -45,10 +45,14 @@ export function dayLegMinutes(daySpots) {
 
 // 트레쥴 category가 기타/음식점/숙소 수준이라 이름으로 성격을 추정한다(§4).
 // 음식점·카페·숙소는 category를 우선(식당 이름에 Beach 등이 들어가도 식사로 본다).
+const TRADULE_KINDS = new Set(['스파', '사원·성당', '해변', '선착장', '섬', '수족관', '동물원', '전망대', '공원', '명소/유적', '테마파크', '시장']);
 export function inferSpotKind(spot) {
   if (spot.category === '음식점') return '식사';
   if (spot.category === '카페') return '카페';
   if (spot.category === '숙소') return '숙소';
+  // D-145(트레쥴 #305): category가 구체 값(스파·해변·섬·수족관·전망대…)이면 그대로 표시. 비었거나 '기타'일 때만 이름으로 추정.
+  if (TRADULE_KINDS.has(spot.category)) return spot.category;
+  if (spot.category === '관광지') return '명소';
   const n = spot.name ?? '';
   if (/spa|스파|massage|마사지/i.test(n)) return '스파';
   if (/island|\bisla\b|섬/i.test(n)) return '섬';

@@ -38,7 +38,7 @@ export function deriveTravelTags(tripData, overseas, now = new Date()) {
   let walkHeavy = false;
   for (const [day, list] of byDay.entries()) {
     if (getFacilitySpot(tripData, day, list) && themeDay === null) themeDay = day;
-    if (beachDay === null && list.some((sp) => isIslandName(sp.name) || /선착장|비치|해변|해수욕장/.test(sp.name ?? '') || sp.category === '해변' || sp.category === '섬')) beachDay = day;
+    if (beachDay === null && list.some((sp) => isIslandName(sp.name) || /선착장|비치|해변|해수욕장/.test(sp.name ?? '') || ['해변', '섬', '선착장'].includes(sp.category))) beachDay = day;
     const walk = list.slice(0, -1).reduce((sum, sp) => sum + (sp.toNextMode === 'walk' && typeof sp.toNextMinutes === 'number' ? sp.toNextMinutes : 0), 0);
     if (walk >= 60) walkHeavy = true;
   }

@@ -1974,7 +1974,7 @@ function buildKindBlocksBody(tripData) {
   const ofKinds = (kinds) => spots.filter((sp) => kinds.includes(inferSpotKind(sp)));
   const lines = [];
 
-  const sights = ofKinds(['명소', '유적', '사원·성당', '시장']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
+  const sights = ofKinds(['명소', '유적', '명소/유적', '전망대', '공원', '사원·성당', '수족관', '동물원', '테마파크', '시장']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
   if (sights.length >= 2) {
     lines.push(`리뷰가 가장 많은 명소는 ${fmt(sights[0])}입니다. 뒤를 이어 ${sights.slice(1).map(fmt).join(', ')} 순입니다.`);
   }
