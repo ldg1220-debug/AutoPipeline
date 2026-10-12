@@ -2033,7 +2033,14 @@ function buildCourseGlanceBody(tripData) {
       byMode.set(key, (byMode.get(key) ?? 0) + 1);
     });
   }
-  const modeText = [...byMode].sort((a, b) => b[1] - a[1]).map(([m, n]) => `${MODE_KR[m] ?? '이동'} ${n}구간`).join(' · ');
+  // D-149: 차량과 "차량 기준(경로 대신 운전 추정)"을 하나로 합쳐 "차량 6구간(4구간은 차량 경로 기준 추정)"으로 쓴다.
+  const fb = byMode.get('car_fallback') ?? 0;
+  const merged = new Map(byMode); merged.delete('car_fallback');
+  if (fb > 0) merged.set('car', (merged.get('car') ?? 0) + fb);
+  const modeText = [...merged].sort((a, b) => b[1] - a[1]).map(([m, n]) => {
+    if (m === 'car' && fb > 0) return `차량 ${n}구간(${fb === n ? '모두' : `${fb}구간은`} 차량 경로 기준 추정)`;
+    return `${MODE_KR[m] ?? '이동'} ${n}구간`;
+  }).join(' · ');
   let p1 = `이 코스는 총 ${spots.length}곳, ${byDay.size}일 일정입니다.`;
   if (typeof tripData.totalDistanceKm === 'number') p1 += tripData.distanceSource === 'straight' ? ` 장소 간 직선거리 기준 약 ${tripData.totalDistanceKm}km입니다.` : ` 총 이동 거리는 ${tripData.totalDistanceKm}km입니다.`;
   if (legCount > 0) p1 += ` 이동 구간 ${legCount}개의 시간을 합치면 약 ${(totalMin / 60).toFixed(1)}시간(${totalMin}분)이고, 수단은 ${modeText} 순으로 많습니다.`;

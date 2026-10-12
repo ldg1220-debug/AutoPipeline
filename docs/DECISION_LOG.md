@@ -2242,3 +2242,8 @@
 ### D-148: 트레쥴 spots[].beach 플래그를 쿠팡 beach 태그 판정에 포함
 - 도쿄 초안에서 오다이바 해변공원(category 공원, `beach:true`)이 이름 패턴으로만 잡혔다. 플래그가 있으면 우선 사용(이름·category 판정과 OR).
 - **관련 파일**: `src/utils/coupangTravel.js`
+
+### D-149: beach 태그 판정 좁히기 · 차량 구간 문구 합치기 (AUB4321, D-148 수정)
+- **결정**: beach 태그 = category 해변·섬·선착장 스팟이 있음 OR (휴양형 코스 AND `beach:true`). category가 비었거나 '기타'일 때만 이름 패턴 사용. 도시형 코스의 공원+`beach:true`(오다이바 해변공원)는 beach가 아니다 → 도쿄에 방수팩이 붙지 않음. 휴양형이면 해변 날이 없어도 beach 품목은 준비물 줄로 붙는다.
+- **문구**: 코스 한눈에 보기의 수단 문장에서 "차량"과 "차량 기준"을 합쳐 "차량 6구간(4구간은 차량 경로 기준 추정) · 도보 2구간"으로. 일자 카드 표의 "차량 기준 N분"은 유지.
+- **관련 파일**: `src/utils/coupangTravel.js`, `src/agents/blog_content_enhancer.js`

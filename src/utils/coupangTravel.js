@@ -38,7 +38,12 @@ export function deriveTravelTags(tripData, overseas, now = new Date()) {
   let walkHeavy = false;
   for (const [day, list] of byDay.entries()) {
     if (getFacilitySpot(tripData, day, list) && themeDay === null) themeDay = day;
-    if (beachDay === null && list.some((sp) => sp.beach === true || isIslandName(sp.name) || /선착장|비치|해변|해수욕장/.test(sp.name ?? '') || ['해변', '섬', '선착장'].includes(sp.category))) beachDay = day;
+    // D-149: category 해변·섬·선착장이 있는 스팟만 beach. category가 없거나 '기타'일 때만 이름 패턴 사용.
+    // 공원+beach:true(오다이바 해변공원 같은 산책 공원)는 도시형 코스에서 beach가 아니다 — 휴양형 코스에서만 beach:true 인정.
+    const isBeachSpot = (sp) => ['해변', '섬', '선착장'].includes(sp.category)
+      || (!sp.category || sp.category === '기타') && (isIslandName(sp.name) || /선착장|비치|해변|해수욕장/.test(sp.name ?? ''))
+      || (tripData.style === 'resort' && sp.beach === true);
+    if (beachDay === null && list.some(isBeachSpot)) beachDay = day;
     const walk = list.slice(0, -1).reduce((sum, sp) => sum + (sp.toNextMode === 'walk' && typeof sp.toNextMinutes === 'number' ? sp.toNextMinutes : 0), 0);
     if (walk >= 60) walkHeavy = true;
   }
