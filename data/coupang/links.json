@@ -524,6 +524,21 @@
       "banner_html": "<a href=\"https://link.coupang.com/a/ehG6Nf5WLI\" target=\"_blank\" referrerpolicy=\"unsafe-url\"><img src=\"https://img4a.coupangcdn.com/image/affiliate/banner/c2fde99502bf076c25f2556925d64dab@2x.jpg\" alt=\"유튜브 AI 성공 전략\" width=\"120\" height=\"240\"></a>",
       "note": "유튜브/AI/수익화",
       "created_at": "2026-06-03"
+    },
+    {
+      "id": "example_travel_adapter",
+      "name": "여행용 멀티 어댑터 110V 돼지코",
+      "keywords": [
+        "멀티어댑터",
+        "돼지코"
+      ],
+      "url": "https://link.coupang.com/a/REPLACE_ME",
+      "tags": [
+        "japan",
+        "overseas"
+      ],
+      "season": "all"
     }
-  ]
+  ],
+  "_how_to_add_travel": "여행 글용: tags 가 있는 항목만 여행 글 후보(없으면 경제·뷰티 글 전용). tags 는 전부 코스 태그에 포함돼야 쓰임. 태그: overseas, japan, beach, themepark, walk / season: all|summer|winter. 계산은 src/utils/coupangTravel.js."
 }

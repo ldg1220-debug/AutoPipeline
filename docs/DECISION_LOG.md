@@ -2215,3 +2215,10 @@
 - **결함**: (1) 장소별 한 줄 정리가 `<p>` 안에 `<ul>`로 렌더(잘못된 중첩) (2) 배편 구간이 있는 날에 "이동은 한 번이지만 차량 39분" (3) 메타 "120.6km을" 조사 어색.
 - **결정**: (1) 모네타이저에서 블록 목록을 감싼 `<p>` 제거 (2) 배편 있는 날은 단일 구간 포인트 문구 생략 (3) 메타를 조사 없는 "… 이동 합계 120.6km — 평점·리뷰 수와 함께 정리했습니다."로.
 - **관련 파일**: `src/agents/monetizer.js`, `src/utils/dayCard.js`, `src/agents/blog_content_enhancer.js`
+
+### D-144: 여행 글 쿠팡 — 코스 태그 매칭 준비물만 허용 (D-137 "여행 글 쿠팡 금지"를 부분 번복) (AU18291)
+- **결정**: 맥락 없는 상품은 계속 금지. `data/coupang/links.json` 항목 중 `tags`가 있는 것만 여행 글 후보(태그 없는 기존 26개는 경제·뷰티 글 전용 — 랜덤 폴백 풀에서도 태그 항목은 제외). 코스 태그는 trip_data로만 코드가 계산(overseas·japan·beach·themepark·walk, 계절 summer/winter). 항목 tags가 전부 코스 태그에 포함돼야 사용. 글당 최대 2개, 장소 제휴·eSIM 포함 전체 5개 이내. 배치: beach/themepark는 해당 일자 카드 아래, 나머지는 "코스 한눈에 보기" 뒤 한 줄. 문구 "준비물 — {품목명} (쿠팡)". 최근 5편(`output/blog/coupang_recent.json`, 초안 전용 실행은 기록 안 함)에 쓴 품목은 후순위. 쿠팡 링크가 있으면 쿠팡 고지를 TL;DR 아래·하단에 노출.
+- **함께 결정**: 트레쥴 코스 데이터 글의 섹션 스톡 사진(Pexels) 제거.
+- **버린 대안**: 쿠팡 Open API 검색(키 미발급 — 실적 0원). 키가 생기면 같은 태그로 검색하도록 교체 가능.
+- **현재 상태**: 태그 항목이 아직 없어(예시 1개는 REPLACE_ME) 링크는 붙지 않는다. 동근님이 §5 품목 링크를 links.json에 추가해야 동작.
+- **관련 파일**: `src/utils/coupangTravel.js`, `src/agents/monetizer.js`, `src/agents/blog_asset_builder.js`, `data/coupang/links.json`

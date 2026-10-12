@@ -12,6 +12,7 @@ import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 import { isOverseasRegion, extractRegion } from './tradule_source.js';
 import { splitKeywordPhrases } from './blog_content_enhancer.js';
 import { buildDayPoints, buildDaySubtitle, getFacilitySpot, inferSpotKind, dayLegMinutes, isBoatLeg, isIslandName, groupByDay } from '../utils/dayCard.js';
+import { loadTaggedCoupangEntries, deriveTravelTags, pickTravelCoupang, placeTravelCoupang, coupangLineHtml, recordRecentCoupang, MAX_COUPANG_PER_POST, MAX_TOTAL_AFFILIATE_PER_POST } from '../utils/coupangTravel.js';
 import { APPROVED_AFFILIATE_BRANDS, MAX_AFFILIATE_LINKS_PER_POST } from '../data/affiliateBrands.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -544,6 +545,7 @@ function loadManualCoupangLinks() {
     const raw = JSON.parse(fs.readFileSync(COUPANG_LINKS_FILE, 'utf8'));
     for (const entry of raw.entries ?? []) {
       if (!entry.url || entry.url.includes('REPLACE_ME')) continue;
+      if (Array.isArray(entry.tags) && entry.tags.length) continue; // D-144: 태그 항목은 여행 글 전용(coupangTravel.js) — 경제 글 랜덤 폴백에 섞이지 않게 제외
       for (const kw of entry.keywords ?? []) {
         result.push({ keyword: kw, ...entry });
       }
@@ -952,8 +954,30 @@ async function monetizeBlogDraft(content) {
     ? `<div class="tradule-cta"><a href="${traduleCourseUrl}" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a></div>`
     : '';
   const placeAff = buildPlaceAffiliateLinks(content.trip_data, blog_draft.slug);
+  // D-144(AU18291): 여행 글 쿠팡 — 코스 태그와 맞는 준비물만(최대 2개, 전체 제휴 5개 이내). 태그 항목이 없으면 아무것도 안 붙는다.
+  const coupangPrep = { count: 0, ids: [], restHtml: '' };
+  if (content.category === 'travel' && content.trip_data?.spots?.length) {
+    const entries = loadTaggedCoupangEntries();
+    if (entries.length) {
+      const derived = deriveTravelTags(content.trip_data, isOverseasRegion(content.trip_data.region ?? ''));
+      const budget = Math.min(MAX_COUPANG_PER_POST, MAX_TOTAL_AFFILIATE_PER_POST - placeAff.count - (travelpayoutsHtml ? 1 : 0));
+      const picked = pickTravelCoupang(entries, derived, budget);
+      const placed = placeTravelCoupang(picked, derived);
+      for (const [day, list] of placed.byDay) {
+        const html = `<p style="margin:0 0 14px;font-size:14px">🧳 ${list.map(coupangLineHtml).join(' · ')}</p>\n`;
+        placeAff.byDay.set(day, (placeAff.byDay.get(day) ?? '') + html);
+      }
+      if (placed.rest.length) coupangPrep.restHtml = `<p style="margin:0 0 14px;font-size:14px">🧳 ${placed.rest.map(coupangLineHtml).join(' · ')}</p>`;
+      coupangPrep.count = picked.length;
+      coupangPrep.ids = picked.map((e) => e.id);
+      if (picked.length) {
+        logger.info(`[monetizer] 쿠팡 여행 품목 ${picked.length}개 (태그: ${[...derived.tags].join(',')}): ${picked.map((e) => e.id).join(', ')}`);
+        if (!process.env.AP_SKIP_THUMBNAIL) recordRecentCoupang(coupangPrep.ids); // 초안 전용 실행은 최근 이력에 남기지 않는다
+      }
+    }
+  }
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
-    { dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}` });
+    { dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
@@ -1043,6 +1067,7 @@ async function monetizeBlogDraft(content) {
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
+    coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 쿠팡 링크가 있으면 TL;DR 아래 대가성 고지
     distanceDisclosureHtml,                       // 임시 조치(2026-09-08): 직선거리 기준 고지 (거리 언급 직후 1회)
     courseMapHtml,                                // §2(2026-09-08): 코스 지도 (트레쥴 워터마크) — 본문 첫 이미지
     timelineHtml,                                 // B-3: 동선 타임라인 표
@@ -1057,6 +1082,7 @@ async function monetizeBlogDraft(content) {
     faqHtml,
     sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
+    coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
     travelpayoutsFooterHtml,                      // 순위 5 §1: 푸터 배치 (본문 중간 1회 + 여기 1회)
@@ -1069,7 +1095,7 @@ async function monetizeBlogDraft(content) {
     `<div class="mae-wrap">\n${innerHtml}\n</div>`,
   ].filter(Boolean).join('\n\n');
 
-  logger.info(`[monetizer] Monetized: ${keyword} (images: ${bodyImages.length}, affiliate links: ${Object.keys(affiliateMap).length + placeAff.count})`);
+  logger.info(`[monetizer] Monetized: ${keyword} (images: ${bodyImages.length}, affiliate links: ${Object.keys(affiliateMap).length + placeAff.count + coupangPrep.count})`);
 
   return {
     ...content,

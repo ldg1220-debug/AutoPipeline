@@ -345,6 +345,8 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
   const stockTarget = sections.findIndex((sec, idx) => idx >= Math.max(startIndex, 1) && !/\d+\s*일차/.test(sec.heading ?? ''));
   for (let i = startIndex; i < count; i++) {
     if (category === 'travel' && i !== stockTarget) continue;
+    // D-144: 코스 데이터(trip_data) 글의 섹션은 숫자 중심이라 실제 코스와 무관한 스톡 풍경 사진은 넣지 않는다(트레쥴 지도 유지).
+    if (category === 'travel' && content?.trip_data?.spots?.length) continue;
     const section = sections[i];
     const query = buildSectionQuery(keyword, section.heading ?? '', category, content);
     // 2026-09-28(작업지시서 §5④): 지역을 특정할 수 없으면 이 섹션은 사진 없이 둔다.
