@@ -2318,7 +2318,8 @@ function buildCourseMeta(tripData, keyword) {
     .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0))
     .slice(0, 3).map((sp) => sp.name);
   const km = typeof tripData.totalDistanceKm === 'number' ? `, 이동 합계 ${tripData.totalDistanceKm}km` : '';
-  return `${keyword} 코스 ${tripData.spots.length}곳${reps.length ? `(${reps.join('·')} 등)` : ''}, ${tripData.days ?? ''}일 일정${km}을 평점·리뷰 수와 함께 정리했습니다.`.replace(/, 일 일정/, '');
+  const days = tripData.days ? `, ${tripData.days}일 일정` : '';
+  return `${keyword} 코스 ${tripData.spots.length}곳${reps.length ? `(${reps.join('·')} 등)` : ''}${days}${km} — 평점·리뷰 수와 함께 정리했습니다.`;
 }
 
 function assembleCourseDraft(content) {

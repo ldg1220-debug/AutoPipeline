@@ -808,7 +808,10 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
       } else {
         // 마크다운 → HTML 변환 후 키워드 하이라이트. ("핵심:" callout 상자는 2026-09-29 제거 —
         // 첫 문장을 그대로 복사해 한 섹션에 같은 내용이 반복됐다.)
-        contentHtml = `<p style="margin:0 0 14px;line-height:1.9">${highlightKeywords(markdownToHtml(s.body ?? ''), seoKeywords)}</p>\n`;
+        contentHtml = `<p style="margin:0 0 14px;line-height:1.9">${highlightKeywords(markdownToHtml(s.body ?? ''), seoKeywords)}</p>\n`
+          // <p> 안에 <ul>/<ol>이 들어가는 잘못된 중첩 정리(블록 앞뒤에서 문단을 닫고 다시 연다)
+          .replace(/<p style="margin:0 0 14px;line-height:1.9">(<(?:ul|ol)\b)/g, '$1')
+          .replace(/(<\/(?:ul|ol)>)<\/p>/g, '$1');
       }
 
       return (

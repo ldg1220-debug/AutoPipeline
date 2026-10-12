@@ -123,7 +123,7 @@ export function buildDayPoints(tripData, day) {
   if (byDay.size > 1 && total > 0 && total === Math.max(...totals) && totals.filter((t) => t === total).length === 1) {
     const carMin = legs.filter((l) => l.toNextMode === 'car').reduce((sum, l) => sum + l.toNextMinutes, 0);
     points.push(`이동이 가장 많은 날입니다(총 ${total}분).${carMin > 0 ? ` 차량 구간이 ${carMin}분 포함돼 있습니다.` : ''}`);
-  } else if (legs.length === 1) {
+  } else if (legs.length === 1 && !hasBoat) {
     const m = legModeLabel(legs[0]);
     points.push(legs[0].toNextMinutes >= 30
       ? `이동은 한 번이지만 ${m} ${legs[0].toNextMinutes}분이라 시간을 넉넉히 잡으세요.`
