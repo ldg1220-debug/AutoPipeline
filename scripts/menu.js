@@ -26,6 +26,7 @@ const ITEMS = [
   { label: '삭제한 글 발행 기록 정리 — 글 번호 입력',          ask: '삭제한 글 번호 (여러 개는 공백으로: 266 271) 또는 URL', confirm: true,
     build: (v) => node('unpublish-post.js', ...v.split(/[\s,]+/).filter(Boolean), '--yes') },
   { label: '트레쥴 지역 스냅샷 갱신',                         build: () => node('refresh-tradule-regions.js') },
+  { label: '지역별 일수 검색량 리포트 (검색광고 API만 · LLM 비용 0)', build: () => node('region-days-volume.js') },
 ];
 
 const PRINT_ONLY = Boolean(process.env.AB_PRINT);
