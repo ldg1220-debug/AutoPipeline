@@ -35,7 +35,7 @@ export function deriveTravelTags(tripData, overseas, now = new Date()) {
   if (overseas) tags.add('overseas');
   if (JAPAN_REGIONS.includes(tripData.region ?? '')) tags.add('japan');
   const byDay = groupByDay(tripData.spots);
-  let walkHeavy = false;
+  let walkHeavy = false; let beachStrong = false;
   for (const [day, list] of byDay.entries()) {
     if (getFacilitySpot(tripData, day, list) && themeDay === null) themeDay = day;
     // D-149: category 해변·섬·선착장이 있는 스팟만 beach. category가 없거나 '기타'일 때만 이름 패턴 사용.
@@ -43,7 +43,12 @@ export function deriveTravelTags(tripData, overseas, now = new Date()) {
     const isBeachSpot = (sp) => ['해변', '섬', '선착장'].includes(sp.category)
       || (!sp.category || sp.category === '기타') && (isIslandName(sp.name) || /선착장|비치|해변|해수욕장/.test(sp.name ?? ''))
       || (tripData.style === 'resort' && sp.beach === true);
-    if (beachDay === null && list.some(isBeachSpot)) beachDay = day;
+    // 섬·해변 category가 있는 날을 우선(선착장만 있는 날은 차선) — 코타키나발루: 선착장 1일차보다 사피 섬 2일차
+    if (list.some(isBeachSpot)) {
+      const strong = list.some((sp) => ['해변', '섬'].includes(sp.category));
+      if (strong && !beachStrong) { beachDay = day; beachStrong = true; }
+      else if (beachDay === null) beachDay = day;
+    }
     const walk = list.slice(0, -1).reduce((sum, sp) => sum + (sp.toNextMode === 'walk' && typeof sp.toNextMinutes === 'number' ? sp.toNextMinutes : 0), 0);
     if (walk >= 60) walkHeavy = true;
   }

@@ -429,21 +429,26 @@ function formatDistancePhrase(tripData) {
   // D-147: 종일 일정(facilityDay) 날은 km 대신 "N일차 종일(장소)"로 표기하고 평균에서 제외한다.
   const byDay = groupByDay(tripData?.spots ?? []);
   const perDay = dayNumbers.map((day) => {
-    const fac = getFacilitySpot(tripData, day, byDay.get(day) ?? []);
-    return fac ? { day, facility: fac.name } : { day, km: extractDayKm(findDayTotal(tripData?.dayTotals, day)) };
+    const list = byDay.get(day) ?? [];
+    const fac = getFacilitySpot(tripData, day, list);
+    if (fac) return { day, facility: fac.name };
+    const km = extractDayKm(findDayTotal(tripData?.dayTotals, day));
+    // D-150: 거리 0(배편 날처럼 집계 안 된 날)은 "0km"로 쓰지 않고 평균에서도 뺀다 — 한눈에 보기·FAQ와 같은 기준.
+    if (typeof km === 'number' && km > 0) return { day, km };
+    return { day, boat: list.some((sp, i) => isBoatLeg(sp, list[i + 1])) };
   });
   const measured = perDay.filter((x) => typeof x.km === 'number');
 
-  if (days <= 1 || measured.length + perDay.filter((x) => x.facility).length < 2 || measured.length === 0) {
+  if (days <= 1 || measured.length === 0 || measured.length + perDay.filter((x) => x.facility).length < 2) {
     return `이동 ${totalKm}km`;
   }
 
   const avgKm = (measured.reduce((sum, x) => sum + x.km, 0) / measured.length).toFixed(1);
   const breakdown = perDay
-    .map((x) => (x.facility ? `${x.day}일차 종일(${x.facility})` : typeof x.km === 'number' ? `${x.day}일차 ${x.km}km` : null))
+    .map((x) => (x.facility ? `${x.day}일차 종일(${x.facility})` : typeof x.km === 'number' ? `${x.day}일차 ${x.km}km` : x.boat ? `${x.day}일차 배편 이동` : null))
     .filter(Boolean)
     .join(' · ');
-  return `${perDay.some((x) => x.facility) ? '이동한 날 평균' : '하루 평균 이동'} ${avgKm}km (${breakdown})`;
+  return `${measured.length < perDay.length ? '이동한 날 평균' : '하루 평균 이동'} ${avgKm}km (${breakdown})`;
 }
 
 /**
