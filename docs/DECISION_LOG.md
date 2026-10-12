@@ -2233,3 +2233,8 @@
 - **결정**: (1) `blog_draft.assembled='code'` 표시. 이 초안은 QA 분량 기준을 2,000자로 적용(사실 블록만이라 원래 적음) (2) QA 반려돼도 LLM 부분 재생성·전체 재작성을 하지 않고 사유만 로그로 남기고 제외 (3) "코스 한눈에 보기" 구성 문장에서 명소 계열(명소·명소/유적·전망대·공원·수족관·동물원·테마파크)을 "명소"로 합치고 선착장은 뺌 (4) 트레쥴 category가 '사원·성당'인데 이름이 상점가·시장·거리면(신사이바시스지 상점가) category를 믿지 않고 이름으로 판정 — 트레쥴 쪽 오분류는 별도 전달.
 - **버린 대안**: 분량을 채우려고 LLM 섹션을 허용(창작 위험), 고정 문구로 패딩(중복 콘텐츠).
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/agents/qa_editor.js`, `scripts/run-blog-pipeline.js`, `src/utils/dayCard.js`
+
+### D-147: 종일 일정(facilityDay) 날 "0km" 표기 제거 · 코드 조립 2,000자 기준 승인 (AU11111)
+- **승인**: 코드 조립 초안(assembled='code') QA 분량 2,000자, 반려 시 LLM 재생성 없이 제외(D-146). 일반 글 3,000자 유지. 신사이바시스지 상점가 이름 우선 판정 유지.
+- **결정**: TL;DR·코스 한눈에 보기·FAQ의 일자별 km에서 facilityDay 날은 km 대신 "N일차 종일(장소)"로 표기하고, 평균·가장 긴/짧은 날 판정에서 제외. 평균 문구는 "이동한 날 평균"(이동한 날 수로 나눔 — 이전에는 전체 일수로 나눠 시설 날이 0으로 평균을 깎았음). `splitDayKms`(dayCard.js)가 공통 계산.
+- **관련 파일**: `src/utils/dayCard.js`, `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`

@@ -8,7 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
-import { inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel } from '../utils/dayCard.js';
+import { splitDayKms, inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -2040,16 +2040,15 @@ function buildCourseGlanceBody(tripData) {
   if (boatCount > 0) p1 += ` 섬으로 가는 ${boatCount}개 구간은 배를 타며 시간은 확인되지 않아 합계에서 뺐습니다.`;
   paras.push(p1);
 
-  // 2) 일차별 이동량
-  const dt = tripData.dayTotals;
-  const dtEntries = Array.isArray(dt) ? dt.map((e) => [e?.day, e]) : Object.entries(dt ?? {}).map(([k, e]) => [Number(k), e]);
-  const dayKms = dtEntries.map(([d, e]) => [d, typeof e === 'number' ? e : e?.distanceKm]).filter(([d, km]) => d != null && typeof km === 'number' && km > 0);
+  // 2) 일차별 이동량 — D-147: 종일 일정(facilityDay) 날은 평균·최댓값·최솟값에서 제외하고 따로 언급한다.
+  const { moving: dayKms, facility: facilityDays } = splitDayKms(tripData);
+  const facilityNote = facilityDays.length ? ` ${facilityDays.map((f) => `${f.day}일차는 ${f.name} 종일 일정`).join(', ')}이라 제외했습니다.` : '';
   if (dayKms.length >= 2) {
     const longest = dayKms.reduce((a, b) => (b[1] > a[1] ? b : a));
     const shortest = dayKms.reduce((a, b) => (b[1] < a[1] ? b : a));
-    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / (tripData.days || byDay.size || dayKms.length)).toFixed(1);
-    const unmeasured = (tripData.days || byDay.size) > dayKms.length ? ' 이동 거리가 집계되지 않은 날은 최솟값 비교에서 뺐습니다.' : '';
-    paras.push(`이동량은 하루 평균 ${avg}km입니다. 가장 많이 움직이는 날은 ${longest[0]}일차(${longest[1]}km), 가장 적게 움직이는 날은 ${shortest[0]}일차(${shortest[1]}km)입니다.${unmeasured}`);
+    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / dayKms.length).toFixed(1);
+    const unmeasured = (tripData.days || byDay.size) > dayKms.length + facilityDays.length ? ' 이동 거리가 집계되지 않은 날은 뺐습니다.' : '';
+    paras.push(`이동한 날 평균은 ${avg}km입니다. 가장 많이 움직이는 날은 ${longest[0]}일차(${longest[1]}km), 가장 적게 움직이는 날은 ${shortest[0]}일차(${shortest[1]}km)입니다.${facilityNote}${unmeasured}`);
   }
 
   // 3) 리뷰 수 상위 명소
@@ -2093,16 +2092,13 @@ function buildCodeFaqs(tripData, keyword) {
       a: beaches.map((b) => `${b.day ?? 1}일차 ${b.name}(${typeof b.rating === 'number' ? `★${b.rating}` : '평점 정보 없음'})`).join(', ') + '입니다.',
     });
   }
-  // 하루 평균·가장 긴 날 (dayTotals: 배열 또는 day 키 객체)
-  const dt = tripData.dayTotals;
-  const dtEntries = Array.isArray(dt) ? dt.map((e) => [e?.day, e]) : Object.entries(dt ?? {}).map(([k, e]) => [Number(k), e]);
-  const dayKms = dtEntries
-    .map(([d, e]) => [d, typeof e === 'number' ? e : e?.distanceKm])
-    .filter(([d, km]) => d != null && typeof km === 'number' && km > 0);
-  if (dayKms.length && tripData.days) {
+  // 하루 평균·가장 긴 날 — D-147: 종일 일정 날 제외, "이동한 날 평균"
+  const { moving: dayKms, facility: facilityDays } = splitDayKms(tripData);
+  if (dayKms.length) {
     const [longDay, longKm] = dayKms.reduce((a, b) => (b[1] > a[1] ? b : a));
-    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / tripData.days).toFixed(1);
-    faqs.push({ q: '하루 평균 얼마나 이동하나요?', a: `하루 평균 ${avg}km이고, 가장 긴 날은 ${longDay}일차(${longKm}km)입니다.` });
+    const avg = (dayKms.reduce((sum, [, km]) => sum + km, 0) / dayKms.length).toFixed(1);
+    const fac = facilityDays.length ? ` ${facilityDays.map((f) => `${f.day}일차는 ${f.name} 종일 일정`).join(', ')}입니다.` : '';
+    faqs.push({ q: '하루 평균 얼마나 이동하나요?', a: `이동한 날 평균 ${avg}km이고, 가장 긴 날은 ${longDay}일차(${longKm}km)입니다.${fac}` });
   }
   const byReviews = spots.filter((x) => typeof x.reviewCount === 'number').sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
   if (byReviews.length) {

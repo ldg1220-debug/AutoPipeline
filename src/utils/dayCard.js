@@ -162,3 +162,24 @@ export function dayCardPlainText(tripData, day) {
   );
   return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', getFacilitySpot(tripData, day, daySpots)), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }
+
+/**
+ * D-147(AU11111): 일자별 이동 거리 — 종일 일정(facilityDay) 날은 따로 빼서 평균·최댓값·최솟값 판정에서 제외한다.
+ * dayTotals는 배열([{day,distanceKm,facilityDay}]) 또는 day 키 객체/숫자 모두 허용.
+ * @returns {{ moving: Array<[number, number]>, facility: Array<{day:number, name:string}> }}
+ */
+export function splitDayKms(tripData) {
+  const dt = tripData?.dayTotals;
+  const entries = Array.isArray(dt) ? dt.map((e) => [e?.day, e]) : Object.entries(dt ?? {}).map(([k, e]) => [Number(k), e]);
+  const byDay = groupByDay(tripData?.spots ?? []);
+  const moving = []; const facility = [];
+  for (const [d, e] of entries) {
+    if (d == null) continue;
+    const list = byDay.get(d) ?? [];
+    const fac = getFacilitySpot(tripData, d, list);
+    if (fac) { facility.push({ day: d, name: fac.name }); continue; }
+    const km = typeof e === 'number' ? e : e?.distanceKm;
+    if (typeof km === 'number' && km > 0) moving.push([d, km]);
+  }
+  return { moving, facility };
+}
