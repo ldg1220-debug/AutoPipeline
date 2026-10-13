@@ -2262,3 +2262,11 @@
 - **결함**: `parseQcCnt`가 "< 10" 문자열에서 숫자 10을 꺼내 PC·모바일 합이 20이 됐다 → 첫 리포트의 바닥이 20(지시서는 5). 데이터가 없는 조합이 전부 20으로 나옴.
 - **결정**: `fetchMonthlyVolumeMap(keywords, { lowValue })` 옵션 추가 — 리포트만 5를 넘기고(둘 다 미만이면 합 10 = 바닥), keyword_miner 검색량 게이트는 기본값(기존 동작) 유지. 리포트 캐시를 v2 파일로 분리해 재조회하게 함. `top`은 바닥 초과만.
 - **관련 파일**: `src/utils/naverSearchAd.js`, `scripts/region-days-volume.js`
+
+### D-153: 제목 개편 · 목록 미리보기 · 검색량 시드 · 3박5일 · 썸네일 스위치 (AUAFF21)
+- **제목**: `src/utils/courseTitle.js`. 키워드는 "N박M일" 띄어쓰기 제거, 끝의 "여행 코스/코스/여행" 제거(→ "코스 코스" 방지), km 제거. 템플릿 A~E 5종 — slug 해시로 시작점을 잡고 직전 5편(`output/blog/title_templates_recent.json`, 초안 전용 실행은 기록 안 함)과 같은 템플릿·20~32자 밖·금지어(완벽·최고·필수·꿀팁·총정리)·연속 기호는 건너뜀. 대표 명소 = 리뷰 상위 비식사·비스파·비숙소 2곳(이름 8자 초과면 1곳, "유니버설 스튜디오 재팬"은 USJ). 템플릿 B는 두 대표가 다른 날일 때만. 코드 조립 경로와 LLM 경로의 제목 폴백이 같은 함수를 쓴다.
+- **미리보기**: 코스 글은 히어로(카테고리 태그·제목·메타 반복) 대신 본문 맨 앞에 코드 생성 한 문장 요약. "📋 한눈에 보기" → "한눈에 보기".
+- **3박5일**: 키워드 "3박5일"→트레쥴 days=4, "4박6일"→days=5 (5박7일은 7 그대로). 제목·본문 표기는 키워드 그대로 두며 일수 정정 로직(`sanitizeDaysAgainstTripData`)에서 예외.
+- **시드**: 검색량 리포트가 있으면 "{지역} {top 박 수 표기 2개}"(검색량이 게이트 이상인 것만, 최근 30일 내 같은 지역·같은 일수 제외, 지역 로테이션)를 시드로. 없으면 기존 패턴. 검색량 게이트는 리포트 값을 먼저 쓰고 없는 키워드만 API 조회.
+- **썸네일**: `THUMBNAIL_SOURCE=dalle(기본)|map|pexels` 스위치만 추가(map=트레쥴 지도+제목 합성, pexels=DALL-E·HTML 건너뛰기). 선택은 다음 결정.
+- **관련 파일**: `src/utils/courseTitle.js`, `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/agents/keyword_miner.js`, `src/agents/tradule_source.js`, `src/agents/blog_asset_builder.js`, `.env.example`

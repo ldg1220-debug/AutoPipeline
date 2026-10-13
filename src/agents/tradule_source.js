@@ -189,7 +189,10 @@ function extractDays(keyword) {
   if (/당일|하루/.test(keyword)) return 1;
   const match = keyword.match(/(\d+)\s*박\s*(\d+)\s*일/);
   if (match) {
+    const nights = Number(match[1]);
     const days = Number(match[2]);
+    // D-153: 3박5일→days=4, 4박6일→days=5 (트레쥴 페이지 "3박4일·3박5일" 병기와 일치). 5박7일은 7 그대로.
+    if (nights >= 3 && nights <= 4 && days === nights + 2) return nights + 1;
     return Math.max(days || 1, 1);
   }
   return 1;

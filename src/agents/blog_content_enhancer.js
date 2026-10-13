@@ -8,6 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
+import { buildCourseTitle as buildCourseTitleV2 } from '../utils/courseTitle.js';
 import { splitDayKms, inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
@@ -390,7 +391,9 @@ export function sanitizeDaysAgainstTripData(text, tripData, keyword) {
   const match = (keyword ?? '').match(/(\d+)\s*박\s*(\d+)\s*일/);
   if (!match) return text;
   const statedDays = Number(match[2]);
-  if (statedDays <= tripData.days) return text; // 키워드 일수가 이미 코스 일수 이하면 문제 없음
+  if (statedDays <= tripData.days) return text;
+  // D-153: "3박5일"·"4박6일"은 트레쥴 페이지 제목(3박4일·3박5일)과 맞춘 표기라 코스 일수(N+1)와 달라도 정정하지 않는다.
+  if (Number(match[1]) <= 4 && statedDays === Number(match[1]) + 2 && tripData.days === Number(match[1]) + 1) return text; // 키워드 일수가 이미 코스 일수 이하면 문제 없음
 
   const correctPhrase = `${tripData.days - 1}박${tripData.days}일`;
   const statedVariants = [
@@ -1328,18 +1331,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
     // 2026-09-29(작업지시서 "카드형 세부 7일 초안" §2): 첫·마지막 스팟은 검색하는 사람이 모르는 이름
     // (식당·스파)이 되기 쉽다 → 숙소 제외, 리뷰 수 상위 두 곳. 이름이 20자 초과이거나 한글·영문이
     // 섞여 어색하면 다음 순위로.
-    const buildFallbackTitle = () => {
-      const isAwkward = (n) => !n || n.length > 20 || (/[가-힣]/.test(n) && /[A-Za-z]{3,}/.test(n));
-      const famous = [...tripData.spots]
-        .filter((sp) => sp.category !== '숙소' && !isAwkward(sp.name))
-        .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
-      const km = typeof tripData.totalDistanceKm === 'number' ? ` ${tripData.totalDistanceKm}km` : '';
-      // 리뷰 수 상위 두 곳을 코스 진행 순서(일차·순서)로 배열해 "A부터 B까지"가 자연스럽게 읽히게 한다.
-      const pair = famous.slice(0, 2).sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
-      return famous.length >= 2
-        ? `${keyword} 코스 — ${tripData.spots.length}곳, ${pair[0].name}·${pair[1].name} 포함${km}`
-        : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선${km}`;
-    };
+    const buildFallbackTitle = () => buildCourseTitleV2(tripData, keyword, keyword.replace(/\s+/g, '-'), { record: !process.env.AP_SKIP_THUMBNAIL }).title; // D-153
     if (tripData?.spots?.length && /\bvs\b|비교|패키지/i.test(outline.title)) {
       logger.warn(`[blog_content_enhancer] 제목에 비교/패키지 표현 감지 → 재작성: "${outline.title}"`);
       outline.title = buildFallbackTitle();
@@ -2305,18 +2297,6 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
 
 // D-142(AU1F781): 코스 글(trip_data 있음)은 LLM 본문 생성(Pass 1~5)을 생략하고 코드 블록만으로 조립한다.
 // 스위치 COURSE_LLM_BODY=on 이면 기존 경로(비교용).
-function buildCourseTitle(tripData, keyword) {
-  const isAwkward = (n) => !n || n.length > 20 || (/[가-힣]/.test(n) && /[A-Za-z]{3,}/.test(n));
-  const famous = [...tripData.spots]
-    .filter((sp) => sp.category !== '숙소' && !isAwkward(sp.name))
-    .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
-  const km = typeof tripData.totalDistanceKm === 'number' ? ` ${tripData.totalDistanceKm}km` : '';
-  const pair = famous.slice(0, 2).sort((a, b) => (a.day ?? 1) - (b.day ?? 1) || (a.order ?? 0) - (b.order ?? 0));
-  return famous.length >= 2
-    ? `${keyword} 코스 — ${tripData.spots.length}곳, ${pair[0].name}·${pair[1].name} 포함${km}`
-    : `${keyword} 코스 — 실제 스팟 ${tripData.spots.length}곳으로 짠 동선${km}`;
-}
-
 function buildCourseMeta(tripData, keyword) {
   const reps = [...tripData.spots]
     .filter((sp) => sp.category !== '숙소' && sp.name)
@@ -2344,7 +2324,8 @@ function assembleCourseDraft(content) {
   const lines = buildSpotLinesBody(tripData);
   if (lines) sections.push({ level: 2, heading: '장소별 한 줄 정리', body: lines, generated: 'code' });
   const faq = buildCodeFaqs(tripData, keyword).map((cf) => ({ ...cf, generated: 'code' }));
-  const title = buildCourseTitle(tripData, keyword);
+  const slugBase = keyword.replace(/\s+/g, '-');
+  const { title } = buildCourseTitleV2(tripData, keyword, slugBase, { record: !process.env.AP_SKIP_THUMBNAIL }); // D-153: 초안 전용 실행은 최근 템플릿 이력에 남기지 않는다
   const wordCount = sections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
   logger.info(`[blog_content_enhancer] Done: ${keyword} (${wordCount}자, 코드 조립)`);
   return {

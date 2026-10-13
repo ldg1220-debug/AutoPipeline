@@ -6,6 +6,7 @@ import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import { fetchMonthlyVolumeMap } from '../utils/naverSearchAd.js';
+import { loadLatestVolumeReport } from '../utils/courseTitle.js';
 import { REGION_TREE, extractRegion, regionStyle } from './tradule_source.js';
 import { REGION_PROFILES, isValidCombo } from '../data/regionProfiles.js';
 import db from '../db/db.js';
@@ -73,7 +74,54 @@ function getRecentlyUsedRegions(withinDays = 21) {
  * 매 실행마다 day-of-year 기준으로 지역 목록을 로테이션하고, 최근 발행된 지역은 후순위로 민다.
  * @param {number} count - 생성할 시드 개수 (기본 30, 6개 패턴이므로 지역 5개 사용)
  */
+/** 최근 N일 이내 발행된 키워드의 "지역|N박M일" 집합 — 같은 지역·같은 일수 재시드 방지(D-153). */
+function getRecentRegionDays(withinDays = 30) {
+  const cutoff = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000).toISOString();
+  const set = new Set();
+  try {
+    const rows = db.prepare(`SELECT keyword FROM keywords WHERE status = 'used' AND used_at IS NOT NULL AND used_at >= ?`).all(cutoff);
+    for (const { keyword } of rows) {
+      const region = extractRegion(keyword);
+      const m = keyword.match(/(\d+)\s*박\s*(\d+)\s*일/);
+      if (region && m) set.add(`${region}|${m[1]}박${m[2]}일`);
+    }
+  } catch { /* DB 조회 실패는 무시 */ }
+  return set;
+}
+
+/**
+ * D-153(AUAFF21): 검색량 리포트(region-days-volume-*.json)가 있으면 "{지역} {대표 일수}"를 시드로 쓴다.
+ * 대표 일수 = 리포트 top 중 박 수 표기(당일치기 제외) 상위 2개, 검색량이 게이트(minMonthlyVolume) 이상인 것만.
+ * 리포트가 없거나 시드가 하나도 안 나오면 null → 기존 패턴 시드로 폴백.
+ */
+function generateSeedsFromVolumeReport(count) {
+  const report = loadLatestVolumeReport();
+  if (!report) return null;
+  const minVolume = config.naverSearchAd?.minMonthlyVolume ?? 1000;
+  const usedRegions = getRecentlyUsedRegions();
+  const recentRD = getRecentRegionDays(30);
+  const offset = dayOfYear() % Math.max(Object.keys(report).length, 1);
+  const names = Object.keys(report);
+  const rotated = [...names.slice(offset), ...names.slice(0, offset)];
+  const ordered = [...rotated.filter((r) => !usedRegions.has(r)), ...rotated.filter((r) => usedRegions.has(r))];
+  const seeds = [];
+  for (const region of ordered) {
+    const e = report[region];
+    const tops = (e?.top ?? []).filter((l) => l !== '당일치기' && (e[l] ?? 0) >= minVolume).slice(0, 2);
+    for (const label of tops) {
+      if (recentRD.has(`${region}|${label}`)) continue;
+      seeds.push(`${region} ${label}`);
+    }
+    if (seeds.length >= count) break;
+  }
+  if (!seeds.length) return null;
+  logger.info(`[keyword_miner] 검색량 리포트 기반 시드 ${seeds.length}개: ${seeds.slice(0, 12).join(', ')}${seeds.length > 12 ? ' …' : ''}`);
+  return seeds.slice(0, count);
+}
+
 export function generateTravelSeeds(count = 30) {
+  const fromReport = generateSeedsFromVolumeReport(count);
+  if (fromReport) return fromReport;
   const usedRegions = getRecentlyUsedRegions();
 
   const offset = dayOfYear() % REGION_TREE.length;
@@ -223,7 +271,18 @@ async function applySearchVolumeGate(candidates) {
   }
 
   const minVolume = config.naverSearchAd.minMonthlyVolume ?? 1000;
-  const volumeMap = await fetchMonthlyVolumeMap(candidates.map((c) => c.keyword));
+  // D-153: 검색량 리포트에 있는 "{지역} {N박M일}" 키워드는 API를 다시 부르지 않고 리포트 값을 쓴다.
+  const volumeMap = {};
+  const report = loadLatestVolumeReport();
+  if (report) {
+    for (const [region, e] of Object.entries(report)) {
+      for (const [label, v] of Object.entries(e)) {
+        if (label !== 'top' && typeof v === 'number') volumeMap[`${region}${label}`.replace(/\s+/g, '')] = v;
+      }
+    }
+  }
+  const need = candidates.map((c) => c.keyword).filter((k) => volumeMap[k.replace(/\s+/g, '')] === undefined);
+  if (need.length) Object.assign(volumeMap, await fetchMonthlyVolumeMap(need));
 
   const passed = [];
   const dropped = [];

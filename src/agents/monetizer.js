@@ -12,6 +12,7 @@ import { getThemeStyles, getCategoryIcon } from './theme_styler.js';
 import { isOverseasRegion, extractRegion } from './tradule_source.js';
 import { splitKeywordPhrases } from './blog_content_enhancer.js';
 import { buildDayPoints, buildDaySubtitle, getFacilitySpot, inferSpotKind, dayLegMinutes, isBoatLeg, isIslandName, groupByDay } from '../utils/dayCard.js';
+import { buildLeadSentence } from '../utils/courseTitle.js';
 import { loadTaggedCoupangEntries, deriveTravelTags, pickTravelCoupang, placeTravelCoupang, coupangLineHtml, recordRecentCoupang, MAX_COUPANG_PER_POST, MAX_TOTAL_AFFILIATE_PER_POST } from '../utils/coupangTravel.js';
 import { APPROVED_AFFILIATE_BRANDS, MAX_AFFILIATE_LINKS_PER_POST } from '../data/affiliateBrands.js';
 
@@ -279,7 +280,7 @@ function buildTldrBox(sections, tripData, factCheck) {
   if (!bullets.length) return '';
   return (
     `<div class="tldr-box">\n` +
-    `<h4>📋 한눈에 보기</h4>\n` +
+    `<h4>한눈에 보기</h4>\n` +
     `<ul>\n${bullets.join('\n')}\n</ul>\n` +
     `</div>`
   );
@@ -1066,8 +1067,13 @@ async function monetizeBlogDraft(content) {
     `<p>${blog_draft.meta_description ?? ''}</p>` +
     `</div>`;
 
+  // D-153: 코스 글은 히어로(카테고리 태그·제목 반복·메타 반복) 대신 한 문장 요약으로 시작한다 — 티스토리 목록 미리보기가 본문 첫 텍스트를 쓰기 때문.
+  const leadHtml = content.trip_data?.spots?.length
+    ? `<p class="course-lead" style="margin:0 0 24px;font-size:17px;line-height:1.8;color:#1e293b">${buildLeadSentence(content.trip_data, keyword)}</p>`
+    : heroHtml;
+
   const innerHtml = [
-    heroHtml,
+    leadHtml,
     // 쿠팡 파트너스 대가성 문구는 반드시 콘텐츠 최상단(제목 근처)에 있어야 한다.
     // 예전엔 맨 아래(hasAffiliate ? PARTNERS_DISCLOSURE)에만 있어서 본문 73% 지점에
     // 위치하는 사례가 실측됐음 — 공정위 지침상 "고지 미흡"으로 판정될 수 있는 위치.

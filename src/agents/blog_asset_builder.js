@@ -716,8 +716,27 @@ async function buildAssets(content, sharedGlobalIds = null) {
 
   // D-127: --draft-only(교체용 HTML 확인)에서는 썸네일이 쓰이지 않으므로 DALL-E·HTML·Pexels 썸네일 단계를 모두 건너뛴다.
   const skipThumb = process.env.AP_SKIP_THUMBNAIL === '1';
+  // D-153(AUAFF21 §5): 썸네일 소스 스위치 THUMBNAIL_SOURCE = dalle(기본) | map(트레쥴 코스 지도 + 제목) | pexels(DALL-E·HTML 건너뛰고 Pexels 직행)
+  const thumbSource = String(process.env.THUMBNAIL_SOURCE ?? 'dalle').toLowerCase();
+  if (thumbSource === 'map' && !skipThumb && content.trip_data?.imageUrl) {
+    try {
+      const raw = path.join(assetDir, 'thumbnail_map_raw.jpg');
+      const out = path.join(assetDir, 'thumbnail.jpg');
+      await downloadImage(content.trip_data.imageUrl, raw);
+      const title = String(content.blog_draft?.title ?? content.keyword).replace(/[<>&]/g, '');
+      const lines = [title.slice(0, 17), title.slice(17, 34)].filter(Boolean);
+      const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="380" width="1200" height="250" fill="#0f172a" fill-opacity="0.72"/>` +
+        lines.map((t, i) => `<text x="60" y="${470 + i * 70}" font-size="56" font-weight="700" fill="#ffffff" font-family="Malgun Gothic, Noto Sans KR, Apple SD Gothic Neo, sans-serif">${t}</text>`).join('') + `</svg>`;
+      await sharp(raw).resize(1200, 630, { fit: 'cover' }).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toFile(out);
+      await fs.unlink(raw).catch(() => {});
+      result.thumbnail = out;
+      logger.info(`[blog_asset_builder] Thumbnail (트레쥴 지도+제목): ${content.keyword}`);
+    } catch (err) {
+      logger.warn(`[blog_asset_builder] map 썸네일 실패 → DALL-E 경로로 진행: ${err.message}`);
+    }
+  }
   // 1. 썸네일 — DALL-E 3 우선, 실패 시 Pexels 폴백
-  if (config.openai.apiKey && !skipThumb) {
+  if (config.openai.apiKey && !skipThumb && !result.thumbnail && thumbSource !== 'pexels') {
     try {
       await throttle(1000);
       const thumbPath = path.join(assetDir, 'thumbnail.jpg');
@@ -748,7 +767,7 @@ async function buildAssets(content, sharedGlobalIds = null) {
   }
 
   // 2.5. 썸네일 폴백 1단계 — DALL-E 실패 시 HTML/CSS+Playwright로 무료 렌더링 (자가 검수 포함)
-  if (!result.thumbnail && !skipThumb) {
+  if (!result.thumbnail && !skipThumb && thumbSource !== 'pexels') {
     try {
       const htmlThumbPath = path.join(assetDir, 'thumbnail.jpg');
       result.thumbnail = await generateHtmlThumbnailWithReview(content, htmlThumbPath);
