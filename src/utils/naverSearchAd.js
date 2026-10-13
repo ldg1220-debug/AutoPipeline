@@ -23,8 +23,10 @@ function buildSignature(timestamp, method, uri, secretKey) {
  * Number("< 10")은 NaN이 되어 그대로 두면 0으로 떨어져 실제보다 과소평가된다("< 10"은
  * 0이 아니라 "10 미만"이라는 뜻) → 문자열에서 숫자만 추출해 사용한다.
  */
-function parseQcCnt(value) {
+function parseQcCnt(value, lowValue = null) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  // lowValue가 주어지면 "< 10" 같은 미만 표기를 그 값으로 취급한다(리포트용: 5). 기본(null)은 기존대로 문자열 속 숫자(10).
+  if (lowValue !== null && /</.test(String(value ?? ''))) return lowValue;
   const match = String(value ?? '').match(/\d+/);
   return match ? Number(match[0]) : 0;
 }
@@ -80,7 +82,7 @@ export async function fetchKeywordVolume(keywords) {
  * 초당 요청 제한에 걸려 429가 연쇄로 난다(실측: 12회 중 7회 429).
  * 공백 제거 비교(네이버는 공백 없는 형태로 relKeyword를 반환하는 경우가 많음).
  */
-export async function fetchMonthlyVolumeMap(keywords) {
+export async function fetchMonthlyVolumeMap(keywords, { lowValue = null } = {}) {
   const { apiKey, secretKey, customerId } = config.naverSearchAd ?? {};
   if (!apiKey || !secretKey || !customerId || keywords.length === 0) return {};
 
@@ -93,8 +95,8 @@ export async function fetchMonthlyVolumeMap(keywords) {
     successCount += list.length > 0 ? 1 : 0;
     for (const item of list) {
       const norm = (item.relKeyword ?? '').replace(/\s+/g, '');
-      const pc     = parseQcCnt(item.monthlyPcQcCnt);
-      const mobile = parseQcCnt(item.monthlyMobileQcCnt);
+      const pc     = parseQcCnt(item.monthlyPcQcCnt, lowValue);
+      const mobile = parseQcCnt(item.monthlyMobileQcCnt, lowValue);
       volumeMap[norm] = pc + mobile;
     }
   }

@@ -2257,3 +2257,8 @@
 - **결정**: `scripts/region-days-volume.js`(메뉴 11, LLM 0) — 트레쥴 지역 스냅샷(국내+해외 전부) × 9개 표기를 네이버 검색광고 키워드도구로 조회해 `output/reports/region-days-volume-YYYYMMDD.json/.csv`로 저장. `<10`·결과 없음은 5, `top`은 5 초과 상위 3개. 캐시 7일(`output/cache/`).
 - **특이사항**: 키워드도구는 힌트에서 공백을 제거하므로 "2박 3일"과 "2박3일"은 같은 키워드 — 따로 합산하지 않는다(합산하면 이중 계산). API 실패로 결과가 통째로 비면 5로 캐시하지 않고 리포트를 만들지 않는다(실패를 "검색량 없음"으로 오인 방지).
 - **관련 파일**: `scripts/region-days-volume.js`, `scripts/menu.js`
+
+### D-152: 검색량 리포트 "< 10" 처리 수정 (D-151 보정)
+- **결함**: `parseQcCnt`가 "< 10" 문자열에서 숫자 10을 꺼내 PC·모바일 합이 20이 됐다 → 첫 리포트의 바닥이 20(지시서는 5). 데이터가 없는 조합이 전부 20으로 나옴.
+- **결정**: `fetchMonthlyVolumeMap(keywords, { lowValue })` 옵션 추가 — 리포트만 5를 넘기고(둘 다 미만이면 합 10 = 바닥), keyword_miner 검색량 게이트는 기본값(기존 동작) 유지. 리포트 캐시를 v2 파일로 분리해 재조회하게 함. `top`은 바닥 초과만.
+- **관련 파일**: `src/utils/naverSearchAd.js`, `scripts/region-days-volume.js`
