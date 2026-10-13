@@ -105,3 +105,17 @@ export function loadLatestVolumeReport() {
     return JSON.parse(fs.readFileSync(path.join(dir, files[files.length - 1]), 'utf8'));
   } catch { return null; }
 }
+
+/** 코스 글 태그 — 코드 생성(GPT 태그가 경비·맛집·숙소추천처럼 본문에 없는 주제를 약속하는 문제 방지, D-154). 최대 10개, 공백 없는 한글 태그. */
+export function buildCourseTags(tripData, keyword) {
+  const kw = titleKeyword(keyword, tripData);
+  const region = tripData?.region ?? kw.split(' ')[0];
+  const dayLabel = (kw.match(/\d+박\d+일|당일치기/) ?? [''])[0];
+  const reps = repSpots(tripData).map((r) => r.label.replace(/\s+/g, '')).filter((n) => /[가-힣]/.test(n));
+  const tags = [
+    `${region}여행`, dayLabel && `${region}${dayLabel}`, `${region}코스`, `${region}여행코스`,
+    dayLabel && `${region}${dayLabel}코스`, `${region}일정`, dayLabel && `${region}${dayLabel}일정`, `${region}동선`,
+    ...reps.map((n) => `${n}`),
+  ].filter(Boolean);
+  return [...new Set(tags)].slice(0, 10);
+}

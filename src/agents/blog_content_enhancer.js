@@ -8,7 +8,7 @@ import { readJSON, writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
-import { buildCourseTitle as buildCourseTitleV2 } from '../utils/courseTitle.js';
+import { buildCourseTitle as buildCourseTitleV2, titleKeyword } from '../utils/courseTitle.js';
 import { splitDayKms, inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
@@ -2308,7 +2308,10 @@ function buildCourseMeta(tripData, keyword) {
 }
 
 function assembleCourseDraft(content) {
-  const { keyword, blog_draft } = content;
+  const { blog_draft } = content;
+  // D-154: 본문·FAQ·메타·태그의 키워드 표기도 제목과 같게 "N박M일" 띄어쓰기를 없앤다("상하이 3박 4일" → "상하이 3박4일").
+  // 끝의 "일정/코스/여행"도 떼어 "푸꾸옥 4박5일 일정 코스 개요" 같은 중복을 막는다.
+  const keyword = titleKeyword(content.keyword, content.trip_data);
   const tripData = content.trip_data;
   const sections = [];
   const overview = buildOverviewBody(tripData, keyword);

@@ -319,7 +319,7 @@ async function applySearchVolumeGate(candidates) {
 
   // D-117: 트레쥴 코스는 카페·맛집·축제·단풍 같은 주제 전용 데이터가 아니다 — 이런 키워드로 글을 만들면 관광지 코스가 카페 글 제목으로
   // 나가는 불일치(예: "도쿄 카페 추천" → 스카이트리·디즈니랜드 8곳)가 생긴다. 채굴 결과에서 제외.
-  const UNSUPPORTED_TOPIC = /카페|맛집|축제|단풍|벚꽃|야시장|빵집|디저트|술집|바\s*추천/;
+  const UNSUPPORTED_TOPIC = /카페|맛집|축제|단풍|벚꽃|야시장|빵집|디저트|술집|바\s*추천|경비|비용|예산|가격|패키지|항공권|할인|쿠폰/;
   const supported = passed.filter((c) => !UNSUPPORTED_TOPIC.test(c.keyword));
   if (supported.length !== passed.length) {
     logger.info(`[keyword_miner] 코스 데이터가 못 받치는 주제어 키워드 ${passed.length - supported.length}개 제외: ${passed.filter((c) => UNSUPPORTED_TOPIC.test(c.keyword)).map((c) => c.keyword).join(', ')}`);

@@ -26,6 +26,7 @@ import {
   setCategoryInEditor,
   setTagsInEditor,
 } from '../utils/tistoryClassifier.js';
+import { buildCourseTags } from '../utils/courseTitle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -400,7 +401,11 @@ async function publishPost(page, content, blogName, context) {
   // 태그도 미리 생성 (API 호출 — 페이지 이동 없음)
   let generatedTags = [];
   try {
-    generatedTags = await generateBlogTags(
+    // D-154: 코스 글은 태그도 코드로 만든다(GPT 태그가 "여행경비·맛집·숙소추천" 등 본문에 없는 주제를 약속).
+    if (content.trip_data?.spots?.length) {
+      generatedTags = buildCourseTags(content.trip_data, keyword);
+      logger.info(`[blog_publisher] 코스 글 태그(코드 생성): ${generatedTags.join(', ')}`);
+    } else generatedTags = await generateBlogTags(
       keyword,
       blog_draft?.seo_keywords ?? [],
       content.category ?? 'economy'

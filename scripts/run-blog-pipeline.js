@@ -16,7 +16,7 @@ import { runBlogQA } from '../src/agents/qa_editor.js';
 import { runProjectManagerReview } from '../src/agents/project_manager.js';
 import { groupSimilarTopics } from '../src/agents/topic_grouper.js';
 import { analyzeCompetitors } from '../src/agents/competitor_analyzer.js';
-import { attachTripData, looksLikeTravelKeyword } from '../src/agents/tradule_source.js';
+import { attachTripData, looksLikeTravelKeyword, extractRegion } from '../src/agents/tradule_source.js';
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
@@ -840,7 +840,12 @@ async function main() {
       return r;
     };
 
+    // D-154: 지역이 다른 키워드는 "3박4일일정" 같은 공통 꼬리 때문에 유사로 잡히면 안 된다(푸꾸옥 3박4일 일정이 삿포로3박4일일정과 유사로 제외됨).
+    // 둘 다 지역이 있으면 같은 지역일 때만 비교한다.
+    const regionOf = (norm) => extractRegion(norm) ?? null;
     const isSimilar = (kwNorm, pubNorm) => {
+      const ra = regionOf(kwNorm); const rb = regionOf(pubNorm);
+      if (ra && rb && ra !== rb) return false;
       const kwCore = stripGeneric(kwNorm);
       const pubCore = stripGeneric(pubNorm);
       if (kwCore.length < 2 || pubCore.length < 2) return false;
@@ -893,6 +898,9 @@ async function main() {
         if (assigned[j] !== -1) continue;
         const kwJ = normalize(contents[j].keyword);
         // 한쪽이 다른 쪽에 4글자 이상 포함되거나, 4글자 이상 공통 부분문자열 존재
+        // D-154: 지역이 서로 다르면 같은 테마 클러스터가 아니다("경비"·"3박4일" 같은 공통 꼬리로 다른 지역 글이 연기되던 문제).
+        const rI = extractRegion(contents[i].keyword); const rJ = extractRegion(contents[j].keyword);
+        if (rI && rJ && rI !== rJ) continue;
         const shorter = kwI.length <= kwJ.length ? kwI : kwJ;
         const longer  = kwI.length <= kwJ.length ? kwJ : kwI;
         let shared = false;

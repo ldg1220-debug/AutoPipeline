@@ -2270,3 +2270,9 @@
 - **시드**: 검색량 리포트가 있으면 "{지역} {top 박 수 표기 2개}"(검색량이 게이트 이상인 것만, 최근 30일 내 같은 지역·같은 일수 제외, 지역 로테이션)를 시드로. 없으면 기존 패턴. 검색량 게이트는 리포트 값을 먼저 쓰고 없는 키워드만 API 조회.
 - **썸네일**: `THUMBNAIL_SOURCE=dalle(기본)|map|pexels` 스위치만 추가(map=트레쥴 지도+제목 합성, pexels=DALL-E·HTML 건너뛰기). 선택은 다음 결정.
 - **관련 파일**: `src/utils/courseTitle.js`, `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/agents/keyword_miner.js`, `src/agents/tradule_source.js`, `src/agents/blog_asset_builder.js`, `.env.example`
+
+### D-154: 자동 모드 실측 보정 — 가격 주제 스킵 · 지역 간 중복 오판정 · 키워드 표기 통일 · 코스 글 태그 코드 생성
+- **실측(10/13 메뉴 6)**: (1) "홍콩 3박4일 경비"가 검색량 1000으로 게이트를 통과해 발행됐고, 제목("…홍콩 3박4일 경비 코스")과 GPT 태그("홍콩여행경비·비용·숙박비용")가 비용을 약속하는데 본문에는 비용 정보가 없다 (2) Part 1.55가 "푸꾸옥 3박4일 일정"을 "삿포로3박4일일정"과 유사로 제외 — 공통 꼬리("3박4일일정" 6글자)로 지역이 다른데도 매칭 (3) Part 1.56이 "3박4일"·"경비" 공통 꼬리로 다른 지역 글을 같은 테마로 묶어 연기 (4) "상하이 3박 4일" 키워드의 띄어쓰기가 제목만 정규화되고 본문·FAQ·메타·태그에는 남음 (5) 푸꾸옥 태그에 맛집·숙소추천 등 본문에 없는 주제.
+- **결정**: (1) 경비·비용·예산·가격·패키지·항공권·할인·쿠폰·얼마를 확인 불가 주제(`UNVERIFIABLE_TOPIC_PATTERN`)와 채굴 제외어에 추가 — 지역이 있어도 LLM 전에 스킵하고 자동 모드는 다음 후보로 (2)(3) 두 키워드에 지역이 모두 있고 서로 다르면 유사/동일 테마로 보지 않음 (4) 코드 조립 초안은 키워드를 `titleKeyword`로 정규화(띄어쓰기 제거, 끝의 일정/코스/여행 제거)해 본문·FAQ·메타·태그가 제목과 같은 표기를 쓴다 (5) 코스 글 태그는 코드 생성(`buildCourseTags`: 지역·일수·코스·일정·동선·대표 명소) — GPT 태그 호출 생략.
+- **이미 발행된 글**: maeilg.com/281(홍콩 3박4일 경비)의 제목·태그는 수동 수정 필요(권장 제목: "홍콩 3박4일 코스 | 홍콩 디즈니랜드 리조트 하루별 동선", 경비·비용 태그 삭제).
+- **관련 파일**: `src/agents/tradule_source.js`, `src/agents/keyword_miner.js`, `scripts/run-blog-pipeline.js`, `src/agents/blog_content_enhancer.js`, `src/agents/blog_publisher.js`, `src/utils/courseTitle.js`

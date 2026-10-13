@@ -416,7 +416,8 @@ const ALL_PARENTS = [...domesticParents, ...overseasParents];
 export const TOPIC_KEYWORD_PATTERN = /축제|페스티벌|단풍|벚꽃|불꽃|야경\s*명소|가볼\s*만한\s*곳|카페|맛집/;
 
 // D-122: trip_data로 확인할 수 없는 주제 — 지역이 있어도 항상 스킵(예: "부산 가을 축제").
-export const UNVERIFIABLE_TOPIC_PATTERN = /축제|페스티벌|단풍|벚꽃|불꽃|야경/;
+// D-154: 경비·비용·예산·가격·패키지·항공권·할인·쿠폰도 trip_data에 없는 정보라 확인 불가(홍콩 3박4일 경비 → 제목·태그가 비용을 약속하는데 본문엔 비용이 없었음).
+export const UNVERIFIABLE_TOPIC_PATTERN = /축제|페스티벌|단풍|벚꽃|불꽃|야경|경비|비용|예산|가격|패키지|항공권|할인|쿠폰|얼마/;
 // 주제어 → 코스에 그 종류의 스팟이 3곳 이상 있어야 하는 키워드(예: "도쿄 카페 추천" → 카페 3곳).
 const THEME_SPOT_RULES = [
   { word: /카페/, label: '카페', match: (sp) => inferSpotKind(sp) === '카페' },
