@@ -776,12 +776,29 @@ function buildDayCardHtml(tripData, day, narrativeHtml, extraHtml = '') {
  * @param {string} catColor      - 카테고리 색상 hex
  * @param {Object} tripData      - 일자 카드 생성용(없으면 일반 렌더)
  */
+/**
+ * D-155(AUTOPI1): 평점·리뷰 출처 표기. Google 값에는 정책이 요구하는 "Google Maps"(대소문자·번역 고정, 줄바꿈 금지, translate="no")만 쓰고,
+ * 카카오 등 다른 출처는 그 출처명 그대로 — Google이 아닌 값에 Google Maps를 붙이지 않는다. 출처를 모르면 아무것도 쓰지 않는다.
+ */
+export function ratingAttributionHtml(tripData) {
+  const src = String(tripData?.ratingSource ?? '').trim();
+  if (!src || !tripData?.spots?.length) return '';
+  const style = 'font-size:12px;color:#5E5E5E;margin:4px 0 16px';
+  if (/google/i.test(src)) {
+    return `<p style="${style}">평점·리뷰 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span></p>`;
+  }
+  const label = /kakao/i.test(src) ? '카카오맵' : src.replace(/[<>&]/g, '');
+  return `<p style="${style}">평점·리뷰 정보 제공: ${label}</p>`;
+}
+
 function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb', tripData = null, extras = {}) {
   // 2026-09-29(§3): 같은 이미지는 글 안에서 1번만. 예전엔 섹션 인덱스에 맞는 이미지가
   // 없으면 bodyImages[i % length]로 순환해 같은 사진·지도가 여러 섹션에 반복됐다.
   const usedImageUrls = new Set();
   // D-110: 본문 첫 이미지로 이미 들어가는 코스 지도를 첫 섹션 이미지로 또 넣지 않는다.
   if (tripData?.imageUrl) usedImageUrls.add(tripData.imageUrl);
+  let lastDayIdx = -1;
+  if (tripData?.spots?.length) sections.forEach((sec, idx) => { if (DAY_HEADING_PATTERN.test(sec.heading ?? '')) lastDayIdx = idx; });
   return sections
     .map((s, i) => {
       const tag = s.level === 'h3' ? 'h3' : 'h2';
@@ -835,7 +852,8 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         `${imageHtml}\n` +
         contentHtml +
         `${affiliateHtml}` +
-        (/한눈에/.test(s.heading ?? '') ? (extras.afterGlanceHtml ?? '') : '')
+        (/한눈에/.test(s.heading ?? '') ? (extras.afterGlanceHtml ?? '') : '') +
+        (i === lastDayIdx ? (extras.ratingAttrHtml ?? '') : '')
       );
     })
     .join('\n\n');
@@ -987,7 +1005,7 @@ async function monetizeBlogDraft(content) {
     }
   }
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
-    { dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
+    { ratingAttrHtml: ratingAttributionHtml(content.trip_data), dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
@@ -1082,6 +1100,7 @@ async function monetizeBlogDraft(content) {
     hasAffiliate ? PARTNERS_DISCLOSURE : '',
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
+    tldrHtml ? ratingAttributionHtml(content.trip_data) : '', // D-155: 평점이 나오는 한눈에 보기 아래 출처
     coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 쿠팡 링크가 있으면 TL;DR 아래 대가성 고지
     distanceDisclosureHtml,                       // 임시 조치(2026-09-08): 직선거리 기준 고지 (거리 언급 직후 1회)
     courseMapHtml,                                // §2(2026-09-08): 코스 지도 (트레쥴 워터마크) — 본문 첫 이미지
@@ -1094,7 +1113,7 @@ async function monetizeBlogDraft(content) {
     placeAff.count > 0 && !travelpayoutsDisclosure ? TRAVELPAYOUTS_DISCLOSURE : '', // D-137: 장소 제휴 링크가 있을 때 고지
     adsenseSlot('mid_content'),
     conclusionAffiliate,
-    faqHtml,
+    faqHtml ? faqHtml + ratingAttributionHtml(content.trip_data) : '', // D-155: FAQ 평점 답변 아래 출처
     sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지

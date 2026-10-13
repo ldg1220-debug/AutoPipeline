@@ -1995,11 +1995,10 @@ function buildKindBlocksBody(tripData) {
   if (spas.length >= 2) lines.push(`평점이 높은 스파는 ${spas.map(fmt).join(', ')} 순입니다.`);
 
   if (lines.length < 2) return '';
-  const src = String(tripData.ratingSource ?? '').trim();
-  if (src) {
-    const label = /google/i.test(src) ? 'Google 지도' : /kakao/i.test(src) ? '카카오맵' : src;
+  // D-155(AUTOPI1): 평점 출처는 Google 정책상 "Google Maps" 표기를 별도 블록(monetizer.ratingAttributionHtml)에서 단다 — 본문 문장에는 출처명을 쓰지 않고 조회일만 둔다.
+  if (String(tripData.ratingSource ?? '').trim()) {
     const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-    lines.push(`평점·리뷰 수는 ${label} 기준입니다(조회일 ${today}).`);
+    lines.push(`평점·리뷰 수 조회일은 ${today}입니다.`);
   }
   return lines.join('\n\n');
 }

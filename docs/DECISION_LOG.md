@@ -2276,3 +2276,8 @@
 - **결정**: (1) 경비·비용·예산·가격·패키지·항공권·할인·쿠폰·얼마를 확인 불가 주제(`UNVERIFIABLE_TOPIC_PATTERN`)와 채굴 제외어에 추가 — 지역이 있어도 LLM 전에 스킵하고 자동 모드는 다음 후보로 (2)(3) 두 키워드에 지역이 모두 있고 서로 다르면 유사/동일 테마로 보지 않음 (4) 코드 조립 초안은 키워드를 `titleKeyword`로 정규화(띄어쓰기 제거, 끝의 일정/코스/여행 제거)해 본문·FAQ·메타·태그가 제목과 같은 표기를 쓴다 (5) 코스 글 태그는 코드 생성(`buildCourseTags`: 지역·일수·코스·일정·동선·대표 명소) — GPT 태그 호출 생략.
 - **이미 발행된 글**: maeilg.com/281(홍콩 3박4일 경비)의 제목·태그는 수동 수정 필요(권장 제목: "홍콩 3박4일 코스 | 홍콩 디즈니랜드 리조트 하루별 동선", 경비·비용 태그 삭제).
 - **관련 파일**: `src/agents/tradule_source.js`, `src/agents/keyword_miner.js`, `scripts/run-blog-pipeline.js`, `src/agents/blog_content_enhancer.js`, `src/agents/blog_publisher.js`, `src/utils/courseTitle.js`
+
+### D-155: 평점 출처 표기 "Google Maps" (AUTOPI1, Google Places 정책)
+- **결정**: 항목별 소문자 `google`은 이미 10/01에 제거됨(AU14A41). 이번에 (1) 평점이 나오는 블록 아래에 정책 표기 한 줄 — 한눈에 보기(TL;DR) 아래, 마지막 일자 카드 아래, FAQ 아래 3곳: `평점·리뷰 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span>` (2) 출처가 카카오 등이면 그 이름 그대로, 출처를 모르면 표기하지 않음 — Google이 아닌 값에 Google Maps를 붙이지 않음 (3) "종류별 장소 순위"의 "평점·리뷰 수는 Google 지도 기준입니다" 문장은 "조회일은 …입니다"로 줄임(출처는 위 블록이 담당) (4) QA 규칙: 본문·FAQ에 소문자 단독 "google"이 있으면 반려 사유로 기록.
+- **범위 밖**: 이미 발행된 글은 그대로(별도 결정).
+- **관련 파일**: `src/agents/monetizer.js`(`ratingAttributionHtml`), `src/agents/blog_content_enhancer.js`, `src/agents/qa_editor.js`

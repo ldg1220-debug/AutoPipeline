@@ -638,6 +638,12 @@ function validateBlogStructure(content) {
     }
   }
 
+  // D-155(AUTOPI1): 소문자 단독 "google"(항목별 출처 표기) 금지 — 출처는 "Google Maps" 블록으로만 표기.
+  const allText = sections.map((s) => s.body ?? '').concat(faq.map((f) => f.a ?? '')).join(' ');
+  if (/(?<![A-Za-z가-힣/.=_-])google(?![A-Za-z가-힣/.=_-])/.test(allText)) {
+    issues.push('소문자 "google" 출처 표기 발견 — 평점 출처는 "Google Maps" 블록으로만 표기');
+  }
+
   // 코드가 만든 FAQ(generated:'code')는 trip_data 사실 문장이라 짧은 게 정상 — 길이 규칙 면제.
   const shortFaq = faq.filter((f) => f.generated !== 'code' && (f.a ?? '').length < BLOG_MIN_FAQ_CHARS);
   if (shortFaq.length > 0) {
