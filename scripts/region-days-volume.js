@@ -20,7 +20,7 @@ import { installApiUsageTracking } from '../src/utils/apiUsage.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const REGIONS_PATH = path.join(ROOT, 'src/data/tradule_regions.json');
-const CACHE_PATH = path.join(ROOT, 'output/cache/region-days-volume-cache.json');
+const CACHE_PATH = path.join(ROOT, 'output/cache/region-days-volume-cache-v2.json');
 const CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
 // PC·모바일 각각 "< 10"이면 5로 보고 합산 → 둘 다 미만이면 10이 바닥(= "데이터 없음"). 이전 판은 "< 10"을 10으로 읽어 바닥이 20이었다(캐시 v2로 분리).
 const FLOOR = 10;
