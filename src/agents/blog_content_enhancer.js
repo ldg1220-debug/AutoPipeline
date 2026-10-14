@@ -1257,7 +1257,7 @@ function buildOverviewBody(tripData, keyword) {
   const lines = days.map((d) => {
     const list = byDay.get(d);
     const fac = getFacilitySpot(tripData, d, list);
-    const top = [...list].filter((sp) => typeof sp.reviewCount === 'number').sort((x, y) => y.reviewCount - x.reviewCount)[0];
+    const top = [...list].filter((sp) => typeof sp.reviewCount === 'number' && sp.category !== '숙소' && !sp.lodging).sort((x, y) => y.reviewCount - x.reviewCount)[0];
     const topPart = top ? ` 이날 리뷰가 가장 많은 곳은 ${top.name}(리뷰 ${top.reviewCount.toLocaleString()})입니다.` : '';
     if (fac) {
       const comp = list.filter((sp) => sp !== fac);
@@ -2050,7 +2050,7 @@ function buildCourseGlanceBody(tripData) {
   }
 
   // 3) 리뷰 수 상위 명소
-  const top = spots.filter((x) => typeof x.reviewCount === 'number').sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
+  const top = spots.filter((x) => typeof x.reviewCount === 'number' && x.category !== '숙소' && !x.lodging).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3); // D-156: 숙소는 대표 명소에서 제외
   if (top.length) {
     paras.push('리뷰 수가 가장 많은 곳은 ' + top.map((x) => `${x.name}(${typeof x.rating === 'number' ? `★${x.rating}, ` : ''}리뷰 ${x.reviewCount.toLocaleString()}개, ${x.day ?? 1}일차)`).join(', ') + '입니다.');
   }
@@ -2098,7 +2098,7 @@ function buildCodeFaqs(tripData, keyword) {
     const fac = facilityDays.length ? ` ${facilityDays.map((f) => `${f.day}일차는 ${f.name} 종일 일정`).join(', ')}입니다.` : '';
     faqs.push({ q: '하루 평균 얼마나 이동하나요?', a: `이동한 날 평균 ${avg}km이고, 가장 긴 날은 ${longDay}일차(${longKm}km)입니다.${fac}` });
   }
-  const byReviews = spots.filter((x) => typeof x.reviewCount === 'number').sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3);
+  const byReviews = spots.filter((x) => typeof x.reviewCount === 'number' && x.category !== '숙소' && !x.lodging).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3); // D-156
   if (byReviews.length) {
     faqs.push({
       q: '대표 명소는 어디인가요?',

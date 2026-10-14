@@ -2281,3 +2281,8 @@
 - **결정**: 항목별 소문자 `google`은 이미 10/01에 제거됨(AU14A41). 이번에 (1) 평점이 나오는 블록 아래에 정책 표기 한 줄 — 한눈에 보기(TL;DR) 아래, 마지막 일자 카드 아래, FAQ 아래 3곳: `평점·리뷰 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span>` (2) 출처가 카카오 등이면 그 이름 그대로, 출처를 모르면 표기하지 않음 — Google이 아닌 값에 Google Maps를 붙이지 않음 (3) "종류별 장소 순위"의 "평점·리뷰 수는 Google 지도 기준입니다" 문장은 "조회일은 …입니다"로 줄임(출처는 위 블록이 담당) (4) QA 규칙: 본문·FAQ에 소문자 단독 "google"이 있으면 반려 사유로 기록.
 - **범위 밖**: 이미 발행된 글은 그대로(별도 결정).
 - **관련 파일**: `src/agents/monetizer.js`(`ratingAttributionHtml`), `src/agents/blog_content_enhancer.js`, `src/agents/qa_editor.js`
+
+### D-156: 숙소는 "리뷰 가장 많은 곳"·대표 명소에서 제외
+- **확인(세부 3박5일, 10/14)**: Google Maps 표기 3곳·`translate="no"`·소문자 google 없음 모두 통과. 다만 숙소(샹그릴라 막탄 세부, 트레쥴 `lodging:true`/category 숙소)가 "대표 명소" FAQ·코스 한눈에 보기·일자 개요의 "리뷰가 가장 많은 곳"에 올라감.
+- **결정**: 일자 개요·한눈에 보기·대표 명소 FAQ의 리뷰 순위에서 category 숙소/`lodging` 스팟 제외(일자 표·한 줄 정리에는 그대로 표시).
+- **관련 파일**: `src/agents/blog_content_enhancer.js`
