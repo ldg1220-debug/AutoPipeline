@@ -684,15 +684,20 @@ const DAY_HEADING_PATTERN = /(\d+)\s*일차/;
 // ── D-137(AUTOPI4): 트레쥴 코스 페이지 CTA + 장소 단위 제휴 ─────────────────────────────
 // 트레쥴 CTA는 공개 코스 페이지(/course/{지역}/{일수})로만 연결한다(planner·course-open 금지 — 로그인 독자의 계획 덮어쓰기 위험).
 // 발행 직전 링크가 200이 아니면 CTA를 넣지 않는다(트레쥴 코스 페이지 404 회귀 동안 자동으로 빠짐).
+// D-157(AUTOPI2): 트레쥴은 숫자 주소(/course/하노이/3)를 정본 라벨 주소(/course/하노이/2박3일)로 영구 리다이렉트한다 — 처음부터 라벨 주소로 링크한다.
+const TRADULE_DAY_LABELS = { 1: '당일치기', 2: '1박2일', 3: '2박3일', 4: '3박4일', 5: '4박5일', 6: '5박6일', 7: '5박7일' };
+export function traduleDayLabel(days) { return TRADULE_DAY_LABELS[days] ?? String(days); }
+
 async function buildTraduleCoursePageUrl(tripData, slug) {
   if (!tripData?.region || !tripData?.days) return null;
   let origin = 'https://www.tradule.co.kr';
   try { if (tripData.appUrl) origin = new URL(tripData.appUrl).origin; } catch { /* 기본값 */ }
-  const base = `${origin}/course/${encodeURIComponent(tripData.region)}/${tripData.days}`;
+  const base = `${origin}/course/${encodeURIComponent(tripData.region)}/${encodeURIComponent(traduleDayLabel(tripData.days))}`;
   const url = `${base}?utm_source=maeilg&utm_medium=blog&utm_campaign=${encodeURIComponent(slug || tripData.region)}`;
   for (const method of ['HEAD', 'GET']) {
     try {
-      const res = await fetch(base, { method, redirect: 'follow', signal: AbortSignal.timeout(8000) });
+      const res = await fetch(base, { method, redirect: 'manual', // 라벨 주소는 리다이렉트 없이 200이어야 정상
+         signal: AbortSignal.timeout(8000) });
       if (res.status === 200) return url;
       if (method === 'HEAD' && (res.status === 405 || res.status === 501)) continue;
       logger.warn(`[monetizer] 트레쥴 코스 페이지 ${res.status} → CTA 생략: ${base}`);

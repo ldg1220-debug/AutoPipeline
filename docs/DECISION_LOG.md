@@ -2286,3 +2286,8 @@
 - **확인(세부 3박5일, 10/14)**: Google Maps 표기 3곳·`translate="no"`·소문자 google 없음 모두 통과. 다만 숙소(샹그릴라 막탄 세부, 트레쥴 `lodging:true`/category 숙소)가 "대표 명소" FAQ·코스 한눈에 보기·일자 개요의 "리뷰가 가장 많은 곳"에 올라감.
 - **결정**: 일자 개요·한눈에 보기·대표 명소 FAQ의 리뷰 순위에서 category 숙소/`lodging` 스팟 제외(일자 표·한 줄 정리에는 그대로 표시).
 - **관련 파일**: `src/agents/blog_content_enhancer.js`
+
+### D-157: 트레쥴 링크는 정본 라벨 주소로 (AUTOPI2)
+- **결정**: 트레쥴 코스 CTA(글 중간·끝 모두 같은 URL)를 `/course/{지역}/{라벨}?utm_…`로 만든다. 라벨: 1 당일치기 · 2 1박2일 · 3 2박3일 · 4 3박4일 · 5 4박5일 · 6 5박6일 · 7 5박7일(트레쥴과 동일). "3박5일" 글은 days=4 → `/3박4일`. 발행 직전 200 확인은 유지하되 리다이렉트를 따라가지 않는다(`redirect:'manual'`) — 라벨 주소는 3xx 없이 200이어야 정상.
+- **확인**: 실제 요청에서 `/course/하노이/2박3일` → 200, `/course/하노이/3` → 308(라벨 주소로).
+- **관련 파일**: `src/agents/monetizer.js`(`traduleDayLabel`, `buildTraduleCoursePageUrl`)
