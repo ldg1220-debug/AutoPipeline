@@ -20,6 +20,7 @@ import { attachTripData, looksLikeTravelKeyword, extractRegion } from '../src/ag
 import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
+import { recordSparseRegions } from '../src/utils/sparseRegions.js';
 import { installApiUsageTracking } from '../src/utils/apiUsage.js';
 import db from '../src/db/db.js';
 import path from 'path';
@@ -735,7 +736,7 @@ async function main() {
 
   const hotCount = rawKeywords.filter((k) => (k.score ?? 0) >= 70).length;
   // D-120: 자동 모드는 후보를 넉넉히 뽑아 두고, 트레쥴 데이터 부족으로 스킵되면 다음 후보로 넘어간다(Part 1.7 이후 targetCount로 자름).
-  const candidateExtra = (singleMode || forceKeyword) ? 0 : 4;
+  const candidateExtra = (singleMode || forceKeyword) ? 0 : 8; // D-158: 4→8 (10/16 실측: 후보 6개가 전부 트레쥴 데이터 부족으로 스킵돼 글 0편)
   const postLimit = Math.min(targetCount + candidateExtra, rawKeywords.length);
   rawKeywords = rawKeywords.slice(0, postLimit);
   logger.info(`[blog:pipeline] 키워드 ${rawKeywords.length}개 선택 (HOT:${hotCount}개, 목표:${postsPerDay}개×${fetchMultiplier})`);
@@ -973,6 +974,8 @@ async function main() {
   try {
     contentData.contents = (await attachTripData(contentData)).contents;
     const skipped = contentData.contents.filter((c) => c.skip_reason);
+    // D-158: 스팟 부족으로 스킵된 지역은 14일간 시드에서 뺀다(--force-keyword 실행은 기록하지 않음).
+    if (!forceKeyword) recordSparseRegions(skipped.filter((c) => /스팟 부족|평점 있는 스팟/.test(c.skip_reason ?? '')).map((c) => extractRegion(c.keyword)));
     if (skipped.length > 0) {
       logger.info(
         `[blog:pipeline] Part 1.7: 트레쥴 데이터 부족으로 ${skipped.length}개 스킵: ` +

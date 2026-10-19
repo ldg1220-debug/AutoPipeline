@@ -6,6 +6,7 @@ import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { throttle, retryOn503 } from '../utils/rateLimiter.js';
 import { fetchMonthlyVolumeMap } from '../utils/naverSearchAd.js';
+import { loadSparseRegions } from '../utils/sparseRegions.js';
 import { loadLatestVolumeReport } from '../utils/courseTitle.js';
 import { REGION_TREE, extractRegion, regionStyle } from './tradule_source.js';
 import { REGION_PROFILES, isValidCombo } from '../data/regionProfiles.js';
@@ -104,8 +105,10 @@ function generateSeedsFromVolumeReport(count) {
   const names = Object.keys(report);
   const rotated = [...names.slice(offset), ...names.slice(0, offset)];
   const ordered = [...rotated.filter((r) => !usedRegions.has(r)), ...rotated.filter((r) => usedRegions.has(r))];
+  const sparse = loadSparseRegions();
   const seeds = [];
   for (const region of ordered) {
+    if (sparse.has(region)) continue; // D-158: 최근 트레쥴 데이터 부족으로 스킵된 지역
     const e = report[region];
     const tops = (e?.top ?? []).filter((l) => l !== '당일치기' && (e[l] ?? 0) >= minVolume).slice(0, 2);
     for (const label of tops) {
