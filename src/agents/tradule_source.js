@@ -235,7 +235,12 @@ function resolveDays(region, keyword) {
 const COURSE_BRIEF_TIMEOUT_MS = 30000;
 const RETRY_GAP_MS = 3000; // 콜드 스타트 회복 시간을 두고 재시도
 
+// D-160(AUTOPI2 B-1): 마지막 조회가 "일시 불가"(503·타임아웃·네트워크 오류)였는지. 422(스팟 부족, 영구)와 구분해 희소 지역 기록에서 뺀다.
+let lastCourseBriefTransient = null;
+export function lastCourseBriefTransientReason() { return lastCourseBriefTransient; }
+
 async function fetchCourseBrief(region, days) {
+  lastCourseBriefTransient = null;
   try {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
     const res = await axios.get(`${apiBase}${COURSE_BRIEF_PATH}`, {
@@ -244,7 +249,9 @@ async function fetchCourseBrief(region, days) {
     });
     return res.data ?? null;
   } catch (err) {
-    logger.warn(`[tradule_source] "${region}"(${days}일) 코스 조회 실패: ${err.message}`);
+    const status = err?.response?.status;
+    if (status === 503 || status == null || status >= 500) lastCourseBriefTransient = status === 503 ? '트레쥴 일시 불가(503)' : `트레쥴 일시 불가(${status ?? err.code ?? '응답 없음'})`;
+    logger.warn(`[tradule_source] "${region}"(${days}일) 코스 조회 실패: ${err.message}${lastCourseBriefTransient ? ` — ${lastCourseBriefTransient}, 이번 실행에서만 건너뜀` : ''}`);
     return null;
   }
 }
@@ -669,10 +676,12 @@ export async function attachTripData(keywordData) {
     const attemptLog = [];
     let sawSparse = false;
     let themeSkipReason = null;
+    let transientReason = null;
     let sparseAtRequested = null; // 사용자가 요청한 일수 자체가 희소 코스인 경우의 일자별 스팟 수
     const minDayToTry = isResortStyleRegion ? startDays : 1;
     for (let d = startDays; d >= minDayToTry; d -= 1) {
       const attempt = await fetchCourseBriefWithRetry(region, d);
+      if (!attempt && lastCourseBriefTransient) { transientReason = lastCourseBriefTransient; break; }
       const rawCount = Array.isArray(attempt?.spots) ? attempt.spots.length : 0;
       const sanitized = Array.isArray(attempt?.spots) ? normalizeLegSources(sanitizeSpots(attempt.spots), attempt.distanceSource) : [];
       const agencyFiltered = filterRegionSelfSpots(filterTravelAgencySpots(sanitized), region);
@@ -718,6 +727,11 @@ export async function attachTripData(keywordData) {
         cleanSpots = agencyFiltered;
         ratedCount = ratedSpots.length;
       }
+    }
+    if (transientReason) {
+      logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${transientReason} → 이번 실행만 스킵(희소 지역으로 기록하지 않음, 다음 실행에서 재시도)`);
+      updated.push({ ...item, skip_reason: transientReason });
+      continue;
     }
     if (themeSkipReason) {
       logger.warn(`[tradule_source] "${item.keyword}"(지역: ${region}) → ${themeSkipReason} → 스킵`);

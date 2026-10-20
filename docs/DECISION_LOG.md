@@ -2304,3 +2304,9 @@
 - **AUTOPI3(예산 구분)**: 평점이 판정 기준에서 빠져 `ratingsUnavailable` 구분이 불필요해져 적용하지 않음(지시서 우선순위대로). 트레쥴 `/api/health` 예산 로그 1줄도 보류.
 - **범위 밖**: 이미 발행된 글(평점 포함)은 별도 결정.
 - **관련 파일**: `src/agents/tradule_source.js`, `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/utils/dayCard.js`, `src/utils/courseTitle.js`, `src/utils/sparseRegions.js`, `src/agents/qa_editor.js`, `scripts/run-blog-pipeline.js`
+
+### D-160: 트레쥴 503(일시 불가)은 희소 지역으로 기록하지 않음 (AUTOPI2 B-1)
+- **배경**: 트레쥴 #332부터 Google 한도로 후보 검색을 건너뛰면 422(스팟 부족, 영구) 대신 503(일시)을 준다. 기존 코드는 조회 실패를 null로 삼키고 스팟 0개로 계산해 "코스 스팟 0개"로 스킵·기록 → 한도로 잠깐 막힌 지역이 `tradule_sparse_regions_v2.json`에 14일간 들어갈 위험.
+- **결정**: 조회 실패가 503·5xx·타임아웃·응답 없음이면 일시 불가로 구분(`lastCourseBriefTransientReason`) → 일수를 줄여 재시도하지 않고 즉시 중단, 스킵 사유 "트레쥴 일시 불가(503)". 이 사유는 "코스 스팟 N개" 패턴이 아니라 희소 기록 대상이 아니며 다음 실행에서 다시 시도된다. 422·정상 응답 후 스팟 부족은 기존대로.
+- **버린 대안**: 503만 구분(타임아웃도 같은 오류를 만들어 함께 처리).
+- **관련 파일**: `src/agents/tradule_source.js`
