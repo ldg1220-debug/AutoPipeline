@@ -676,7 +676,8 @@ export async function attachTripData(keywordData) {
       const rawCount = Array.isArray(attempt?.spots) ? attempt.spots.length : 0;
       const sanitized = Array.isArray(attempt?.spots) ? normalizeLegSources(sanitizeSpots(attempt.spots), attempt.distanceSource) : [];
       const agencyFiltered = filterRegionSelfSpots(filterTravelAgencySpots(sanitized), region);
-      const ratedSpots = filterUnratedSpots(agencyFiltered);
+      // D-159(AUTOPI4): 트레쥴이 평점·리뷰를 더 주지 않는다(ratingPolicy on-click) — 생존성 판정은 평점이 아니라 스팟 수만 본다.
+      const ratedSpots = agencyFiltered;
       const agencyDropped = sanitized.length - agencyFiltered.length;
       // 2026-09-30(발행글 대조: 시드니 days=5 응답이 6·6·1·1·1곳 — 3~5일차가 스팟 하나짜리 카드로 발행됨): 여러 날 코스에서
       // 스팟이 2곳 미만인 날이 있거나 요청한 일수만큼 날이 채워지지 않으면 "희소 코스"로 보고, 일수를 줄여 재시도한다.
@@ -736,10 +737,10 @@ export async function attachTripData(keywordData) {
         ? `휴양지라 일수를 줄이지 않고 ${startDays}일 그대로 시도함 — 데이터 부족, 상한 문제 아님`
         : `일수를 줄여도 ${MIN_SPOTS}곳 미달`;
       logger.warn(
-        `[tradule_source] "${item.keyword}"(지역: ${region}) → 평점 있는 스팟 부족, ${retryNote} ` +
+        `[tradule_source] "${item.keyword}"(지역: ${region}) → 코스 스팟 부족, ${retryNote} ` +
         `(시도: ${attemptLog.join(', ')}) → 이 키워드는 글쓰기 스킵 대상으로 표시`
       );
-      updated.push({ ...item, skip_reason: (!brief && sawSparse) ? '일자별 스팟이 부족한 코스(하루 1곳 이하인 날 존재, 일수를 줄여도 마찬가지)' : `평점 있는 스팟 ${ratedCount}개 (최소 ${MIN_SPOTS}개)` });
+      updated.push({ ...item, skip_reason: (!brief && sawSparse) ? '일자별 스팟이 부족한 코스(하루 1곳 이하인 날 존재, 일수를 줄여도 마찬가지)' : `코스 스팟 ${ratedCount}개 (최소 ${MIN_SPOTS}개)` });
       continue;
     }
     if (days !== startDays) {

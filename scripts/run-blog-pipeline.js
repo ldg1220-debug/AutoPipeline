@@ -975,7 +975,7 @@ async function main() {
     contentData.contents = (await attachTripData(contentData)).contents;
     const skipped = contentData.contents.filter((c) => c.skip_reason);
     // D-158: 스팟 부족으로 스킵된 지역은 14일간 시드에서 뺀다(--force-keyword 실행은 기록하지 않음).
-    if (!forceKeyword) recordSparseRegions(skipped.filter((c) => /스팟 부족|평점 있는 스팟/.test(c.skip_reason ?? '')).map((c) => extractRegion(c.keyword)));
+    if (!forceKeyword) recordSparseRegions(skipped.filter((c) => /코스 스팟 \d+개/.test(c.skip_reason ?? '')).map((c) => extractRegion(c.keyword)));
     if (skipped.length > 0) {
       logger.info(
         `[blog:pipeline] Part 1.7: 트레쥴 데이터 부족으로 ${skipped.length}개 스킵: ` +

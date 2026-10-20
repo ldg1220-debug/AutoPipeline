@@ -3,8 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/cache/tradule_sparse_regions.json');
+const FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../output/cache/tradule_sparse_regions_v2.json');
 const TTL_MS = 14 * 24 * 3600 * 1000;
+// D-159: 판정 기준이 "평점 있는 스팟 ≥ 6" → "스팟 ≥ 6"으로 바뀌어 파일명을 v2로 분리했다 — 마카오·칭다오·단양·공주 등 이전 기록은 자연히 무효.
 
 function read() { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return {}; } }
 

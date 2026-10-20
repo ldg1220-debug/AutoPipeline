@@ -638,6 +638,12 @@ function validateBlogStructure(content) {
     }
   }
 
+  // D-159(AUTOPI4): 코스 글 본문·FAQ에 평점(★)·리뷰 수 표기가 남으면 반려 — 트레쥴이 평점을 주지 않는 정책(on-click)이고 Google 약관상 장기 보관 금지.
+  if (content.trip_data?.spots?.length) {
+    const t = sections.map((s) => s.body ?? '').concat(faq.map((f) => f.a ?? '')).join(' ');
+    if (/★|리뷰\s*[0-9]/.test(t)) issues.push('코스 글에 평점(★)·리뷰 수 표기가 남아 있음 — 평점·리뷰는 본문에 쓰지 않는다');
+  }
+
   // D-155(AUTOPI1): 소문자 단독 "google"(항목별 출처 표기) 금지 — 출처는 "Google Maps" 블록으로만 표기.
   const allText = sections.map((s) => s.body ?? '').concat(faq.map((f) => f.a ?? '')).join(' ');
   if (/(?<![A-Za-z가-힣/.=_-])google(?![A-Za-z가-힣/.=_-])/.test(allText)) {
@@ -662,7 +668,7 @@ function validateBlogStructure(content) {
   // 재실행(비용 2배)했고 재작성본은 오히려 더 짧은 2,199자로 통과): 2일 이하 코스는 스팟이 적어 사실만으로 채울 분량이
   // 원래 적다 — 최소 분량을 2400자로 낮춘다.
   // D-146: 코드 조립 초안(blog_draft.assembled==='code')은 사실 블록만이라 분량이 원래 적다 — LLM으로 채우면 창작이 들어가므로 기준을 2000자로 낮춘다(서울 2박3일 실측: 분량 미달 → LLM "장소별 상세" 추가 → 주어 없는 문장·비문).
-  const minTotalChars = draft.assembled === 'code' ? 2000 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
+  const minTotalChars = draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
   if (totalChars < minTotalChars) {
     issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${minTotalChars}자 — AdSense 콘텐츠 가치 기준)`);
   }

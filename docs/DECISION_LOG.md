@@ -2297,3 +2297,10 @@
 - **결정**: (1) 스팟 부족으로 스킵된 지역을 `output/cache/tradule_sparse_regions.json`에 14일간 기억하고 검색량 리포트 시드에서 제외 (--force-keyword 실행은 기록 안 함) (2) 자동 모드 후보 여분 4→8개 — 스킵돼도 다음 후보가 이어지게.
 - **트레쥴에 전달**: 마카오·칭다오·단양·공주는 스팟 원본(10~20곳)은 있는데 평점 있는 곳이 0~2곳 — 평점 수집 누락/정책 변경 여부 확인 필요.
 - **관련 파일**: `src/utils/sparseRegions.js`, `scripts/run-blog-pipeline.js`, `src/agents/keyword_miner.js`
+
+### D-159: 코스 글에서 평점·리뷰 수 제거 (AUTOPI4 — AUTOPI3보다 우선)
+- **배경**: 트레쥴이 Google 무료 한도·약관 때문에 course-brief에서 평점·리뷰 수를 뺀다(`ratingPolicy:"on-click"`). 블로그에 박아 두는 것도 Google 약관상 장기 보관이라 같이 뺀다. 10/19 자동 모드 발행 0편(마카오·칭다오·단양·공주 "평점 있는 스팟 0~2")의 원인이 이것 — 지역 데이터 부족이 아니었다.
+- **결정**: (1) 생존성 판정은 평점이 아니라 원본 스팟 수(≥6)만 — `tradule_source`의 "평점 있는 스팟" 조건 삭제, 스킵 사유 문구 "코스 스팟 N개" (2) 희소 지역 기억은 이 스킵 사유일 때만 기록하고, 파일명을 `tradule_sparse_regions_v2.json`으로 바꿔 이전 기록(마카오·칭다오·단양·공주 등)을 무효화 (3) 코드 조립 경로 전체에서 ★·리뷰·평점·조회일 제거 — 한눈에 보기 경로, 일자 표(열: 순서·장소·종류·다음 이동), 장소별 한 줄 정리, 코스 한눈에 보기, 일자 개요 (4) 대표 명소 = 일차별 첫 명소/랜드마크(트레쥴 순서, 식사·카페·스파·숙소 제외) — 제목·리드 문장·태그·FAQ 모두 이 기준 (5) "종류별 장소 순위" → "종류별 장소"(순위 표현 없음) (6) FAQ: 평점 문항 삭제, "일차별 대표 명소는?"·"식사는 어디서 하나요?"·"가장 많이 걷는 날은?" 추가 (7) 출처 표기 "평점·리뷰 정보 제공" → "장소 정보 제공: Google Maps" 한눈에 보기 아래 1곳 (8) CTA에 "평점·사진은 트레쥴에서 장소를 누르면 볼 수 있어요." 한 줄 (9) QA: 코스 글 본문·FAQ에 ★ 또는 "리뷰 [0-9]" 패턴이 있으면 반려 (10) 코드 조립 초안 분량 기준 2000→1500자 — 평점 문구가 빠져 분량이 2000 근처까지 줄어듦(서울 2박3일 2,046자 추정).
+- **AUTOPI3(예산 구분)**: 평점이 판정 기준에서 빠져 `ratingsUnavailable` 구분이 불필요해져 적용하지 않음(지시서 우선순위대로). 트레쥴 `/api/health` 예산 로그 1줄도 보류.
+- **범위 밖**: 이미 발행된 글(평점 포함)은 별도 결정.
+- **관련 파일**: `src/agents/tradule_source.js`, `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/utils/dayCard.js`, `src/utils/courseTitle.js`, `src/utils/sparseRegions.js`, `src/agents/qa_editor.js`, `scripts/run-blog-pipeline.js`

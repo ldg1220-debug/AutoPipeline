@@ -542,11 +542,23 @@ function buildDeterministicItinerary(tripData) {
 // 경로(cleanSpots)에 그대로 남는다(tradule_source.js 참고) — 구간 사슬이
 // 끊기지 않도록. 대신 서술에서는 평점을 지어내지 않고 "평점 정보 없음"이라고
 // 명시한다(추천 어조 없이 사실만).
-function formatRatingPart(s) {
-  if (typeof s.rating === 'number') {
-    return ` (평점 ${s.rating}${typeof s.reviewCount === 'number' ? `, 리뷰 ${s.reviewCount.toLocaleString()}개` : ''})`;
+function formatRatingPart() {
+  return ''; // D-159(AUTOPI4): 코스 글에는 평점·리뷰 수를 쓰지 않는다(트레쥴 ratingPolicy on-click)
+}
+
+// D-159: 대표 명소 = 일차별 첫 명소/랜드마크 스팟(트레쥴 순서 기준, 식사·카페·스파·숙소 제외).
+const SIGHT_KIND_SET = new Set(['명소', '명소/유적', '유적', '전망대', '공원', '사원·성당', '수족관', '동물원', '테마파크', '시장']);
+function isSightSpot(sp) {
+  return !sp.lodging && sp.category !== '숙소' && SIGHT_KIND_SET.has(inferSpotKind(sp));
+}
+function dayLandmarks(tripData) {
+  const out = [];
+  for (const [day, list] of [...groupSpotsByDay(tripData?.spots ?? []).entries()].sort((a, b) => a[0] - b[0])) {
+    const fac = getFacilitySpot(tripData, day, list);
+    const first = fac ?? list.find(isSightSpot);
+    if (first) out.push({ day, name: first.name });
   }
-  return ' (평점 정보 없음)';
+  return out;
 }
 
 // 2026-09-28(작업지시서 "세부 초안 3차" §5): "N일차" 제목 섹션은 아웃라인이
@@ -1224,8 +1236,6 @@ function buildSpotLinesBody(tripData) {
     const facilitySpot = getFacilitySpot(tripData, day, list);
     list.forEach((sp, i) => {
       const parts = [inferSpotKind(sp) ?? '장소'];
-      parts.push(typeof sp.rating === 'number' ? `★${sp.rating}` : '평점 정보 없음');
-      if (typeof sp.reviewCount === 'number') parts.push(`리뷰 ${sp.reviewCount.toLocaleString()}`);
       parts.push(sp === facilitySpot ? `${day}일차 종일 일정` : (facilitySpot ? `${day}일차 동반 방문` : `${day}일차 ${i === 0 ? '첫 장소' : `${i + 1}번째`}`));
       const next = list[i + 1];
       if (sp === facilitySpot && !next) { /* 이동 없음 */ }
@@ -1257,8 +1267,8 @@ function buildOverviewBody(tripData, keyword) {
   const lines = days.map((d) => {
     const list = byDay.get(d);
     const fac = getFacilitySpot(tripData, d, list);
-    const top = [...list].filter((sp) => typeof sp.reviewCount === 'number' && sp.category !== '숙소' && !sp.lodging).sort((x, y) => y.reviewCount - x.reviewCount)[0];
-    const topPart = top ? ` 이날 리뷰가 가장 많은 곳은 ${top.name}(리뷰 ${top.reviewCount.toLocaleString()})입니다.` : '';
+    const top = fac ? null : list.find(isSightSpot); // D-159: 리뷰 순위 대신 그날 첫 명소
+    const topPart = top ? ` 이날의 대표 명소는 ${top.name}입니다.` : '';
     if (fac) {
       const comp = list.filter((sp) => sp !== fac);
       return `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다${comp.length ? `(${comp.map((c) => c.name).join('·')} 동반)` : ''}.${topPart}`;
@@ -1955,21 +1965,13 @@ function buildKindBlocksBody(tripData) {
   const spots = tripData?.spots ?? [];
   if (spots.length < 4) return '';
   const byDay = groupSpotsByDay(spots);
-  const fmt = (sp) => {
-    const parts = [];
-    if (typeof sp.rating === 'number') parts.push(`★${sp.rating}`);
-    if (typeof sp.reviewCount === 'number') parts.push(`리뷰 ${sp.reviewCount.toLocaleString()}`);
-    parts.push(`${sp.day ?? 1}일차`);
-    return `${sp.name}(${parts.join(' · ')})`;
-  };
-  const byReviews = (a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+  const fmt = (sp) => `${sp.name}(${sp.day ?? 1}일차)`;
   const ofKinds = (kinds) => spots.filter((sp) => kinds.includes(inferSpotKind(sp)));
   const lines = [];
 
-  const sights = ofKinds(['명소', '유적', '명소/유적', '전망대', '공원', '사원·성당', '수족관', '동물원', '테마파크', '시장']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
-  if (sights.length >= 2) {
-    lines.push(`리뷰가 가장 많은 명소는 ${fmt(sights[0])}입니다. 뒤를 이어 ${sights.slice(1).map(fmt).join(', ')} 순입니다.`);
-  }
+  // D-159(AUTOPI4): 순위 표현·평점·리뷰 수 없이 종류별 목록만.
+  const sights = spots.filter(isSightSpot).slice(0, 6);
+  if (sights.length >= 2) lines.push(`명소는 ${sights.map(fmt).join(', ')}입니다.`);
 
   const islands = ofKinds(['섬']);
   const beaches = ofKinds(['해변']);
@@ -1987,19 +1989,13 @@ function buildKindBlocksBody(tripData) {
   }
 
   // D-119: 카페는 표에서 '카페'로 표기되므로 "식사 장소" 줄에 섞지 않는다(통영 초안: 카페 배양장이 식사 장소로 표기됨).
-  const meals = ofKinds(['식사']).filter((sp) => typeof sp.reviewCount === 'number').sort(byReviews).slice(0, 3);
-  if (meals.length >= 2) lines.push(`리뷰가 많은 식사 장소 ${meals.length}곳은 ${meals.map(fmt).join(', ')}입니다.`);
+  const meals = ofKinds(['식사']).slice(0, 5);
+  if (meals.length >= 2) lines.push(`식사 장소는 ${meals.map(fmt).join(', ')}입니다.`);
 
-  const spas = ofKinds(['스파']).filter((sp) => typeof sp.rating === 'number')
-    .sort((a, b) => b.rating - a.rating || byReviews(a, b)).slice(0, 3);
-  if (spas.length >= 2) lines.push(`평점이 높은 스파는 ${spas.map(fmt).join(', ')} 순입니다.`);
+  const spas = ofKinds(['스파']).slice(0, 4);
+  if (spas.length >= 2) lines.push(`스파는 ${spas.map(fmt).join(', ')}입니다.`);
 
   if (lines.length < 2) return '';
-  // D-155(AUTOPI1): 평점 출처는 Google 정책상 "Google Maps" 표기를 별도 블록(monetizer.ratingAttributionHtml)에서 단다 — 본문 문장에는 출처명을 쓰지 않고 조회일만 둔다.
-  if (String(tripData.ratingSource ?? '').trim()) {
-    const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-    lines.push(`평점·리뷰 수 조회일은 ${today}입니다.`);
-  }
   return lines.join('\n\n');
 }
 
@@ -2049,11 +2045,9 @@ function buildCourseGlanceBody(tripData) {
     paras.push(`이동한 날 평균은 ${avg}km입니다. 가장 많이 움직이는 날은 ${longest[0]}일차(${longest[1]}km), 가장 적게 움직이는 날은 ${shortest[0]}일차(${shortest[1]}km)입니다.${facilityNote}${unmeasured}`);
   }
 
-  // 3) 리뷰 수 상위 명소
-  const top = spots.filter((x) => typeof x.reviewCount === 'number' && x.category !== '숙소' && !x.lodging).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3); // D-156: 숙소는 대표 명소에서 제외
-  if (top.length) {
-    paras.push('리뷰 수가 가장 많은 곳은 ' + top.map((x) => `${x.name}(${typeof x.rating === 'number' ? `★${x.rating}, ` : ''}리뷰 ${x.reviewCount.toLocaleString()}개, ${x.day ?? 1}일차)`).join(', ') + '입니다.');
-  }
+  // 3) 일차별 대표 명소 (D-159: 리뷰 순위 대신 코스 순서상 그날 첫 명소)
+  const marks = dayLandmarks(tripData);
+  if (marks.length >= 2) paras.push('일차별 대표 명소는 ' + marks.map((m) => `${m.day}일차 ${m.name}`).join(', ') + '입니다.');
 
   // 4) 구성 (종류별 곳 수)
   const kinds = new Map();
@@ -2061,10 +2055,6 @@ function buildCourseGlanceBody(tripData) {
   const SIGHT_KINDS = new Set(['명소', '명소/유적', '유적', '전망대', '공원', '수족관', '동물원', '테마파크']);
   for (const sp of spots) { let k = inferSpotKind(sp); if (k === '선착장') continue; if (SIGHT_KINDS.has(k)) k = '명소'; if (k) kinds.set(k, (kinds.get(k) ?? 0) + 1); }
   if (kinds.size) paras.push('장소는 ' + [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}곳`).join(' · ') + '으로 구성돼 있습니다.');
-
-  // 5) 평점 정보 없는 곳
-  const unrated = spots.filter((x) => typeof x.rating !== 'number').map((x) => x.name);
-  if (unrated.length) paras.push(`평점 정보가 없는 곳은 ${unrated.join(', ')}입니다. 방문 전 현장 상황을 확인하세요.`);
 
   return paras.join('\n\n');
 }
@@ -2087,7 +2077,7 @@ function buildCodeFaqs(tripData, keyword) {
   if (beaches.length) {
     faqs.push({
       q: '해변은 어디가 포함돼 있나요?',
-      a: beaches.map((b) => `${b.day ?? 1}일차 ${b.name}(${typeof b.rating === 'number' ? `★${b.rating}` : '평점 정보 없음'})`).join(', ') + '입니다.',
+      a: beaches.map((b) => `${b.day ?? 1}일차 ${b.name}`).join(', ') + '입니다.',
     });
   }
   // 하루 평균·가장 긴 날 — D-147: 종일 일정 날 제외, "이동한 날 평균"
@@ -2098,24 +2088,25 @@ function buildCodeFaqs(tripData, keyword) {
     const fac = facilityDays.length ? ` ${facilityDays.map((f) => `${f.day}일차는 ${f.name} 종일 일정`).join(', ')}입니다.` : '';
     faqs.push({ q: '하루 평균 얼마나 이동하나요?', a: `이동한 날 평균 ${avg}km이고, 가장 긴 날은 ${longDay}일차(${longKm}km)입니다.${fac}` });
   }
-  const byReviews = spots.filter((x) => typeof x.reviewCount === 'number' && x.category !== '숙소' && !x.lodging).sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3); // D-156
-  if (byReviews.length) {
-    faqs.push({
-      q: '대표 명소는 어디인가요?',
-      a: '리뷰 수 상위 ' + byReviews.length + '곳입니다. ' + byReviews.map((x) => `${x.name}(${typeof x.rating === 'number' ? `★${x.rating}, ` : ''}리뷰 ${x.reviewCount.toLocaleString()}개, ${x.day ?? 1}일차)`).join(', ') + '.',
-    });
+  // D-159(AUTOPI4): 평점·리뷰 기반 문항 삭제 → 코스 데이터로 답할 수 있는 문항.
+  const marks = dayLandmarks(tripData);
+  if (marks.length) faqs.push({ q: '일차별 대표 명소는 어디인가요?', a: marks.map((m) => `${m.day}일차 ${m.name}`).join(', ') + '입니다.' });
+  const mealsByDay = [];
+  for (const [day, list] of [...groupSpotsByDay(spots).entries()].sort((a, b) => a[0] - b[0])) {
+    const names = list.filter((x) => inferSpotKind(x) === '식사').map((x) => x.name);
+    if (names.length) mealsByDay.push(`${day}일차 ${names.join('·')}`);
   }
-  const rated = spots.filter((x) => typeof x.rating === 'number');
-  if (rated.length) {
-    const maxRating = Math.max(...rated.map((x) => x.rating));
-    const tops = rated.filter((x) => x.rating === maxRating).sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
-    const fmt = (x) => `${x.name} ★${x.rating}${typeof x.reviewCount === 'number' ? `(리뷰 ${x.reviewCount.toLocaleString()}개)` : ''}, ${x.day ?? 1}일차`;
-    faqs.push({
-      q: '평점이 가장 높은 곳은?',
-      a: tops.length === 1
-        ? `${fmt(tops[0])} 코스에 포함돼 있습니다.`
-        : `★${maxRating}로 ${tops.length}곳이 같습니다. ${tops.slice(0, 3).map(fmt).join(' / ')} 코스입니다.`,
-    });
+  if (mealsByDay.length) faqs.push({ q: '식사는 어디서 하나요?', a: `코스에 포함된 식사 장소는 ${mealsByDay.join(', ')}입니다.` });
+  if (!straightFaq) {
+    const walkByDay = [];
+    for (const [day, list] of [...groupSpotsByDay(spots).entries()].sort((a, b) => a[0] - b[0])) {
+      const m = list.slice(0, -1).reduce((sum, sp) => sum + (sp.toNextMode === 'walk' && typeof sp.toNextMinutes === 'number' ? sp.toNextMinutes : 0), 0);
+      if (m > 0) walkByDay.push([day, m]);
+    }
+    if (walkByDay.length) {
+      const [wd, wm] = walkByDay.reduce((a, b) => (b[1] > a[1] ? b : a));
+      faqs.push({ q: '가장 많이 걷는 날은?', a: `도보 이동 시간이 가장 긴 날은 ${wd}일차로 도보 구간 합계가 ${wm}분입니다.` });
+    }
   }
   return faqs;
 }
@@ -2318,7 +2309,7 @@ function assembleCourseDraft(content) {
   const glance = buildCourseGlanceBody(tripData);
   if (glance) sections.push({ level: 2, heading: '코스 한눈에 보기', body: glance, generated: 'code' });
   const kind = buildKindBlocksBody(tripData);
-  if (kind) sections.push({ level: 2, heading: '종류별 장소 순위', body: kind, generated: 'code' });
+  if (kind) sections.push({ level: 2, heading: '종류별 장소', body: kind, generated: 'code' });
   for (let d = 1; d <= (tripData.days ?? 0); d++) {
     const body = buildDeterministicItineraryForDay(tripData, d);
     if (body) sections.push({ level: 2, heading: `${d}일차 일정`, body, generated: 'code' });
@@ -2643,7 +2634,7 @@ async function enhanceBlogDraft(content) {
   const kindBody = buildKindBlocksBody(tripData);
   if (kindBody && !finalSections.some((sec) => /종류별/.test(sec.heading ?? ''))) {
     const glanceIdx = finalSections.findIndex((sec) => /한눈에/.test(sec.heading ?? ''));
-    finalSections.splice(glanceIdx >= 0 ? glanceIdx + 1 : 0, 0, { level: 2, heading: '종류별 장소 순위', body: kindBody });
+    finalSections.splice(glanceIdx >= 0 ? glanceIdx + 1 : 0, 0, { level: 2, heading: '종류별 장소', body: kindBody });
   }
   // D-130: 장소별 한 줄 정리(코드 블록) — 마지막 일자 카드 뒤, 장소별 상세 앞.
   const spotLinesBody = buildSpotLinesBody(tripData);

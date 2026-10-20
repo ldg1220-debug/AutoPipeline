@@ -307,14 +307,7 @@ function buildTldrBulletsFromTripData(tripData) {
   // 표기 — 이전 지시서 지적("무표기가 제일 위험", B-4) 대응. 없으면 생략.
   // 2026-10-01: 항목마다 ", google"을 붙이지 않는다 — 출처는 "종류별 장소 순위" 섹션에서 글 전체에 한 번만 밝힌다.
   const sourceSuffix = '';
-  const route = spots
-    .map((s) => {
-      const ratingPart = (typeof s.rating === 'number' && typeof s.reviewCount === 'number')
-        ? `(★${s.rating}, 리뷰 ${s.reviewCount.toLocaleString()}${sourceSuffix})`
-        : '';
-      return `${s.name}${ratingPart}`;
-    })
-    .join(' → ');
+  const route = spots.map((s) => s.name).join(' → '); // D-159: 평점·리뷰 수 제거
   bullets.push(`<li>${route}</li>`);
 
   if (!straightLine) {
@@ -486,12 +479,12 @@ function buildTimelineTable(tripData) {
 
     const rows = daySpots.map((s) => {
       const nextTd = showNextCol ? `<td>${formatToNext(s, straightLine)}</td>` : '';
-      return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td><td>${formatRating(s, tripData.ratingSource)}</td>${nextTd}</tr>`;
+      return `<tr><td>${s.order ?? ''}</td><td>${s.name}</td>${nextTd}</tr>`;
     }).join('\n');
 
     return (
       `<h5>${dayNumbers.length > 1 ? `${day}일차` : (tripData.days === 1 ? '당일' : `${day}일차`)}${kmSuffix}</h5>\n` +
-      `<table>\n<thead><tr><th>순서</th><th>장소</th><th>평점</th>${nextTh}</tr></thead>\n` +
+      `<table>\n<thead><tr><th>순서</th><th>장소</th>${nextTh}</tr></thead>\n` +
       `<tbody>\n${rows}\n</tbody>\n</table>`
     );
   });
@@ -756,7 +749,7 @@ function buildDayCardHtml(tripData, day, narrativeHtml, extraHtml = '') {
   const rows = daySpots.map((sp, idx) => {
     const isLast = idx === daySpots.length - 1;
     const next = isLast ? '—' : (isBoatLeg(sp, daySpots[idx + 1]) ? '배편 (시간 미확인)' : formatToNext(sp, straightLine));
-    return `<tr><td>${idx + 1}</td><td>${sp.name}</td><td>${inferSpotKind(sp) ?? '—'}</td><td>${typeof sp.rating === 'number' ? formatRating(sp, tripData.ratingSource) : '평점 정보 없음'}</td>${straightLine ? '' : `<td>${next}</td>`}</tr>`;
+    return `<tr><td>${idx + 1}</td><td>${sp.name}</td><td>${inferSpotKind(sp) ?? '—'}</td>${straightLine ? '' : `<td>${next}</td>`}</tr>`;
   }).join('\n');
   const points = buildDayPoints(tripData, day);
   const dayMapUrl = tripData.dayImageUrls?.[day - 1];
@@ -766,7 +759,7 @@ function buildDayCardHtml(tripData, day, narrativeHtml, extraHtml = '') {
   return (
     mapHtml +
     (subtitle ? `<p style="margin:0 0 10px;color:#64748b;font-size:14px">${subtitle}</p>\n` : '') +
-    `<div class="timeline-table"><table>\n<thead><tr><th>순서</th><th>장소</th><th>종류</th><th>평점 (리뷰)</th>${straightLine ? '' : '<th>다음 이동</th>'}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table></div>\n` +
+    `<div class="timeline-table"><table>\n<thead><tr><th>순서</th><th>장소</th><th>종류</th>${straightLine ? '' : '<th>다음 이동</th>'}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table></div>\n` +
     (points.length ? `<p style="margin:10px 0 14px;line-height:1.9"><b>이 날의 포인트</b> — ${points.join(' ')}</p>\n` : '') +
     (narrativeHtml ? `<p style="margin:0 0 14px;line-height:1.9">${narrativeHtml}</p>\n` : '') +
     extraHtml
@@ -786,14 +779,13 @@ function buildDayCardHtml(tripData, day, narrativeHtml, extraHtml = '') {
  * 카카오 등 다른 출처는 그 출처명 그대로 — Google이 아닌 값에 Google Maps를 붙이지 않는다. 출처를 모르면 아무것도 쓰지 않는다.
  */
 export function ratingAttributionHtml(tripData) {
+  // D-159(AUTOPI4): 평점·리뷰를 더 쓰지 않으므로 문구는 "장소 정보 제공". 출처가 카카오면 카카오맵, 그 외(미표기 포함)는 Google Maps(트레쥴 장소 데이터 출처).
   const src = String(tripData?.ratingSource ?? '').trim();
-  if (!src || !tripData?.spots?.length) return '';
+  if (!tripData?.spots?.length) return '';
   const style = 'font-size:12px;color:#5E5E5E;margin:4px 0 16px';
-  if (/google/i.test(src)) {
-    return `<p style="${style}">평점·리뷰 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span></p>`;
-  }
-  const label = /kakao/i.test(src) ? '카카오맵' : src.replace(/[<>&]/g, '');
-  return `<p style="${style}">평점·리뷰 정보 제공: ${label}</p>`;
+  if (/kakao/i.test(src)) return `<p style="${style}">장소 정보 제공: 카카오맵</p>`;
+  if (src && !/google/i.test(src)) return `<p style="${style}">장소 정보 제공: ${src.replace(/[<>&]/g, '')}</p>`;
+  return `<p style="${style}">장소 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span></p>`;
 }
 
 function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [], catColor = '#2563eb', tripData = null, extras = {}) {
@@ -984,7 +976,7 @@ async function monetizeBlogDraft(content) {
   // D-137: 트레쥴 코스 페이지 CTA(200 확인된 경우만) + 장소 단위 제휴 링크(승인 브랜드 설정 시에만).
   const traduleCourseUrl = await buildTraduleCoursePageUrl(content.trip_data, blog_draft.slug);
   const traduleCtaLine = traduleCourseUrl
-    ? `<div class="tradule-cta"><a href="${traduleCourseUrl}" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a></div>`
+    ? `<div class="tradule-cta"><a href="${traduleCourseUrl}" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a><br><span style="font-size:13px;color:#64748b">평점·사진은 트레쥴에서 장소를 누르면 볼 수 있어요.</span></div>`
     : '';
   const placeAff = buildPlaceAffiliateLinks(content.trip_data, blog_draft.slug);
   // D-144(AU18291): 여행 글 쿠팡 — 코스 태그와 맞는 준비물만(최대 2개, 전체 제휴 5개 이내). 태그 항목이 없으면 아무것도 안 붙는다.
@@ -1010,7 +1002,7 @@ async function monetizeBlogDraft(content) {
     }
   }
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
-    { ratingAttrHtml: ratingAttributionHtml(content.trip_data), dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
+    { dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
@@ -1118,7 +1110,7 @@ async function monetizeBlogDraft(content) {
     placeAff.count > 0 && !travelpayoutsDisclosure ? TRAVELPAYOUTS_DISCLOSURE : '', // D-137: 장소 제휴 링크가 있을 때 고지
     adsenseSlot('mid_content'),
     conclusionAffiliate,
-    faqHtml ? faqHtml + ratingAttributionHtml(content.trip_data) : '', // D-155: FAQ 평점 답변 아래 출처
+    faqHtml,
     sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지

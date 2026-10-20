@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { dayLegMinutes, groupByDay } from './dayCard.js';
+import { dayLegMinutes, groupByDay, inferSpotKind, getFacilitySpot } from './dayCard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECENT_FILE = path.resolve(__dirname, '../../output/blog/title_templates_recent.json');
@@ -20,13 +20,21 @@ export function titleKeyword(keyword, tripData) {
   return k;
 }
 
+// D-159(AUTOPI4): 대표 명소 = 일차별 첫 명소/랜드마크(트레쥴 순서 기준, 식사·카페·스파·숙소 제외). 리뷰 수를 쓰지 않는다.
+const SIGHT = new Set(['명소', '명소/유적', '유적', '전망대', '공원', '사원·성당', '수족관', '동물원', '테마파크', '시장']);
 function repSpots(tripData) {
-  const bad = new Set(['음식점', '카페', '숙소', '스파']);
-  const pool = [...(tripData?.spots ?? [])]
-    .filter((sp) => !bad.has(sp.category) && sp.category !== '숙소' && sp.name && typeof sp.reviewCount === 'number')
-    .sort((a, b) => b.reviewCount - a.reviewCount);
   const short = (n) => ALIASES[n] ?? n;
-  const top = pool.slice(0, 2).map((sp) => ({ ...sp, label: short(sp.name) }));
+  const marks = [];
+  for (const [day, list] of [...groupByDay(tripData?.spots ?? []).entries()].sort((a, b) => a[0] - b[0])) {
+    const fac = getFacilitySpot(tripData, day, list);
+    const first = fac ?? list.find((sp) => !sp.lodging && sp.category !== '숙소' && SIGHT.has(inferSpotKind(sp)));
+    if (first?.name) marks.push({ ...first, label: short(first.name) });
+  }
+  let top = marks.slice(0, 2);
+  if (top.length < 2) { // 하루짜리·명소가 한 날에 몰린 코스: 같은 날 두 번째 명소로 보충
+    const pool = (tripData?.spots ?? []).filter((sp) => !sp.lodging && sp.category !== '숙소' && SIGHT.has(inferSpotKind(sp)) && !top.some((t) => t.name === sp.name));
+    if (pool[0]) top = [...top, { ...pool[0], label: short(pool[0].name) }];
+  }
   if (top.length === 2 && (top[0].label.length > 8 || top[1].label.length > 8)) return [top[0]];
   return top;
 }

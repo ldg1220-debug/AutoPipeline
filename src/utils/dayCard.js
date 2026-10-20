@@ -140,10 +140,6 @@ export function buildDayPoints(tripData, day) {
   if (daySpots.filter((sp) => sp.category === '음식점').length >= 2) {
     points.push('식사 장소가 2곳 이상 포함돼 있어 이 동선 안에서 해결할 수 있습니다.');
   }
-  const unrated = daySpots.filter((sp) => typeof sp.rating !== 'number');
-  if (unrated.length > 0) {
-    points.push(`평점 정보가 없는 곳(${unrated.map((sp) => sp.name).join('·')})은 방문 전 현장 상황 확인을 권합니다.`);
-  }
   if (points.length === 0 && legs.length > 0) {
     const byMode = new Map();
     for (const l of legs) byMode.set(legModeKey(l), (byMode.get(legModeKey(l)) ?? 0) + l.toNextMinutes);
@@ -158,7 +154,7 @@ export function dayCardPlainText(tripData, day) {
   const daySpots = groupByDay(tripData?.spots).get(day) ?? [];
   if (!daySpots.length) return '';
   const rows = daySpots.map((sp, i) =>
-    `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${typeof sp.rating === 'number' ? `★${sp.rating} (${sp.reviewCount ?? ''})` : '평점 정보 없음'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${legModeLabel(sp)} ${sp.toNextMinutes}분` : '—') : '—'}`
+    `${i + 1} ${sp.name} ${inferSpotKind(sp) ?? '—'} ${i < daySpots.length - 1 ? (isBoatLeg(sp, daySpots[i + 1]) ? '배편 (시간 미확인)' : typeof sp.toNextMinutes === 'number' ? `${legModeLabel(sp)} ${sp.toNextMinutes}분` : '—') : '—'}`
   );
   return [buildDaySubtitle(daySpots, tripData.distanceSource === 'straight', getFacilitySpot(tripData, day, daySpots)), ...rows, `이 날의 포인트 ${buildDayPoints(tripData, day).join(' ')}`].join('\n');
 }
