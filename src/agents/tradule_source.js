@@ -408,6 +408,10 @@ for (const r of [...REGIONS_SNAPSHOT.domestic, ...REGIONS_SNAPSHOT.overseas]) {
   if (!parentToChildren.has(r.parent)) parentToChildren.set(r.parent, []);
   parentToChildren.get(r.parent).push(r.name);
 }
+const childToParent = new Map();
+for (const [parent, children] of parentToChildren) for (const c of children) childToParent.set(c, parent);
+/** D-161: 지역(자식)의 상위 권역(국가·광역). 모르면 null. 관련 글을 같은 나라/권역으로 넓힐 때 쓴다. */
+export function regionParent(region) { return childToParent.get(region) ?? null; }
 const ALL_PARENTS = [...domesticParents, ...overseasParents];
 
 /**

@@ -665,6 +665,18 @@ async function main() {
     // keyword_miner는 { keywords: [...] } 반환 → contents 포맷으로 변환
     rawKeywords = keywordData.keywords ?? keywordData.contents ?? [];
 
+    // D-161(AU17C31 ③): 자동 모드 후보는 코스형만 — "{지역} + (N박M일|당일치기|코스|일정|동선)". "발리 여행지 추천"·"신혼 여행지 추천"·"동해 드라이브 코스"는 제외.
+    const isCourseKeyword = (kw) => !!extractRegion(kw ?? '')
+      && /\d+\s*박\s*\d+\s*일|당일치기|코스|일정|동선/.test(kw)
+      && !/드라이브|여행지|추천|맛집|카페/.test(kw);
+    if (!forceKeyword && !singleMode) {
+      const nonCourse = rawKeywords.filter((k) => !isCourseKeyword(k.keyword ?? k));
+      if (nonCourse.length) {
+        logger.info(`[blog:pipeline] 코스형이 아닌 후보 ${nonCourse.length}개 제외: ${nonCourse.map((k) => k.keyword ?? k).join(', ')}`);
+        rawKeywords = rawKeywords.filter((k) => isCourseKeyword(k.keyword ?? k));
+      }
+    }
+
     // 신규 키워드가 목표치에 못 미치면 DB pending으로 채움
     // D-121: 스킵 대비 여분 후보(candidateExtra)까지 DB pending으로 채운다.
     const fillTarget = targetCount + ((singleMode || forceKeyword) ? 0 : 4);
@@ -675,8 +687,14 @@ async function main() {
       // 문제 방지 — category = 'travel'인 것만 보충 대상으로 삼는다.
       const dbKeywords = db
         .prepare(`SELECT keyword, category, score FROM keywords WHERE status = 'pending' AND category = 'travel' AND keyword NOT LIKE '%<%' AND keyword NOT LIKE '%N박M일%' ORDER BY score DESC LIMIT ?`)
-        .all(need * 2);  // 중복 제거 여분 확보
-      const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase())).slice(0, need);
+        .all(need * 6);  // 중복 제거·코스형 필터 여분 확보
+      // D-161: 코스형이 아닌 pending은 status='skipped_non_course'로 정리(삭제 아님). --force-keyword/단일 모드는 건드리지 않는다.
+      if (!forceKeyword && !singleMode) {
+        const bad = dbKeywords.filter((k) => !isCourseKeyword(k.keyword));
+        for (const k of bad) db.prepare(`UPDATE keywords SET status = 'skipped_non_course' WHERE keyword = ? AND status = 'pending'`).run(k.keyword);
+        if (bad.length) logger.info(`[blog:pipeline] DB pending ${bad.length}개 코스형 아님 → skipped_non_course: ${bad.map((k) => k.keyword).join(', ')}`);
+      }
+      const fillKws = dbKeywords.filter((k) => !existingKws.has(k.keyword.toLowerCase()) && (forceKeyword || singleMode || isCourseKeyword(k.keyword))).slice(0, need);
       if (fillKws.length > 0) {
         logger.info(`[blog:pipeline] 신규 ${rawKeywords.length}개 부족 → DB pending(travel) ${fillKws.length}개 보충`);
         rawKeywords = [...rawKeywords, ...fillKws];
@@ -873,6 +891,21 @@ async function main() {
         logger.info(`[blog:pipeline] Part 1.55: "${c.keyword}" 제외 → 발행된 유사 키워드: "${dupPub}"`);
         return false;
       }
+      return true;
+    });
+    // D-161(AU17C31 ②): 같은 지역 + 같은 일수 코스는 60일 안에 발행된 글이 있으면 중복 — 위 21일·부분문자열 검사가 놓치던 경우(오사카 2박3일 vs "오사카 2박3일, USJ와 …").
+    // DB 대기열에서 다시 채운 키워드도 같은 경로를 지난다. 지역·일수를 정규화해 비교한다.
+    const nightsOf = (kw) => { const m = (kw ?? '').match(/(\d+)\s*박\s*(\d+)\s*일/); return m ? `${m[1]}박${m[2]}일` : /당일/.test(kw ?? '') ? '당일' : null; };
+    const publishedWide = db
+      .prepare(`SELECT keyword, title FROM blog_posts WHERE status = 'published' AND published_at >= datetime('now', '-60 days')`)
+      .all()
+      .map((r) => ({ keyword: r.keyword, region: extractRegion(`${r.keyword ?? ''}`) ?? extractRegion(`${r.title ?? ''}`), nights: nightsOf(r.keyword) ?? nightsOf(r.title) }));
+    contentData.contents = contentData.contents.filter((c) => {
+      if (c.forced) return true;
+      const reg = extractRegion(c.keyword ?? ''); const nt = nightsOf(c.keyword);
+      if (!reg || !nt) return true;
+      const hit = publishedWide.find((p) => p.region === reg && p.nights === nt);
+      if (hit) { logger.info(`[blog:pipeline] Part 1.55: "${c.keyword}" 제외 → 60일 안에 같은 지역+일수 발행 글: "${hit.keyword}" (${reg} ${nt})`); return false; }
       return true;
     });
     const removed = before - contentData.contents.length;

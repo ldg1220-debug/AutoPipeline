@@ -9,7 +9,7 @@ import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
 import { buildCourseTitle as buildCourseTitleV2, titleKeyword } from '../utils/courseTitle.js';
-import { splitDayKms, inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel } from '../utils/dayCard.js';
+import { splitDayKms, inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel, pickRepSpot } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
 // 3-pass 구조(intent→outline→body)로, 각 pass는 prompts/blog_pass*.md 가이드만 참조한다.
@@ -555,7 +555,7 @@ function dayLandmarks(tripData) {
   const out = [];
   for (const [day, list] of [...groupSpotsByDay(tripData?.spots ?? []).entries()].sort((a, b) => a[0] - b[0])) {
     const fac = getFacilitySpot(tripData, day, list);
-    const first = fac ?? list.find(isSightSpot);
+    const first = fac ?? pickRepSpot(list, isSightSpot);
     if (first) out.push({ day, name: first.name });
   }
   return out;
@@ -565,6 +565,31 @@ function dayLandmarks(tripData) {
 // 만들면 일수가 빠질 수 있어 코드가 직접 만든다 — 이 패턴으로 아웃라인이 만든
 // 일자 섹션을 걸러내고, 같은 날짜 수만큼 새로 생성해 채워 넣는다.
 const DAY_SECTION_PATTERN = /(\d+)\s*일차/;
+
+/**
+ * D-161(AU17C31 ④): 일차별 "동선 요약" 문단 — 구간 수·수단별 분 합계·가장 긴 구간만 쓴다(트레쥴 응답값, 추정 없음).
+ * 종일 시설만 있는 날은 "이날은 ○○에서 하루를 보냅니다" + 다음 날 첫 장소만 쓰고 정보 부족으로 보지 않는다.
+ */
+function buildDaySummary(tripData, day) {
+  const byDay = groupSpotsByDay(tripData?.spots ?? []);
+  const list = byDay.get(day) ?? [];
+  if (!list.length) return '';
+  const fac = getFacilitySpot(tripData, day, list);
+  const nextFirst = (byDay.get(day + 1) ?? [])[0];
+  if (fac) {
+    return `${day}일차는 ${fac.name}에서 하루를 보냅니다.${nextFirst ? ` 다음 날은 ${nextFirst.name}에서 시작합니다.` : ''}`;
+  }
+  if (tripData.distanceSource === 'straight') return '';
+  const legs = list.slice(0, -1).map((sp, i) => ({ from: sp, to: list[i + 1], min: sp.toNextMinutes, mode: sp.toNextMode }))
+    .filter((l) => typeof l.min === 'number' && !isBoatLeg(l.from, l.to));
+  if (!legs.length) return '';
+  const byMode = new Map();
+  for (const l of legs) byMode.set(l.mode, (byMode.get(l.mode) ?? 0) + l.min);
+  const total = legs.reduce((a, l) => a + l.min, 0);
+  const modeText = [...byMode.entries()].filter(([m]) => m).map(([m, min]) => `${MODE_KR[m] ?? m} ${min}분`).join(' · ');
+  const longest = legs.reduce((a, l) => (l.min > a.min ? l : a), legs[0]);
+  return `${day}일차 동선은 이동 구간 ${legs.length}개, 합계 ${total}분${modeText ? `(${modeText})` : ''}입니다. 가장 긴 구간은 ${longest.from.name}에서 ${longest.to.name}까지 ${MODE_KR[longest.mode] ?? longest.mode ?? ''} ${longest.min}분입니다.`;
+}
 
 function buildDeterministicItineraryForDay(tripData, day) {
   if (!tripData?.spots?.length) return '';
@@ -1267,7 +1292,7 @@ function buildOverviewBody(tripData, keyword) {
   const lines = days.map((d) => {
     const list = byDay.get(d);
     const fac = getFacilitySpot(tripData, d, list);
-    const top = fac ? null : list.find(isSightSpot); // D-159: 리뷰 순위 대신 그날 첫 명소
+    const top = fac ? null : pickRepSpot(list, isSightSpot); // D-159: 리뷰 순위 대신 그날 첫 명소
     const topPart = top ? ` 이날의 대표 명소는 ${top.name}입니다.` : '';
     if (fac) {
       const comp = list.filter((sp) => sp !== fac);
@@ -2311,7 +2336,9 @@ function assembleCourseDraft(content) {
   const kind = buildKindBlocksBody(tripData);
   if (kind) sections.push({ level: 2, heading: '종류별 장소', body: kind, generated: 'code' });
   for (let d = 1; d <= (tripData.days ?? 0); d++) {
-    const body = buildDeterministicItineraryForDay(tripData, d);
+    const chain = buildDeterministicItineraryForDay(tripData, d);
+    const summary = buildDaySummary(tripData, d);
+    const body = [chain, summary].filter(Boolean).join('\n\n');
     if (body) sections.push({ level: 2, heading: `${d}일차 일정`, body, generated: 'code' });
   }
   const lines = buildSpotLinesBody(tripData);

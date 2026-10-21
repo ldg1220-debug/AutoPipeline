@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { dayLegMinutes, groupByDay, inferSpotKind, getFacilitySpot } from './dayCard.js';
+import { dayLegMinutes, groupByDay, inferSpotKind, getFacilitySpot, pickRepSpot } from './dayCard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECENT_FILE = path.resolve(__dirname, '../../output/blog/title_templates_recent.json');
@@ -27,7 +27,7 @@ function repSpots(tripData) {
   const marks = [];
   for (const [day, list] of [...groupByDay(tripData?.spots ?? []).entries()].sort((a, b) => a[0] - b[0])) {
     const fac = getFacilitySpot(tripData, day, list);
-    const first = fac ?? list.find((sp) => !sp.lodging && sp.category !== '숙소' && SIGHT.has(inferSpotKind(sp)));
+    const first = fac ?? pickRepSpot(list, (sp) => !sp.lodging && sp.category !== '숙소' && SIGHT.has(inferSpotKind(sp)));
     if (first?.name) marks.push({ ...first, label: short(first.name) });
   }
   let top = marks.slice(0, 2);

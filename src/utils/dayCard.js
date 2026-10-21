@@ -179,3 +179,17 @@ export function splitDayKms(tripData) {
   }
   return { moving, facility };
 }
+
+const LOW_PRIORITY_REP = new Set(['수족관', '동물원', '테마파크']);
+/**
+ * D-161(AU17C31 ⑤): 하루 대표 명소. 트레쥴이 spots[].landmarkRank를 주면 가장 작은 값, 없으면 그날 첫 명소.
+ * 수족관·동물원·테마파크는 다른 명소가 있으면 후순위. isSight는 명소 판정 함수.
+ */
+export function pickRepSpot(list, isSight) {
+  const sights = (list ?? []).filter(isSight);
+  if (!sights.length) return undefined;
+  const preferred = sights.filter((sp) => !LOW_PRIORITY_REP.has(inferSpotKind(sp)));
+  const pool = preferred.length ? preferred : sights;
+  const ranked = pool.filter((sp) => typeof sp.landmarkRank === 'number');
+  return ranked.length ? ranked.reduce((a, b) => (b.landmarkRank < a.landmarkRank ? b : a)) : pool[0];
+}

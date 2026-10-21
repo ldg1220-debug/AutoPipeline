@@ -12,6 +12,7 @@ import db from '../db/db.js';
 import logger from './logger.js';
 import { getEmbedding } from './imageCache.js';
 import { config } from '../config/index.js';
+import { extractRegion, regionParent } from '../agents/tradule_source.js';
 
 const INTERNAL_LINK_LIMIT = parseInt(process.env.INTERNAL_LINK_LIMIT ?? '3', 10);
 
@@ -125,6 +126,23 @@ async function rankRelatedCandidates(keyword, currentPostUrl, limit, category) {
   if (category && rows.length < MIN_RELATED_POSTS_TO_SHOW) return [];
   if (rows.length === 0) return [];
 
+  // D-161(AU17C31 ①): 지역이 있는 코스 글은 같은 지역 → 같은 나라/권역 글만 후보로 삼는다. 지역을 알 수 없는 글·다른 나라 글은 제외(오사카 글에 후쿠오카 2편이 붙던 문제).
+  const myRegion = extractRegion(keyword ?? '');
+  let tierOf = null;
+  if (myRegion) {
+    const myParent = regionParent(myRegion);
+    tierOf = (row) => {
+      const r = extractRegion(`${row.keyword ?? ''} ${row.title ?? ''}`);
+      if (!r) return 0;
+      if (r === myRegion) return 2;
+      return myParent && regionParent(r) === myParent ? 1 : 0;
+    };
+    const kept = rows.filter((row) => tierOf(row) > 0);
+    rows.length = 0;
+    rows.push(...kept);
+    if (rows.length === 0) return [];
+  }
+
   // 임베딩 유사도 사용 가능하면 활성화 (API 비용 발생)
   const useEmbedding = !!config.openai.apiKey && rows.length > 0;
   let queryVec = null;
@@ -137,7 +155,7 @@ async function rankRelatedCandidates(keyword, currentPostUrl, limit, category) {
   }
 
   const scored = rows.map((row) => {
-    let score = wordOverlapScore(keyword, row.keyword);
+    let score = wordOverlapScore(keyword, row.keyword) + (tierOf ? tierOf(row) * 10 : 0);
 
     if (queryVec) {
       try {
@@ -160,7 +178,7 @@ async function rankRelatedCandidates(keyword, currentPostUrl, limit, category) {
       top15.map(async (row) => {
         try {
           const vec = await getEmbedding(row.keyword);
-          row.score = cosineSimilarity(queryVec, vec);
+          row.score = cosineSimilarity(queryVec, vec) + (tierOf ? tierOf(row) * 10 : 0);
         } catch {
           // 임베딩 실패 시 단어 오버랩 점수 유지
         }
