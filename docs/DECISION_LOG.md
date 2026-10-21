@@ -2316,3 +2316,8 @@
 - **확인**: QA 분량 합계는 본문+FAQ+일자 카드 글자 수라 1,500 기준은 적용되고 있었음(284는 word_count 1,354가 본문만 센 값). 
 - **버린 대안**: 분량 미달 시 days-1 재조회 — 코드 조립 후에야 길이를 알아 파이프라인 구조를 크게 바꿔야 해 보류(QA가 계속 반려·드랍).
 - **관련 파일**: `src/utils/internalLinks.js`, `src/agents/tradule_source.js`, `scripts/run-blog-pipeline.js`, `src/agents/blog_content_enhancer.js`, `src/utils/dayCard.js`, `src/utils/courseTitle.js`
+
+### D-162: 쉼표 나열 키워드의 제목·슬러그 정리
+- **배경**: DB 대기 키워드 "도쿄, 테마파크 투어, 2박 3일"로 발행된 286의 제목이 "도쿄 스카이트리 넣은 도쿄, 테마파크 투어, 2박3일 코스", 슬러그도 쉼표 포함.
+- **결정**: `titleKeyword`가 따옴표를 지우고 쉼표로 나열된 키워드는 "첫 항목 + 일수"로 줄인다("도쿄 2박3일"). 제목·슬러그·본문·FAQ가 모두 이 표기를 쓴다. 이미 발행된 286은 범위 밖.
+- **관련 파일**: `src/utils/courseTitle.js`

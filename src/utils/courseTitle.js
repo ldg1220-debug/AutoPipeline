@@ -14,7 +14,14 @@ const ALIASES = { '유니버설 스튜디오 재팬': 'USJ', '유니버설스튜
 
 /** 키워드 → 제목용 표기. "오사카 2박 3일"→"오사카 2박3일", 끝의 "여행 코스"/"코스"/"여행" 제거. 일수가 없으면 코스 일수로 보충. */
 export function titleKeyword(keyword, tripData) {
-  let k = String(keyword ?? '').replace(/(\d+)\s*박\s*(\d+)\s*일/g, '$1박$2일').replace(/\s+/g, ' ').trim();
+  // D-162: "도쿄, 테마파크 투어, 2박 3일"·"'도쿄', '2박 3일'" 같은 쉼표 나열 키워드는 "지역 + 일수"로 줄인다(제목에 "도쿄 … 도쿄, 테마파크 투어, 2박3일 코스"가 나온 286 사례).
+  let raw = String(keyword ?? '').replace(/['"‘’“”]/g, '');
+  if (/[,，]/.test(raw)) {
+    const parts = raw.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+    const nights = parts.find((x) => /\d+\s*박\s*\d+\s*일|당일/.test(x));
+    raw = [parts[0], nights && nights !== parts[0] ? nights : ''].filter(Boolean).join(' ');
+  }
+  let k = raw.replace(/(\d+)\s*박\s*(\d+)\s*일/g, '$1박$2일').replace(/\s+/g, ' ').trim();
   k = k.replace(/\s*(여행\s*코스|코스|여행|일정)\s*$/g, '').trim();
   if (!/\d+박\d+일|당일/.test(k) && tripData?.days > 1) k = `${k} ${tripData.days - 1}박${tripData.days}일`;
   return k;
