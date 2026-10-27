@@ -1,0 +1,258 @@
+<meta charset=utf-8><style>
+/* 포스트 전체 래퍼 — 기본 스킨에서도 가독성 확보 */
+.mae-wrap{max-width:780px;margin:0 auto;font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:16px;line-height:1.9;color:#1e293b;word-break:keep-all}
+.mae-wrap p{margin:0 0 14px}
+/* 헤더 진입 배너 */
+.mae-hero{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#fff;border-radius:14px;padding:28px 24px 22px;margin:0 0 28px;position:relative;overflow:hidden}
+.mae-hero::before{content:'';position:absolute;right:-20px;top:-20px;width:160px;height:160px;background:rgba(255,255,255,.04);border-radius:50%}
+.mae-hero .hero-tag{font-size:12px;background:rgba(255,255,255,.18);padding:3px 12px;border-radius:20px;display:inline-block;margin-bottom:10px;letter-spacing:.5px}
+.mae-hero .hero-title{margin:0 0 8px;font-size:22px;font-weight:700;line-height:1.4}
+.mae-hero p{margin:0;font-size:14px;opacity:.85;line-height:1.7}
+/* 소개 */
+.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:0 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
+/* TL;DR */
+.tldr-box{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:12px;padding:20px 24px;margin:0 0 28px;box-shadow:0 4px 20px rgba(30,58,138,.25)}
+.tldr-box h4{margin:0 0 10px;font-size:14px;opacity:.8;letter-spacing:.5px;text-transform:uppercase}
+.tldr-box ul{margin:0;padding-left:20px;font-size:14px;line-height:2}
+.tldr-box li::marker{color:#93c5fd}
+/* 섹션 헤더 */
+.section-hdr{display:flex;align-items:center;gap:10px;margin:36px 0 8px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}
+.section-hdr .s-num{background:var(--cat-color,#2563eb);color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;flex-shrink:0;letter-spacing:.3px}
+.section-hdr h2,.section-hdr h3{margin:0;font-size:19px;color:#0f172a;font-weight:700}
+/* 이미지 */
+.blog-img-wrap{margin:18px 0 8px;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)}
+.blog-img-wrap img{width:100%;display:block}
+.photo-credit{font-size:11px;color:#94a3b8;text-align:right;margin-top:4px}
+/* callout */
+.callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:13px 18px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px;line-height:1.8;color:#1e40af}
+/* 키워드 하이라이트 */
+.keyword-mark{background:#fef3c7;padding:1px 5px;border-radius:3px;font-weight:700;color:#92400e}
+/* 인포카드 */
+.info-card-wrap{margin:20px 0;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.info-card-wrap img{width:100%;display:block}
+/* FAQ */
+.faq-wrap{margin:24px 0}
+.faq-item{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 22px;margin:12px 0;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.faq-item:hover{border-color:#93c5fd;box-shadow:0 2px 12px rgba(59,130,246,.1)}
+.faq-q{font-weight:700;color:#1e3a8a;margin-bottom:8px;font-size:15px}
+.faq-q::before{content:'Q. ';color:#3b82f6}
+.faq-a{color:#374151;font-size:14px;line-height:1.8}
+/* 제휴 */
+.affiliate-block{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;margin:18px 0}
+.affiliate-block ul{margin:8px 0 0;padding-left:20px;line-height:1.9}
+/* 키워드 태그 */
+.keyword-tags{margin:24px 0;display:flex;flex-wrap:wrap;gap:8px}
+.keyword-tag{background:#e0e7ff;color:#3730a3;font-size:12px;padding:5px 14px;border-radius:20px;font-weight:600}
+/* CTA */
+.cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:32px 24px;text-align:center;margin:36px 0;box-shadow:0 6px 24px rgba(30,58,138,.3)}
+.cta-box h3{margin:0 0 10px;font-size:20px;font-weight:700}
+.cta-box p{margin:0 0 16px;font-size:14px;opacity:.9;line-height:1.7}
+/* 트레쥴 코스 CTA(본문 중간·푸터 공용) — 지시서 2026-09-16 §3: 광고 배너처럼 보이던
+   .cta-box 대신 연회색 + 왼쪽 세로선의 슬림한 한 줄 링크로 축소 */
+.tradule-cta{background:#f8fafc;border-left:4px solid #2563eb;border-radius:0 8px 8px 0;padding:14px 18px;margin:28px 0;font-size:15px}
+.tradule-cta a{color:#1e40af;font-weight:600;text-decoration:none}
+.timeline-table{margin:24px 0}
+.timeline-table h4{margin:0 0 10px;font-size:16px}
+.timeline-table h5{margin:16px 0 8px;font-size:14px;font-weight:700;color:#374151}
+.timeline-table table{width:100%;border-collapse:collapse;font-size:14px;margin-bottom:12px}
+.timeline-table th,.timeline-table td{border:1px solid #e5e7eb;padding:8px 10px;text-align:left}
+.timeline-table th{background:#f9fafb;font-weight:600}
+.distance-disclosure{font-size:12px;color:#9ca3af;margin:-8px 0 16px}
+.partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
+.fact-sources{font-size:13px;color:#6b7280;margin:20px 0;padding:12px 16px;background:#f9fafb;border-radius:8px}
+.fact-sources p{margin:0 0 6px}
+.fact-sources ul{margin:0;padding-left:18px}
+.fact-sources a{color:#4b5563}
+.related-posts{margin:28px 0}
+.related-posts-title{font-size:17px;font-weight:700;color:#1e293b;margin-bottom:12px}
+.related-cards{display:flex;flex-wrap:wrap;gap:10px}
+.related-card{display:flex;flex-direction:column;gap:4px;flex:1 1 200px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;text-decoration:none;transition:box-shadow .15s}
+.related-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08);border-color:#94a3b8}
+.related-card-kw{font-size:11px;color:#64748b;background:#e0e7ff;padding:2px 8px;border-radius:20px;align-self:flex-start;font-weight:600}
+.related-card-title{font-size:14px;color:#1e293b;font-weight:600;line-height:1.4}
+/* ── 카테고리 테마: 여행 (#0284c7) ── */
+:root { --cat-color: #0284c7; }
+
+/* TL;DR 박스 — 카테고리 primary 색 적용 */
+.tldr-box {
+  background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%) !important;
+}
+
+/* callout 박스 — 카테고리 라이트 색상 */
+.callout {
+  background: #f0f9ff !important;
+  border-left-color: #0284c7 !important;
+  color: #0369a1 !important;
+}
+
+/* FAQ 섹션 배경 */
+.faq-wrap {
+  border-top: 3px solid #0284c7;
+  padding-top: 12px;
+}
+.faq-q { color: #0369a1 !important; }
+
+/* 키워드 태그 */
+.keyword-tag {
+  background: #f0f9ff !important;
+  color: #0369a1 !important;
+}
+
+/* 제휴 블록 강조 */
+.affiliate-block {
+  border-color: #bae6fd !important;
+  background: #f0f9ff !important;
+}
+
+/* 시즌 효과 */
+.tldr-box {
+      background: linear-gradient(135deg, #7c2d12 0%, #ea580c 100%) !important;
+    }
+</style>
+
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"오사카 2박3일 코스 | 도톤보리·구로몬 시장 하루별 동선","author":{"@type":"Person","name":"매일읽어주는남자"},"publisher":{"@type":"Organization","name":"매일읽어주는남자","logo":{"@type":"ImageObject","url":""}},"datePublished":"2026-10-27","keywords":"오사카 2박3일","mainEntityOfPage":{"@type":"WebPage","@id":"오사카-2박3일"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"하루에 몇 곳을 도나요?","acceptedAnswer":{"@type":"Answer","text":"하루 평균 3.7곳이고, 가장 많은 날은 1일차(5곳)입니다."}},{"@type":"Question","name":"걸어서 다닐 수 있나요?","acceptedAnswer":{"@type":"Answer","text":"이동 구간 8개 중 5개가 도보입니다. 도보만으로 이어지는 날은 없고, 다른 날은 대중교통이나 차량이 섞여 있습니다."}},{"@type":"Question","name":"일차별 대표 명소는 어디인가요?","acceptedAnswer":{"@type":"Answer","text":"1일차 도톤보리·쓰텐카쿠 전망대, 2일차 구로몬 시장·해유관, 3일차 유니버설 스튜디오 재팬입니다."}}]}</script>
+<meta property="og:title" content="오사카 2박3일 코스 | 도톤보리·구로몬 시장 하루별 동선" />
+<meta property="og:description" content="오사카 2박3일 코스 11곳(쓰텐카쿠 전망대·도톤보리·릴로 커피 로스터즈 등), 3일 일정, 이동 합계 23.4km — 평점·리뷰 수와 함께 정리했습니다." />
+<meta property="og:type" content="article" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="오사카 2박3일 코스 | 도톤보리·구로몬 시장 하루별 동선" />
+
+<div class="mae-wrap">
+<p class="course-lead" style="margin:0 0 24px;font-size:17px;line-height:1.8;color:#1e293b">오사카 2박3일은 1일차 도톤보리·쓰텐카쿠 전망대 중심 → 2일차 구로몬 시장·해유관 중심 → 3일차 유니버설 스튜디오 재팬 종일 순서로 구성한 코스입니다. 하루를 통째로 쓰는 유니버설 스튜디오 재팬 일정이 3일차에 들어 있는 코스입니다.</p>
+
+<!-- AdSense: title_below -->
+<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXX" data-ad-slot="0000000000" data-ad-format="auto" data-full-width-responsive="true"></ins>
+<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+
+<p class="partners-disclosure">※ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>
+
+<div class="blog-img-wrap">
+<img src="https://www.tradule.co.kr/api/content/course-map?region=%EC%98%A4%EC%82%AC%EC%B9%B4&days=3&v=ec805fadcb" alt="오사카 3일 코스 지도" loading="lazy" />
+<p class="photo-credit">코스 지도 · 트레쥴</p>
+</div>
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">1</span>
+<h2 id="overview">오사카 2박3일 전체 동선 한눈에 보기</h2>
+</div>
+
+<ul class="course-toc" style="margin:0 0 16px;padding-left:20px;line-height:1.9"><li><a href="#day1">1일차 — 도톤보리·쓰텐카쿠 전망대 중심</a></li><li><a href="#day2">2일차 — 구로몬 시장·해유관 중심</a></li><li><a href="#day3">3일차 — 유니버설 스튜디오 재팬 종일</a></li><li><a href="#faq">자주 묻는 질문</a></li></ul><div class="timeline-table"><table>
+<thead><tr><th>일차</th><th>테마</th><th>핵심 장소</th><th>이동 수단</th><th>하루 이동 합계</th></tr></thead>
+<tbody>
+<tr><td>1일차</td><td>도톤보리·쓰텐카쿠 전망대 중심</td><td>쓰텐카쿠 전망대, 도톤보리, 우메다 스카이 빌딩 공중정원 전망대</td><td>도보·차량</td><td>약 65분</td></tr>
+<tr><td>2일차</td><td>구로몬 시장·해유관 중심</td><td>해유관, 구로몬 시장, 신세카이 시장</td><td>차량·대중교통·도보</td><td>약 66분</td></tr>
+<tr><td>3일차</td><td>유니버설 스튜디오 재팬 종일</td><td>유니버설 스튜디오 재팬</td><td>—</td><td>—</td></tr>
+</tbody>
+</table></div>
+<p style="font-size:12px;color:#5E5E5E;margin:4px 0 16px">장소 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span></p><div class="tradule-cta"><a href="https://www.tradule.co.kr/course/%EC%98%A4%EC%82%AC%EC%B9%B4/2%EB%B0%953%EC%9D%BC?utm_source=maeilg&utm_medium=blog&utm_campaign=%EC%98%A4%EC%82%AC%EC%B9%B4-2%EB%B0%953%EC%9D%BC" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a><br><span style="font-size:13px;color:#64748b">평점·사진은 트레쥴에서 장소를 누르면 볼 수 있어요.</span></div><p style="margin:0 0 14px;font-size:14px">🧳 <a href="https://link.coupang.com/a/hMAuJY1jdk" target="_blank" rel="nofollow sponsored noopener">준비물 — 여행용 동전지갑 (쿠팡)</a></p>
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">2</span>
+<h2 id="day1">1일차 — 도톤보리·쓰텐카쿠 전망대 중심</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">1일차는 쓰텐카쿠 전망대에서 시작해 우메다 스카이 빌딩 공중정원 전망대에서 마칩니다. 모두 5곳입니다.</p>
+<h3 style="margin:22px 0 8px">쓰텐카쿠 전망대 <span style="font-size:14px;font-weight:400;color:#64748b">(전망대)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">쓰텐카쿠는 오사카부 오사카시 나니와구에 있는 신세카이 중심부에 있는 전망대입니다. 1일차 첫 일정으로 넣었습니다.</p>
+<p style="margin:6px 0 10px;padding:8px 12px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:14px;line-height:1.7">📌 이 날 가장 긴 이동 구간입니다. 앞뒤 일정에 시간 여유를 두세요.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 도톤보리까지 도보 30분</p>
+<h3 style="margin:22px 0 8px">도톤보리 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">도톤보리는 과거에는 극장이 밀집된 지역이었으나, 현재는 밤문화와 오락시설이 밀집된 지역으로 변모했습니다. 쓰텐카쿠 전망대에서 이어 들르는 2번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 릴로 커피 로스터즈까지 도보 12분</p>
+<h3 style="margin:22px 0 8px">릴로 커피 로스터즈 <span style="font-size:14px;font-weight:400;color:#64748b">(카페)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">도톤보리에서 이어 쉬어 가도록 넣은 카페입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 규카츠 교토가츠규 우메다점까지 차량 기준 11분</p>
+<h3 style="margin:22px 0 8px">규카츠 교토가츠규 우메다점 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">릴로 커피 로스터즈에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 우메다 스카이 빌딩 공중정원 전망대까지 도보 12분</p>
+<h3 style="margin:22px 0 8px">우메다 스카이 빌딩 공중정원 전망대 <span style="font-size:14px;font-weight:400;color:#64748b">(전망대)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">건물은 40층의 두 동의 타워로 이루어져 있고 꼭대기에서 서로 연결되며 중앙의 아트리움 같은 넓은 공간을 다리와 에스컬레이터가 교차하고 있습니다. 오사카시 기타구에 위치합니다. 규카츠 교토가츠규 우메다점에서 이어지는 1일차 마지막 일정입니다.</p>
+<div class="blog-img-wrap"><img src="https://www.tradule.co.kr/api/content/course-map?region=%EC%98%A4%EC%82%AC%EC%B9%B4&amp;days=3&amp;day=1&amp;v=ec805fadcb" alt="1일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>
+<p style="margin:10px 0 14px;line-height:1.8">🔁 <b>일정 조율 팁</b> — 체력이나 시간이 부족하면 그날 마지막 장소(우메다 스카이 빌딩 공중정원 전망대)는 빼도 앞 동선은 그대로 이어집니다.</p>
+<p style="margin:0 0 14px;font-size:14px">🎟 <a href="https://tp.media/r?campaign_id=137&marker=765548&p=4110&sub_id=blog_%EC%98%A4%EC%82%AC%EC%B9%B4_%EC%98%A4%EC%82%AC%EC%B9%B4-2%EB%B0%953%EC%9D%BC&trs=563085&u=https%3A%2F%2Fwww.klook.com%2Fko%2Fsearch%2Fresult%2F%3Fquery%3D%25EC%2593%25B0%25ED%2585%2590%25EC%25B9%25B4%25EC%25BF%25A0%2520%25EC%25A0%2584%25EB%25A7%259D%25EB%258C%2580" target="_blank" rel="nofollow sponsored noopener">쓰텐카쿠 전망대 입장권 확인</a> <span style="color:#94a3b8">(제휴 링크)</span></p>
+
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">3</span>
+<h2 id="day2">2일차 — 구로몬 시장·해유관 중심</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">2일차는 해유관에서 시작해 하루카스 300에서 마칩니다. 모두 5곳입니다.</p>
+<h3 style="margin:22px 0 8px">해유관 <span style="font-size:14px;font-weight:400;color:#64748b">(수족관)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">2일차 첫 일정으로 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 구로몬 시장까지 차량 18분</p>
+<h3 style="margin:22px 0 8px">구로몬 시장 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">구로몬 시장은 일본 오사카부 오사카시 주오구 닛폰바시에 있는 시장 및 상점가입니다. 재래시장의 특이한 점을 보면 한국식 음식들을 많이 진열되는 형태로 판매되고 있는 특이 사항을 두고 있습니다. 해유관에서 이어 들르는 2번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 신세카이 시장까지 대중교통 19분</p>
+<h3 style="margin:22px 0 8px">신세카이 시장 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">구로몬 시장에서 이어 들르는 3번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 치토세까지 도보 12분</p>
+<h3 style="margin:22px 0 8px">치토세 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">신세카이 시장에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 하루카스 300까지 도보 17분</p>
+<h3 style="margin:22px 0 8px">하루카스 300 <span style="font-size:14px;font-weight:400;color:#64748b">(전망대)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">치토세에서 이어지는 2일차 마지막 일정입니다.</p>
+<div class="blog-img-wrap"><img src="https://www.tradule.co.kr/api/content/course-map?region=%EC%98%A4%EC%82%AC%EC%B9%B4&amp;days=3&amp;day=2&amp;v=ec805fadcb" alt="2일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>
+<p style="margin:10px 0 14px;line-height:1.8">🔁 <b>일정 조율 팁</b> — 체력이나 시간이 부족하면 그날 마지막 장소(하루카스 300)는 빼도 앞 동선은 그대로 이어집니다.</p>
+
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">4</span>
+<h2 id="day3">3일차 — 유니버설 스튜디오 재팬 종일</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">3일차는 유니버설 스튜디오 재팬에서 하루 대부분을 보내는 날입니다.</p>
+<h3 style="margin:22px 0 8px">유니버설 스튜디오 재팬 <span style="font-size:14px;font-weight:400;color:#64748b">(테마파크)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">유니버설 스튜디오 재팬은 여러 유니버설 스튜디오 놀이공원 중 하나로 일본 오사카시에 있으며, 2001년 3월 31일 개장했습니다. 이 놀이공원은 유니버설 올랜도 리조트와 비슷하며 비슷한 놀이기구를 갖추고 있습니다.</p>
+<p style="margin:6px 0 10px;padding:8px 12px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:14px;line-height:1.7">📌 이날은 이곳을 중심으로 하루를 보내도록 구성했습니다.</p>
+<div class="blog-img-wrap"><img src="https://www.tradule.co.kr/api/content/course-map?region=%EC%98%A4%EC%82%AC%EC%B9%B4&amp;days=3&amp;day=3&amp;v=ec805fadcb" alt="3일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>
+<p style="margin:0 0 14px;font-size:14px">🎟 <a href="https://tp.media/r?campaign_id=137&marker=765548&p=4110&sub_id=blog_%EC%98%A4%EC%82%AC%EC%B9%B4_%EC%98%A4%EC%82%AC%EC%B9%B4-2%EB%B0%953%EC%9D%BC&trs=563085&u=https%3A%2F%2Fwww.klook.com%2Fko%2Fsearch%2Fresult%2F%3Fquery%3D%25EC%259C%25A0%25EB%258B%2588%25EB%25B2%2584%25EC%2584%25A4%2520%25EC%258A%25A4%25ED%258A%259C%25EB%2594%2594%25EC%2598%25A4%2520%25EC%259E%25AC%25ED%258C%25AC" target="_blank" rel="nofollow sponsored noopener">유니버설 스튜디오 재팬 입장권 확인</a> <span style="color:#94a3b8">(제휴 링크)</span></p>
+<p style="margin:0 0 14px;font-size:14px">🧳 <a href="https://link.coupang.com/a/hMANX10KT6" target="_blank" rel="nofollow sponsored noopener">준비물 — 보조배터리 (쿠팡)</a></p>
+
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">5</span>
+<h2 id="checklist">떠나기 전 체크리스트</h2>
+</div>
+
+<ul style="margin:0 0 14px;padding-left:20px;line-height:1.9"><li>도보 구간이 있어 오래 걸어도 편한 신발을 준비하세요.</li><li>3일차는 한 시설에서 하루를 보내므로 입장 방식과 운영 시간을 공식 안내에서 미리 확인하세요.</li><li>각 장소의 영업시간과 휴무일은 방문 전에 공식 안내에서 한 번 더 확인하세요.</li><li>대중교통·차량 구간이 있는 날은 이동 시간을 넉넉히 잡으세요.</li></ul>
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">6</span>
+<h2 id="closing">마무리</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">오사카 2박3일 코스는 11곳을 3일에 나눠 담았습니다. 이동 시간은 장소 아래 한 줄과 위의 요약표에서 확인하세요.</p>
+<p style="margin:14px 0 4px;font-size:13px;color:#64748b">출처: <a href="https://ko.wikipedia.org/wiki/%EC%93%B0%ED%85%90%EC%B9%B4%EC%BF%A0" target="_blank" rel="noopener nofollow">쓰텐카쿠</a> · <a href="https://ko.wikipedia.org/wiki/%EB%8F%84%ED%86%A4%EB%B3%B4%EB%A6%AC" target="_blank" rel="noopener nofollow">도톤보리</a> · <a href="https://ko.wikipedia.org/wiki/%EC%9A%B0%EB%A9%94%EB%8B%A4_%EC%8A%A4%EC%B9%B4%EC%9D%B4_%EB%B9%8C%EB%94%A9" target="_blank" rel="noopener nofollow">우메다 스카이 빌딩</a> · <a href="https://ko.wikipedia.org/wiki/%EA%B5%AC%EB%A1%9C%EB%AA%AC_%EC%8B%9C%EC%9E%A5" target="_blank" rel="noopener nofollow">구로몬 시장</a> · <a href="https://ko.wikipedia.org/wiki/%EC%9C%A0%EB%8B%88%EB%B2%84%EC%84%A4_%EC%8A%A4%ED%8A%9C%EB%94%94%EC%98%A4_%EC%9E%AC%ED%8C%AC" target="_blank" rel="noopener nofollow">유니버설 스튜디오 재팬</a> — 한국어 위키백과 (CC BY-SA 4.0). 설명은 위 문서를 바탕으로 요약했습니다.</p>
+<p style="margin:0 0 14px;font-size:13px;color:#64748b">동선·이동 시간은 트레쥴 코스 데이터 기준입니다.</p>
+
+<div class="cta-box" style="border:1px solid #bfdbfe;background:#f0f9ff;"><h3>📶 오사카 현지 데이터, 미리 준비하기</h3><p>공항에서 유심 찾아 헤매지 않아도 됩니다. eSIM은 출국 전에 앱으로 미리 설치해두면 도착하자마자 바로 연결됩니다.</p><a href="https://tp.media/r?campaign_id=224&marker=765548&p=5998&sub_id=blog_%EC%98%A4%EC%82%AC%EC%B9%B4_%EC%98%A4%EC%82%AC%EC%B9%B42%EB%B0%953%EC%9D%BC&trs=563085&u=https%3A%2F%2Fyesim.tech%2Fko%2F" target="_blank" rel="nofollow sponsored noopener" style="display:inline-block;margin-top:10px;padding:10px 24px;background:#2563eb;color:#fff;font-weight:bold;border-radius:4px;text-decoration:none;font-size:15px;">예심(Yesim) eSIM — 즉시 개통 →</a> <a href="https://tp.media/r?campaign_id=541&marker=765548&p=8310&sub_id=blog_%EC%98%A4%EC%82%AC%EC%B9%B4_%EC%98%A4%EC%82%AC%EC%B9%B42%EB%B0%953%EC%9D%BC&trs=563085&u=https%3A%2F%2Fairalo.com" target="_blank" rel="nofollow sponsored noopener" style="display:inline-block;margin-top:10px;margin-left:8px;padding:10px 24px;background:#fff;color:#2563eb;font-weight:bold;border:1px solid #2563eb;border-radius:4px;text-decoration:none;font-size:15px;">Airalo eSIM →</a></div>
+
+<p class="partners-disclosure">※ 일부 링크는 제휴 링크이며, 구매 시 소정의 수수료를 받습니다. 구매자가 지불하는 금액에는 차이가 없습니다.</p>
+
+<!-- AdSense: mid_content -->
+<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXX" data-ad-slot="0000000000" data-ad-format="auto" data-full-width-responsive="true"></ins>
+<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+
+<h2 id="faq">자주 묻는 질문 (FAQ)</h2>
+<div class="faq-wrap">
+<div class="faq-item"><div class="faq-q">하루에 몇 곳을 도나요?</div><div class="faq-a">하루 평균 3.7곳이고, 가장 많은 날은 1일차(5곳)입니다.</div></div>
+<div class="faq-item"><div class="faq-q">걸어서 다닐 수 있나요?</div><div class="faq-a">이동 구간 8개 중 5개가 도보입니다. 도보만으로 이어지는 날은 없고, 다른 날은 대중교통이나 차량이 섞여 있습니다.</div></div>
+<div class="faq-item"><div class="faq-q">일차별 대표 명소는 어디인가요?</div><div class="faq-a">1일차 도톤보리·쓰텐카쿠 전망대, 2일차 구로몬 시장·해유관, 3일차 유니버설 스튜디오 재팬입니다.</div></div>
+</div>
+
+<p class="partners-disclosure">※ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>
+
+<div class="keyword-tags">
+<span class="keyword-tag">#오사카 2박3일</span>
+</div>
+
+<div class="tradule-cta"><a href="https://www.tradule.co.kr/course/%EC%98%A4%EC%82%AC%EC%B9%B4/2%EB%B0%953%EC%9D%BC?utm_source=maeilg&utm_medium=blog&utm_campaign=%EC%98%A4%EC%82%AC%EC%B9%B4-2%EB%B0%953%EC%9D%BC" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a><br><span style="font-size:13px;color:#64748b">평점·사진은 트레쥴에서 장소를 누르면 볼 수 있어요.</span></div>
+
+<p style="font-size:13px;color:#64748b;">📶 <a href="https://tp.media/r?campaign_id=224&marker=765548&p=5998&sub_id=blog_%EC%98%A4%EC%82%AC%EC%B9%B4_%EC%98%A4%EC%82%AC%EC%B9%B42%EB%B0%953%EC%9D%BC&trs=563085&u=https%3A%2F%2Fyesim.tech%2Fko%2F" target="_blank" rel="nofollow sponsored noopener">오사카 eSIM 미리 준비하기 (예심(Yesim) eSIM — 즉시 개통)</a></p>
+
+<!-- AdSense: post_end -->
+<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXX" data-ad-slot="0000000000" data-ad-format="auto" data-full-width-responsive="true"></ins>
+<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+</div>

@@ -9,6 +9,7 @@ import { throttle, retryOn429, retryOn503 } from '../utils/rateLimiter.js';
 import { loadCompetitorInsights, formatInsightsForPrompt, formatBlogInsightsForPrompt } from './competitor_analyzer.js';
 import { isClaimKeyword, searchAndVerify, formatFactCheckContext } from '../utils/factSearch.js';
 import { buildCourseTitle as buildCourseTitleV2, titleKeyword } from '../utils/courseTitle.js';
+import { buildGroundedCourse } from '../utils/groundedCourse.js';
 import { splitDayKms, inferSpotKind, isBoatLeg, isIslandName, isFacilityDay, getFacilitySpot, legModeKey, legModeLabel, pickRepSpot } from '../utils/dayCard.js';
 
 // [역할: Writer (블로그 본문)] — 전체 워크플로우는 docs/AGENT_WORKFLOW.md 참고.
@@ -2373,6 +2374,18 @@ function assembleCourseDraft(content) {
   };
 }
 
+async function assembleGroundedDraft(content) {
+  const base = assembleCourseDraft(content); // 제목·슬러그·메타·JSON-LD는 기존 코드 조립과 같다
+  const kw = titleKeyword(content.keyword, content.trip_data);
+  const g = await buildGroundedCourse(content, kw);
+  const wordCount = g.sections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
+  logger.info(`[blog_content_enhancer] Done: ${kw} (${wordCount}자, 근거 설명 ${g.groundedCount}곳)`);
+  return {
+    ...base,
+    blog_draft: { ...base.blog_draft, sections: g.sections, faq: g.faq, lead: g.lead, grounded: true, grounded_count: g.groundedCount, word_count: wordCount },
+  };
+}
+
 async function enhanceBlogDraft(content) {
   const { keyword, category, shortform_script, blog_draft } = content;
 
@@ -2384,6 +2397,11 @@ async function enhanceBlogDraft(content) {
   }
 
   if (content.trip_data?.spots?.length && process.env.COURSE_LLM_BODY !== 'on') {
+    // D-166: COURSE_GROUNDED_DESC=on 이면 새 메인 템플릿(일차 H2 + 장소 H3 + 위키 근거 설명). 자유 생성 본문은 여전히 만들지 않는다.
+    if (process.env.COURSE_GROUNDED_DESC === 'on') {
+      logger.info(`[blog_content_enhancer] 코스 글 — 근거 설명 템플릿 (COURSE_GROUNDED_DESC=on): ${keyword}`);
+      return assembleGroundedDraft(content);
+    }
     logger.info(`[blog_content_enhancer] 코스 글 — LLM 본문 생략 (COURSE_LLM_BODY=off): ${keyword}`);
     return assembleCourseDraft(content);
   }

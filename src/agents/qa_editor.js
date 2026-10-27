@@ -35,7 +35,7 @@ async function runLLMQA(content) {
 - 숏폼 요약: ${s.summary ?? ''}
 - 숏폼 CTA: ${s.cta ?? ''}
 - 블로그 제목: ${content.blog_draft?.title ?? ''}
-- 블로그 섹션: ${JSON.stringify(content.blog_draft?.sections ?? [])}
+- 블로그 섹션: ${JSON.stringify((content.blog_draft?.sections ?? []).map(({ html, ...rest }) => rest))}
 
 검수 항목:
 1. fact_check_score (0~100): 사실 정확성. 허위·과장·확인 불가 내용 발견 시 감점.
@@ -660,7 +660,7 @@ function validateBlogStructure(content) {
   // 렌더 단계에서 붙으므로 글자수에 따로 더한다(LLM 해설을 뺀 뒤 총량이 줄어드는 걸 보정).
   const cardChars = sections.reduce((sum, s) => {
     const m = (s.heading ?? '').match(/(\d+)\s*일차/);
-    return m && content.trip_data?.spots?.length ? sum + dayCardPlainText(content.trip_data, Number(m[1])).length : sum;
+    return m && content.trip_data?.spots?.length && !draft.grounded ? sum + dayCardPlainText(content.trip_data, Number(m[1])).length : sum;
   }, 0);
   const totalChars = sections.reduce((sum, s) => sum + (s.body ?? '').length, 0)
     + faq.reduce((sum, f) => sum + (f.a ?? '').length, 0) + cardChars;
@@ -668,7 +668,7 @@ function validateBlogStructure(content) {
   // 재실행(비용 2배)했고 재작성본은 오히려 더 짧은 2,199자로 통과): 2일 이하 코스는 스팟이 적어 사실만으로 채울 분량이
   // 원래 적다 — 최소 분량을 2400자로 낮춘다.
   // D-146: 코드 조립 초안(blog_draft.assembled==='code')은 사실 블록만이라 분량이 원래 적다 — LLM으로 채우면 창작이 들어가므로 기준을 2000자로 낮춘다(서울 2박3일 실측: 분량 미달 → LLM "장소별 상세" 추가 → 주어 없는 문장·비문).
-  const minTotalChars = draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
+  const minTotalChars = draft.grounded ? 2000 : draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
   if (totalChars < minTotalChars) {
     issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${minTotalChars}자 — AdSense 콘텐츠 가치 기준)`);
   }

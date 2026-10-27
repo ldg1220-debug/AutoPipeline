@@ -796,13 +796,13 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
   // D-110: 본문 첫 이미지로 이미 들어가는 코스 지도를 첫 섹션 이미지로 또 넣지 않는다.
   if (tripData?.imageUrl) usedImageUrls.add(tripData.imageUrl);
   let lastDayIdx = -1;
-  if (tripData?.spots?.length) sections.forEach((sec, idx) => { if (DAY_HEADING_PATTERN.test(sec.heading ?? '')) lastDayIdx = idx; });
+  if (tripData?.spots?.length) sections.forEach((sec, idx) => { if (!sec.html && DAY_HEADING_PATTERN.test(sec.heading ?? '')) lastDayIdx = idx; });
   return sections
     .map((s, i) => {
       const tag = s.level === 'h3' ? 'h3' : 'h2';
       const hookKey = `section${i + 1}_end`;
       const affiliateHtml = affiliateMap[hookKey] ?? '';
-      const dayMatch = tripData?.spots?.length ? (s.heading ?? '').match(DAY_HEADING_PATTERN) : null;
+      const dayMatch = (tripData?.spots?.length && !s.html) ? (s.heading ?? '').match(DAY_HEADING_PATTERN) : null;
 
       // 섹션 인덱스와 정확히 일치하는 이미지만(순환 금지). 일자 섹션에는 스톡 사진을 넣지 않는다.
       let imgData = dayMatch ? null : (bodyImages.find((img) => img.section_index === i) ?? null);
@@ -825,7 +825,12 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         : '';
 
       let contentHtml;
-      if (dayMatch) {
+      if (s.html) {
+        // D-166: 근거 설명 템플릿 — 코드가 만든 HTML을 그대로 쓴다. {{ATTRIBUTION}}·{{DAY_EXTRA_n}} 자리만 치환한다.
+        contentHtml = s.html
+          .replace('{{ATTRIBUTION}}', extras.ratingAttrHtml ?? '')
+          .replace(/\{\{DAY_EXTRA_(\d+)\}\}/g, (_, d) => extras.dayAffiliate?.get(Number(d)) ?? '');
+      } else if (dayMatch) {
         // 본문 = "코드 목록\n\n해설" — 목록은 표로 대체하고 해설만 남긴다.
         const rawBody = s.body ?? '';
         const idx = rawBody.indexOf('\n\n');
@@ -845,7 +850,7 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         // ① 섹션 헤더: 번호 뱃지 + 카테고리 색상
         `<div class="section-hdr" style="--cat-color:${catColor}">\n` +
         `<span class="s-num">${i + 1}</span>\n` +
-        `<${tag}>${s.heading}</${tag}>\n` +
+        `<${tag}${s.id ? ` id="${s.id}"` : ''}>${s.heading}</${tag}>\n` +
         `</div>\n` +
         `${imageHtml}\n` +
         contentHtml +
@@ -868,7 +873,7 @@ function renderFaq(faqList) {
         `</div>`
     )
     .join('\n');
-  return `<h2>자주 묻는 질문 (FAQ)</h2>\n<div class="faq-wrap">\n${items}\n</div>`;
+  return `<h2 id="faq">자주 묻는 질문 (FAQ)</h2>\n<div class="faq-wrap">\n${items}\n</div>`;
 }
 
 /**
@@ -946,7 +951,7 @@ async function monetizeBlogDraft(content) {
     buildTravelpayoutsBlock(content);
 
   // ① TL;DR 박스
-  const tldrHtml     = buildTldrBox(blog_draft.sections, content.trip_data, content.fact_check);
+  const tldrHtml     = blog_draft.grounded ? '' : buildTldrBox(blog_draft.sections, content.trip_data, content.fact_check); // D-166: 근거 설명 템플릿은 개요 표가 대신한다
   const distanceDisclosureHtml = buildStraightLineDisclosure(content.trip_data); // 임시 조치(2026-09-08), 1회만
   const courseMapHtml = buildCourseMapImage(content.trip_data);
   // 2026-09-29(작업지시서 "카드형 세부 7일 초안" §5): 일자 카드가 같은 표를 이미 보여주므로 위쪽
@@ -1003,7 +1008,7 @@ async function monetizeBlogDraft(content) {
     }
   }
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
-    { dayAffiliate: placeAff.byDay, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
+    { dayAffiliate: placeAff.byDay, ratingAttrHtml: blog_draft.grounded ? ratingAttributionHtml(content.trip_data) : '', afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
@@ -1084,8 +1089,9 @@ async function monetizeBlogDraft(content) {
     `</div>`;
 
   // D-153: 코스 글은 히어로(카테고리 태그·제목 반복·메타 반복) 대신 한 문장 요약으로 시작한다 — 티스토리 목록 미리보기가 본문 첫 텍스트를 쓰기 때문.
+  const leadText = blog_draft.lead ? String(blog_draft.lead).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : null;
   const leadHtml = content.trip_data?.spots?.length
-    ? `<p class="course-lead" style="margin:0 0 24px;font-size:17px;line-height:1.8;color:#1e293b">${buildLeadSentence(content.trip_data, keyword)}</p>`
+    ? `<p class="course-lead" style="margin:0 0 24px;font-size:17px;line-height:1.8;color:#1e293b">${leadText ?? buildLeadSentence(content.trip_data, keyword)}</p>`
     : heroHtml;
 
   const innerHtml = [

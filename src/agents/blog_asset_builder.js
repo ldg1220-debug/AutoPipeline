@@ -718,8 +718,8 @@ async function buildAssets(content, sharedGlobalIds = null) {
 
   // D-127: --draft-only(교체용 HTML 확인)에서는 썸네일이 쓰이지 않으므로 DALL-E·HTML·Pexels 썸네일 단계를 모두 건너뛴다.
   const skipThumb = process.env.AP_SKIP_THUMBNAIL === '1';
-  // D-153(AUAFF21 §5): 썸네일 소스 스위치 THUMBNAIL_SOURCE = dalle(기본) | map(트레쥴 코스 지도 + 제목) | pexels(DALL-E·HTML 건너뛰고 Pexels 직행)
-  const thumbSource = String(process.env.THUMBNAIL_SOURCE ?? 'dalle').toLowerCase();
+  // D-153(AUAFF21 §5): 썸네일 소스 스위치 THUMBNAIL_SOURCE = map(기본 D-166 — 트레쥴 코스 지도 + 제목; gpt-image-1 접근 불가) | dalle | pexels(DALL-E·HTML 건너뛰고 Pexels 직행)
+  const thumbSource = String(process.env.THUMBNAIL_SOURCE ?? 'map').toLowerCase();
   if (thumbSource === 'map' && !skipThumb && content.trip_data?.imageUrl) {
     try {
       const raw = path.join(assetDir, 'thumbnail_map_raw.jpg');
