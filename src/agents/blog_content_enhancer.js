@@ -1996,8 +1996,10 @@ function buildKindBlocksBody(tripData) {
   const lines = [];
 
   // D-159(AUTOPI4): 순위 표현·평점·리뷰 수 없이 종류별 목록만.
-  const sights = spots.filter(isSightSpot).slice(0, 6);
-  if (sights.length >= 2) lines.push(`명소는 ${sights.map(fmt).join(', ')}입니다.`);
+  const allSights = spots.filter(isSightSpot);
+  const sights = allSights.slice(0, 6);
+  // D-165: 앞 6곳만 나열하면서 "명소는 …입니다"라고 쓰면 한눈에 보기의 "명소 11곳"과 어긋난다 — 전체 수를 함께 쓴다.
+  if (sights.length >= 2) lines.push(allSights.length > sights.length ? `명소는 총 ${allSights.length}곳이며, 코스 순서상 앞의 ${sights.length}곳은 ${sights.map(fmt).join(', ')}입니다.` : `명소는 ${sights.map(fmt).join(', ')}입니다.`);
 
   const islands = ofKinds(['섬']);
   const beaches = ofKinds(['해변']);

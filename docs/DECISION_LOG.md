@@ -2332,3 +2332,8 @@
 - **결정**: tradule.co.kr 로 가는 서버 측 요청(course-brief · 코스 페이지 200 확인 · regions 갱신 · places 조회)에 `User-Agent: TraduleAutoPipeline/1.0 (+https://maeilg.com)`를 붙인다. 공통 헬퍼 `src/utils/traduleHttp.js`(`traduleHeaders`) 한 곳에서 관리.
 - **한계**: 글에 들어가는 course-map 이미지 URL은 독자 브라우저·티스토리가 불러오므로 AutoPipeline이 UA를 붙일 수 없다(사람 방문으로 집계되는 것이 맞음).
 - **관련 파일**: `src/utils/traduleHttp.js`, `src/agents/tradule_source.js`, `src/agents/monetizer.js`, `scripts/refresh-tradule-regions.js`, `scripts/write-kin-answer.js`
+
+### D-165: 나고야 3박4일(288) 점검 후속 — 표기 정리
+- **발견**: (1) "이동수단은 차량 기준·도보 혼합입니다" — 차량 대체 구간 라벨이 그대로 노출 (2) 종류별 장소가 명소 11곳 중 앞 6곳만 "명소는 …입니다"로 나열되어 한눈에 보기의 "명소 11곳"과 어긋남 (3) 카테고리 '기타'인 "가토 기요마사 상"이 이름 끝 "사 "로 사원·성당 판정.
+- **결정**: (1) 포인트 문장에서는 차량 대체(car_fallback)를 차량으로 합쳐 표기 (2) 6곳 초과 시 "명소는 총 N곳이며, 코스 순서상 앞의 6곳은 …" (3) 이름 기반 사원·성당 판정은 이름이 '…사'로 끝날 때만.
+- **관련 파일**: `src/utils/dayCard.js`, `src/agents/blog_content_enhancer.js`

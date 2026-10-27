@@ -60,7 +60,7 @@ export function inferSpotKind(spot) {
   if (/island|\bisla\b|섬/i.test(n)) return '섬';
   if (/beach|비치|해변/i.test(n)) return '해변';
   if (/park|공원|파크/i.test(n)) return '공원';
-  if (/temple|사원|성당|church|[가-힣]사(\s|$)/i.test(n)) return '사원·성당';
+  if (/temple|사원|성당|church|[가-힣]사$/i.test(n)) return '사원·성당'; // D-165: "가토 기요마사 상"이 사원으로 잡히던 것 방지 — 이름 끝이 '…사'일 때만
   if (/market|시장/i.test(n)) return '시장';
   if (/fort|요새|[가-힣]성(\s|$)|(^|\s)성$|castle|궁/i.test(n)) return '유적';
   if (/스튜디오|디즈니|랜드|테마파크|universal|resort\s*land/i.test(n)) return '테마파크';
@@ -138,7 +138,7 @@ export function buildDayPoints(tripData, day) {
     points.push('식사 장소가 2곳 이상 포함돼 있어 이 동선 안에서 해결할 수 있습니다.');
   }
   if (points.length === 0 && legs.length > 0) {
-    const modes = new Set(legs.map((l) => legModeKey(l)));
+    const modes = new Set(legs.map((l) => (legModeKey(l) === 'car_fallback' ? 'car' : legModeKey(l)))); // D-165: "차량 기준·도보 혼합" 같은 어색한 표기 방지 — 차량으로 합친다
     points.push(modes.size === 1 ? `이동수단은 ${modeLabel([...modes][0])} 하나입니다.` : `이동수단은 ${[...modes].map((m) => modeLabel(m)).join('·')} 혼합입니다.`);
   }
   return points;
