@@ -26,6 +26,7 @@ import logger from '../utils/logger.js';
 import { writeJSON } from '../utils/fileIO.js';
 import { REGION_PROFILES } from '../data/regionProfiles.js';
 import { searchRegionSpots } from '../utils/factSearch.js';
+import { traduleHeaders } from '../utils/traduleHttp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -245,6 +246,7 @@ async function fetchCourseBrief(region, days) {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
     const res = await axios.get(`${apiBase}${COURSE_BRIEF_PATH}`, {
       params: { region, days },
+      headers: traduleHeaders(),
       timeout: COURSE_BRIEF_TIMEOUT_MS,
     });
     return res.data ?? null;

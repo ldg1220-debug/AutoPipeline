@@ -35,6 +35,7 @@ import fs from 'fs/promises';
 import axios from 'axios';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
+import { traduleHeaders } from '../src/utils/traduleHttp.js';
 import {
   REGION_TREE,
   DOMESTIC_PARENT_REGIONS,
@@ -189,6 +190,7 @@ async function fetchPlaceByName(name) {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
     const res = await axios.get(`${apiBase}/api/places/search`, {
       params: { q: name },
+      headers: traduleHeaders(),
       timeout: 10000,
     });
     const first = res.data?.places?.[0] ?? res.data?.[0] ?? null;
@@ -205,6 +207,7 @@ async function fetchPlaceReviewSnippets(placeId) {
     const apiBase = config.tradule?.apiBase || 'https://www.tradule.co.kr';
     const res = await axios.get(`${apiBase}/api/places/details`, {
       params: { placeId },
+      headers: traduleHeaders(),
       timeout: 10000,
     });
     const data = res.data ?? {};

@@ -2327,3 +2327,8 @@
 - **근거**: 285·286 프로젝트 매니저 검수 "이동 시간·거리 중복으로 가독성 저하". 오사카 2박3일 기준 합계 분 수가 개요·사슬·동선 요약·카드 부제·포인트에 반복되던 것을 각 분 수가 본문 산문 1회로 정리. 글자 수는 1,846자(QA 합산 기준)로 1,500 이상 유지.
 - **유지**: `--force-keyword`는 중복 검사 면제 그대로.
 - **관련 파일**: `src/agents/blog_content_enhancer.js`, `src/utils/dayCard.js`, `src/agents/blog_asset_builder.js`, `src/agents/tradule_source.js`
+
+### D-164: 트레쥴 호출에 User-Agent 표시
+- **결정**: tradule.co.kr 로 가는 서버 측 요청(course-brief · 코스 페이지 200 확인 · regions 갱신 · places 조회)에 `User-Agent: TraduleAutoPipeline/1.0 (+https://maeilg.com)`를 붙인다. 공통 헬퍼 `src/utils/traduleHttp.js`(`traduleHeaders`) 한 곳에서 관리.
+- **한계**: 글에 들어가는 course-map 이미지 URL은 독자 브라우저·티스토리가 불러오므로 AutoPipeline이 UA를 붙일 수 없다(사람 방문으로 집계되는 것이 맞음).
+- **관련 파일**: `src/utils/traduleHttp.js`, `src/agents/tradule_source.js`, `src/agents/monetizer.js`, `scripts/refresh-tradule-regions.js`, `scripts/write-kin-answer.js`

@@ -15,6 +15,7 @@ import { buildDayPoints, buildDaySubtitle, getFacilitySpot, inferSpotKind, dayLe
 import { buildLeadSentence } from '../utils/courseTitle.js';
 import { loadTaggedCoupangEntries, deriveTravelTags, pickTravelCoupang, placeTravelCoupang, coupangLineHtml, recordRecentCoupang, MAX_COUPANG_PER_POST, MAX_TOTAL_AFFILIATE_PER_POST } from '../utils/coupangTravel.js';
 import { APPROVED_AFFILIATE_BRANDS, MAX_AFFILIATE_LINKS_PER_POST } from '../data/affiliateBrands.js';
+import { traduleHeaders } from '../utils/traduleHttp.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -689,7 +690,7 @@ async function buildTraduleCoursePageUrl(tripData, slug) {
   const url = `${base}?utm_source=maeilg&utm_medium=blog&utm_campaign=${encodeURIComponent(slug || tripData.region)}`;
   for (const method of ['HEAD', 'GET']) {
     try {
-      const res = await fetch(base, { method, redirect: 'manual', // 라벨 주소는 리다이렉트 없이 200이어야 정상
+      const res = await fetch(base, { method, headers: traduleHeaders(), redirect: 'manual', // 라벨 주소는 리다이렉트 없이 200이어야 정상
          signal: AbortSignal.timeout(8000) });
       if (res.status === 200) return url;
       if (method === 'HEAD' && (res.status === 405 || res.status === 501)) continue;

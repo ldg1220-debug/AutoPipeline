@@ -13,6 +13,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import axios from 'axios';
 import { config } from '../src/config/index.js';
+import { traduleHeaders } from '../src/utils/traduleHttp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_PATH = path.resolve(__dirname, '../src/data/tradule_regions.json');
@@ -27,7 +28,7 @@ async function main() {
   // no-cache 헤더로 우회한다.
   const res = await axios.get(`${apiBase}/api/content/regions`, {
     params: { v: Date.now() },
-    headers: { 'Cache-Control': 'no-cache' },
+    headers: traduleHeaders({ 'Cache-Control': 'no-cache' }),
     timeout: 15000,
   });
   const data = res.data ?? {};
