@@ -88,8 +88,10 @@ async function pageDetails(lang, ids) {
 
 const usable = (pg) => !(pg.pageprops && 'disambiguation' in pg.pageprops) && pg.extract && pg.extract.length >= 40 && !DISAMBIG_PATTERN.test(pg.extract.slice(0, 200));
 
-function nameMatches(spotName, title) {
-  const a = coreName(spotName); const b = coreName(title);
+function nameMatches(spotName, title, region) {
+  // 지역명 접두어("경주 월정교" → "월정교")는 비교에서 뺀다.
+  const strip = (n) => (region && String(n).startsWith(region) && String(n).length > region.length + 1 ? String(n).slice(region.length) : String(n));
+  const a = coreName(strip(spotName)); const b = coreName(strip(title));
   if (normName(spotName) === normName(title)) return true;
   if (a.length < 2 || b.length < 2) return false;
   return a === b || (Math.min(a.length, b.length) >= 3 && (a.includes(b) || b.includes(a)));
@@ -101,7 +103,7 @@ function categoryMatches(lang, kind, pg) {
 }
 const toResult = (lang, pg, via) => ({ lang, title: pg.title, extract: String(pg.extract).replace(/\s+/g, ' ').trim().slice(0, 900), url: pg.fullurl, via });
 
-async function geoLookup(lang, spot, kind) {
+async function geoLookup(lang, spot, kind, region) {
   if (typeof spot.lat !== 'number' || typeof spot.lng !== 'number') return null;
   const geo = await api(`${lang}.wikipedia.org`, { action: 'query', list: 'geosearch', gscoord: `${spot.lat}|${spot.lng}`, gsradius: GEO_RADIUS_M, gslimit: 10 });
   const hits = geo?.query?.geosearch ?? [];
@@ -110,7 +112,7 @@ async function geoLookup(lang, spot, kind) {
   const dist = new Map(hits.map((h) => [h.pageid, h.dist]));
   pages.sort((x, y) => (dist.get(x.pageid) ?? 9e9) - (dist.get(y.pageid) ?? 9e9));
   // (a) 이름 유사도 — 한국어 위키만 한글 이름과 비교한다(영어 문서는 로마자 이름이 있을 때만)
-  const nameOk = pages.find((pg) => (lang === 'ko' || /[A-Za-z]{3,}/.test(spot.name)) && nameMatches(spot.name, pg.title));
+  const nameOk = pages.find((pg) => (lang === 'ko' || /[A-Za-z]{3,}/.test(spot.name)) && nameMatches(spot.name, pg.title, region));
   if (nameOk) return toResult(lang, nameOk, 'geo-name');
   // (b) 분류가 장소 종류와 맞는 가장 가까운 문서 — 종류가 구체적일 때만
   const catOk = pages.find((pg) => categoryMatches(lang, kind, pg));
@@ -192,14 +194,14 @@ async function voyageLookup(spot, regionKo) {
  */
 export async function fetchWikiFact(spot, { kind, region } = {}) {
   if (!spot?.name) return null;
-  const key = cacheKey(spot, kind);
+  const key = `v2|${cacheKey(spot, kind)}`; // v2: 지역 접두어 제거 매칭
   const hit = readCache('all', key);
   if (hit) return hit.result;
   let failed = false;
   const attempt = async (fn) => { try { return await fn(); } catch (err) { failed = true; logger.warn(`[placeFacts] 조회 실패 "${spot.name}": ${err.message}`); return null; } };
-  let result = await attempt(() => geoLookup('ko', spot, kind));
+  let result = await attempt(() => geoLookup('ko', spot, kind, region));
   if (!result) result = await attempt(() => nameLookup('ko', spot));
-  if (!result) result = await attempt(() => geoLookup('en', spot, kind));
+  if (!result) result = await attempt(() => geoLookup('en', spot, kind, region));
   if (!result) result = await attempt(() => voyageLookup(spot, region));
   if (!failed || result) writeCache('all', key, result);
   return result;
