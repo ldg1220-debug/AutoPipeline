@@ -494,9 +494,11 @@ async function generateInfoCard(stats, keyword, category, outputPath) {
   if (!stats?.length) return null;
 
   const catColor = CARD_COLORS[category] ?? '#2563eb';
+  // D-163(AU23): 값이 길면 글자 크기를 줄여 카드 밖으로 잘리지 않게 한다.
+  const valSize = (v) => { const n = String(v ?? '').length; return n <= 5 ? 26 : n <= 7 ? 22 : n <= 9 ? 18 : 15; };
   const cards = stats.slice(0, 4).map((s) =>
     `<div class="card">
-      <div class="val">${s.value}</div>
+      <div class="val" style="font-size:${valSize(s.value)}px">${s.value}</div>
       <div class="lbl">${s.label}</div>
     </div>`
   ).join('');
@@ -508,13 +510,13 @@ body{width:730px;height:200px;background:linear-gradient(135deg,#0f172a,#1e293b)
   font-family:'Malgun Gothic','맑은 고딕','AppleGothic',sans-serif}
 .title{color:#64748b;font-size:12px;writing-mode:vertical-rl;
   letter-spacing:3px;flex-shrink:0;white-space:nowrap}
-.cards{display:flex;gap:12px;flex:1}
+.cards{display:flex;gap:12px;flex:1;min-width:0}
 .card{flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
-  border-radius:12px;padding:18px 10px;text-align:center;border-top:3px solid ${catColor}}
-.val{font-size:26px;font-weight:700;color:#f1f5f9;line-height:1.1;margin-bottom:7px}
+  border-radius:12px;padding:18px 8px;text-align:center;min-width:0;overflow:hidden;border-top:3px solid ${catColor}}
+.val{font-size:26px;font-weight:700;color:#f1f5f9;line-height:1.1;margin-bottom:7px;white-space:nowrap}
 .lbl{font-size:11px;color:#94a3b8;line-height:1.4}
 </style></head><body>
-<div class="title">${(keyword.split(/\s+/)[0] || keyword).slice(0, 8)}</div>
+<div class="title">${(keyword.split(/\s+/)[0] || keyword).slice(0, 6)}</div>
 <div class="cards">${cards}</div>
 </body></html>`;
 
@@ -822,9 +824,14 @@ async function buildAssets(content, sharedGlobalIds = null) {
         const guideText = await loadImageGuide();
         const review = await reviewImageWithGemini(cardPath, guideText);
         if (!review.pass) {
-          logger.warn(`[blog_asset_builder] Info card self-review FAIL: ${review.reason} (${content.keyword})`);
+          // D-163: 검수 실패 카드는 쓰지 않고 인포카드 없이 진행한다.
+          logger.warn(`[blog_asset_builder] Info card self-review FAIL: ${review.reason} (${content.keyword}) → 인포카드 생략`);
+          await fs.unlink(cardPath).catch(() => {});
+          result.info_card = null;
+          result.info_stats = null;
+        } else {
+          logger.info(`[blog_asset_builder] Info card (${stats.length} stats): ${content.keyword}`);
         }
-        logger.info(`[blog_asset_builder] Info card (${stats.length} stats): ${content.keyword}`);
       }
     } catch (err) {
       logger.warn(`[blog_asset_builder] Info card failed: ${err.message}`);

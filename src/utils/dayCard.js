@@ -97,8 +97,8 @@ export function buildDaySubtitle(daySpots, straight = false, facility = false) {
   }
   const total = straight ? 0 : dayLegMinutes(daySpots);
   const kindPart = kinds.join(' · ');
-  const movePart = total > 0 ? `(이동 ${total}분)` : '';
-  return [kindPart, movePart].filter(Boolean).join(' ');
+  // D-163(AU23): 일차 합계 분은 개요 문장 한 곳에서만 쓴다 — 카드 부제에는 넣지 않는다.
+  return kindPart;
 }
 
 export function buildDayPoints(tripData, day) {
@@ -128,23 +128,18 @@ export function buildDayPoints(tripData, day) {
   if (hasBoat) points.push('섬은 배로 이동합니다. 배편 시간은 현지에서 확인하세요.');
   if (byDay.size > 1 && total > 0 && total === Math.max(...totals) && totals.filter((t) => t === total).length === 1) {
     const carMin = legs.filter((l) => l.toNextMode === 'car').reduce((sum, l) => sum + l.toNextMinutes, 0);
-    points.push(`이동이 가장 많은 날입니다(총 ${total}분).${carMin > 0 ? ` 차량 구간이 ${carMin}분 포함돼 있습니다.` : ''}`);
+    points.push(`이동이 가장 많은 날입니다.${carMin > 0 ? ' 차량 구간이 포함돼 있습니다.' : ''}`);
   } else if (legs.length === 1 && !hasBoat) {
-    const m = legModeLabel(legs[0]);
-    points.push(legs[0].toNextMinutes >= 30
-      ? `이동은 한 번이지만 ${m} ${legs[0].toNextMinutes}분이라 시간을 넉넉히 잡으세요.`
-      : `이동은 한 번(${m} ${legs[0].toNextMinutes}분)뿐이라 여유 있는 날입니다.`);
+    points.push(legs[0].toNextMinutes >= 30 ? '이동은 한 번이지만 시간이 걸려 넉넉히 잡는 편이 좋습니다.' : '이동은 한 번뿐이라 여유 있는 날입니다.');
   } else if (legs.length > 1 && legs.every((l) => l.toNextMode === 'walk')) {
-    points.push(`이동은 모두 도보입니다(총 ${total}분).`);
+    points.push('이동은 모두 도보입니다.');
   }
   if (daySpots.filter((sp) => sp.category === '음식점').length >= 2) {
     points.push('식사 장소가 2곳 이상 포함돼 있어 이 동선 안에서 해결할 수 있습니다.');
   }
   if (points.length === 0 && legs.length > 0) {
-    const byMode = new Map();
-    for (const l of legs) byMode.set(legModeKey(l), (byMode.get(legModeKey(l)) ?? 0) + l.toNextMinutes);
-    const modeText = [...byMode].map(([m, min]) => `${modeLabel(m)} ${min}분`).join(' · ');
-    points.push(`이동 ${legs.length}구간, 총 ${total}분(${modeText}).`);
+    const modes = new Set(legs.map((l) => legModeKey(l)));
+    points.push(modes.size === 1 ? `이동수단은 ${modeLabel([...modes][0])} 하나입니다.` : `이동수단은 ${[...modes].map((m) => modeLabel(m)).join('·')} 혼합입니다.`);
   }
   return points;
 }

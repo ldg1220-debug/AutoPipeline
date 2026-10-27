@@ -598,7 +598,7 @@ export async function attachTripData(keywordData) {
               });
               continue;
             }
-            logger.warn(`[tradule_source] "${item.keyword}" → 웹 검색도 스팟 부족 (평점 있는 곳 ${webCleanSpots.length}개, 최소 ${MIN_SPOTS}개) → 스킵`);
+            logger.warn(`[tradule_source] "${item.keyword}" → 웹 검색도 스팟 부족 (스팟 ${webCleanSpots.length}개, 최소 ${MIN_SPOTS}개) → 스킵`);
             webSearchTriedButShort = true;
           }
         }
@@ -815,7 +815,7 @@ export async function attachTripData(keywordData) {
         style:           regionStyle(brief.region ?? region),
       },
     });
-    logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${cleanSpots.length}개 확보(평점 있는 곳 ${ratedCount}개)`);
+    logger.info(`[tradule_source] "${item.keyword}"(지역: ${region}) → 스팟 ${cleanSpots.length}개 확보`);
   }
 
   // 디버깅용 원본 응답 저장

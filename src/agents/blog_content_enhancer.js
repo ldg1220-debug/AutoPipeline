@@ -583,15 +583,13 @@ function buildDaySummary(tripData, day) {
   const legs = list.slice(0, -1).map((sp, i) => ({ from: sp, to: list[i + 1], min: sp.toNextMinutes, mode: sp.toNextMode }))
     .filter((l) => typeof l.min === 'number' && !isBoatLeg(l.from, l.to));
   if (!legs.length) return '';
-  const byMode = new Map();
-  for (const l of legs) byMode.set(l.mode, (byMode.get(l.mode) ?? 0) + l.min);
-  const total = legs.reduce((a, l) => a + l.min, 0);
-  const modeText = [...byMode.entries()].filter(([m]) => m).map(([m, min]) => `${MODE_KR[m] ?? m} ${min}분`).join(' · ');
+  // D-163: 표와 겹치는 구간별 분 수는 쓰지 않고 그날의 특징만 — 가장 긴 구간 하나, 도보만으로 가능한지.
   const longest = legs.reduce((a, l) => (l.min > a.min ? l : a), legs[0]);
-  return `${day}일차 동선은 이동 구간 ${legs.length}개, 합계 ${total}분${modeText ? `(${modeText})` : ''}입니다. 가장 긴 구간은 ${longest.from.name}에서 ${longest.to.name}까지 ${MODE_KR[longest.mode] ?? longest.mode ?? ''} ${longest.min}분입니다.`;
+  const allWalk = legs.every((l) => l.mode === 'walk');
+  return `${day}일차는 ${allWalk ? '도보만으로 이동할 수 있는 날입니다' : '도보 외 이동수단이 필요한 날입니다'}. 구간 중 가장 긴 곳은 ${longest.from.name}에서 ${longest.to.name} 사이입니다.`;
 }
 
-function buildDeterministicItineraryForDay(tripData, day) {
+function buildDeterministicItineraryForDay(tripData, day, withMinutes = true) {
   if (!tripData?.spots?.length) return '';
   const byDay = groupSpotsByDay(tripData.spots);
   const daySpots = byDay.get(day) ?? [];
@@ -599,7 +597,8 @@ function buildDeterministicItineraryForDay(tripData, day) {
   const parts = daySpots.map((s, i) => {
     const ratingPart = formatRatingPart(s);
     const next = daySpots[i + 1];
-    const nextPart = (next && isBoatLeg(s, next))
+    const nextPart = !withMinutes ? ''
+      : (next && isBoatLeg(s, next))
       ? ' → 배편 (시간 미확인)'
       : (next && typeof s.toNextMinutes === 'number')
       ? ` → ${MODE_KR[s.toNextMode] ?? s.toNextMode ?? ''} 이동 ${s.toNextMinutes}분`
@@ -1262,12 +1261,9 @@ function buildSpotLinesBody(tripData) {
     list.forEach((sp, i) => {
       const parts = [inferSpotKind(sp) ?? '장소'];
       parts.push(sp === facilitySpot ? `${day}일차 종일 일정` : (facilitySpot ? `${day}일차 동반 방문` : `${day}일차 ${i === 0 ? '첫 장소' : `${i + 1}번째`}`));
+      // D-163: 구간별 "다음: …분"은 일자 표와 중복이라 쓰지 않는다.
       const next = list[i + 1];
-      if (sp === facilitySpot && !next) { /* 이동 없음 */ }
-      else if (!next) parts.push('그날 마지막 장소');
-      else if (isBoatLeg(sp, next)) parts.push(`다음: ${next.name}까지 배편`);
-      else if (!straight && typeof sp.toNextMinutes === 'number') parts.push(`다음: ${next.name}까지 ${legModeLabel(sp)} ${sp.toNextMinutes}분`);
-      else parts.push(`다음: ${next.name}`);
+      if (!next && sp !== facilitySpot) parts.push('그날 마지막 장소');
       lines.push(`- ${sp.name} — ${parts.join(' · ')}`);
     });
   }
@@ -1299,9 +1295,14 @@ function buildOverviewBody(tripData, keyword) {
       return `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다${comp.length ? `(${comp.map((c) => c.name).join('·')} 동반)` : ''}.${topPart}`;
     }
     const first = list[0]; const last = list[list.length - 1];
-    const minutes = tripData.distanceSource === 'straight' ? 0 : list.slice(0, -1).reduce((sum, sp, i) => sum + (typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, list[i + 1]) ? sp.toNextMinutes : 0), 0);
+    const dayLegs = tripData.distanceSource === 'straight' ? [] : list.slice(0, -1).filter((sp, i) => typeof sp.toNextMinutes === 'number' && !isBoatLeg(sp, list[i + 1]));
+    const minutes = dayLegs.reduce((sum, sp) => sum + sp.toNextMinutes, 0);
+    const byMode = new Map(); for (const sp of dayLegs) byMode.set(sp.toNextMode, (byMode.get(sp.toNextMode) ?? 0) + sp.toNextMinutes);
+    const topMode = [...byMode.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
     const km = dayKm(d);
-    const stats = [`${list.length}곳`, minutes > 0 ? `이동 ${minutes}분` : null, km ? `${km}km` : null].filter(Boolean).join(', ');
+    // D-163: 구간별 분 수 나열 대신 "이동 N구간, 합계 약 M분(○○ 위주)" 한 줄 — 구간 상세는 일자 표에만.
+    const moveText = minutes > 0 ? `이동 ${dayLegs.length}구간, 합계 약 ${minutes}분${topMode ? `(${MODE_KR[topMode] ?? topMode} 위주)` : ''}` : null;
+    const stats = [`${list.length}곳`, moveText, km ? `${km}km` : null].filter(Boolean).join(', ');
     return list.length === 1
       ? `${d}일차는 ${first.name} 한 곳입니다.${topPart}`
       : `${d}일차는 ${first.name}에서 시작해 ${last.name}에서 마칩니다(${stats}).${topPart}`;
@@ -2095,7 +2096,7 @@ function buildCodeFaqs(tripData, keyword) {
   if (typeof tripData.totalDistanceKm === 'number') {
     faqs.push({
       q: `${keyword} 코스의 총 이동 거리는?`,
-      a: `${straightFaq ? '직선거리 기준 ' : ''}${tripData.totalDistanceKm}km입니다.${totalMin > 0 ? ` 이동 합계는 약 ${(totalMin / 60).toFixed(1)}시간(구간 ${legCount}개)입니다.` : ''}`,
+      a: `${straightFaq ? '직선거리 기준 ' : ''}${tripData.totalDistanceKm}km입니다.`,
     });
   }
   const beaches = spots.filter((x) => inferSpotKind(x) === '해변');
@@ -2336,7 +2337,7 @@ function assembleCourseDraft(content) {
   const kind = buildKindBlocksBody(tripData);
   if (kind) sections.push({ level: 2, heading: '종류별 장소', body: kind, generated: 'code' });
   for (let d = 1; d <= (tripData.days ?? 0); d++) {
-    const chain = buildDeterministicItineraryForDay(tripData, d);
+    const chain = buildDeterministicItineraryForDay(tripData, d, false); // D-163: 구간 분 수는 일자 표에만
     const summary = buildDaySummary(tripData, d);
     const body = [chain, summary].filter(Boolean).join('\n\n');
     if (body) sections.push({ level: 2, heading: `${d}일차 일정`, body, generated: 'code' });
