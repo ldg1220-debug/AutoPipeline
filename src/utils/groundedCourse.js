@@ -72,7 +72,8 @@ async function rewriteWithLlm(items) {
   if (!config.openai?.apiKey || !items.length) return null;
   const prompt =
     `아래 각 장소의 "근거"만 사용해 한국어 존댓말로 2~4문장 설명을 씁니다.\n` +
-    `규칙: 근거에 없는 사실(연도·수치·가격·영업시간·순위·"최고/유명/인기" 같은 평가)은 절대 쓰지 마세요. 근거를 가볍게 줄여 쓰는 것은 괜찮습니다. 직접 다녀온 경험처럼 쓰지 마세요. 장소 이름은 문장 안에서 반복하지 않아도 됩니다.\n` +
+    `구성: 이 장소가 무엇인지 → 무엇을 보거나 하는 곳인지 → (근거에 있을 때만) 언제 가면 좋은지.\n` +
+    `규칙: 근거에 없는 사실(연도·수치·가격·영업시간·순위·"최고/유명/인기" 같은 평가)은 절대 쓰지 마세요. 영어 근거는 한국어로 옮겨 쓰되 내용을 더하지 마세요. 직접 다녀온 경험처럼 쓰지 마세요. 근거가 빈약하면 1~2문장만 쓰세요.\n` +
     `반드시 JSON {"items":[{"id":번호,"sentences":["문장1","문장2"]}]} 만 출력하세요.\n\n` +
     items.map((it) => `[${it.id}] ${it.name} (${it.kind ?? '장소'})\n근거: ${cleanExtract(it.extract)}`).join('\n\n');
   try {
@@ -89,30 +90,32 @@ async function rewriteWithLlm(items) {
 }
 
 /** 장소별 근거 설명을 모은다. @returns Map<spot, {sentences, source:{title,url,lang}}> */
-async function collectDescriptions(spots) {
+async function collectDescriptions(spots, region) {
   const targets = [];
   let id = 0;
   for (const sp of spots) {
     const kind = inferSpotKind(sp);
-    if (NO_DESC_KINDS.has(kind) || sp.lodging) continue; // 식당·카페·숙소는 위키에 거의 없고 오매칭 위험이 크다
+    if (NO_DESC_KINDS.has(kind) || sp.lodging) continue; // 식당·카페·숙소는 조회하지 않는다
     if (kind && !SIGHT_KINDS.has(kind) && sp.category !== '관광지' && sp.category !== '기타') continue;
-    const fact = await fetchWikiFact(sp);
+    const fact = await fetchWikiFact(sp, { kind, region });
     if (!fact) continue;
     targets.push({ id: ++id, sp, name: sp.name, kind, extract: fact.extract, fact });
   }
-  const llm = await rewriteWithLlm(targets.filter((t) => t.fact.lang === 'ko' || true));
+  const llm = await rewriteWithLlm(targets);
+  const preview = process.env.COURSE_GROUNDED_OFFLINE_PREVIEW === 'on'; // 개발용: LLM 없이 발췌문으로 미리보기(운영 금지)
   const out = new Map();
   for (const t of targets) {
     let sentences = llm?.get(t.id);
     if (!sentences?.length) {
-      if (t.fact.lang !== 'ko') continue; // 영어 근거는 LLM 번역 없이는 쓰지 않는다
-      // LLM이 없거나 실패했을 때: 근거 앞 문장을 존댓말로 바꿔 쓰되, 과장·평가 표현이 든 문장은 근거에 있어도 쓰지 않는다.
+      // D-167: 추출식 대체는 쓰지 않는다 — LLM 재작성이 없으면 이 장소는 "코스상 역할 1문장"만 붙는다.
+      if (!preview || t.fact.lang !== 'ko') { logger.info(`[groundedCourse] 설명 생략(재작성 없음): ${t.name}`); continue; }
       sentences = splitSentences(t.extract).filter((x) => !HYPE.test(x) && !/알려져|상징|랜드마크|관광명소/.test(x)).map(toPolite).filter(Boolean).slice(0, 2);
     }
     sentences = factcheckSentences(sentences, t.extract, t.name).slice(0, 4);
     if (!sentences.length) continue;
-    out.set(t.sp, { sentences, source: { title: t.fact.title, url: t.fact.url, lang: t.fact.lang } });
+    out.set(t.sp, { sentences, source: { title: t.fact.title, url: t.fact.url, lang: t.fact.lang, via: t.fact.via } });
   }
+  logger.info(`[groundedCourse] 근거 문서 ${targets.length}곳 / 설명 확정 ${out.size}곳 (조회 대상 ${spots.filter((sp) => !NO_DESC_KINDS.has(inferSpotKind(sp)) && !sp.lodging).length}곳)`);
   return out;
 }
 
@@ -146,15 +149,20 @@ function dayTheme(tripData, day, list) {
 
 function dayTips(tripData, day, list, i) {
   const sp = list[i]; const next = list[i + 1]; const tips = [];
-  const fac = getFacilitySpot(tripData, day, list);
-  if (fac && sp === fac) tips.push('이날은 이곳을 중심으로 하루를 보내도록 구성했습니다.');
   if (next && isBoatLeg(sp, next)) tips.push('다음 장소는 배편으로 이동합니다. 배 시간은 현지에서 확인하세요.');
-  const { legs } = legSummary(tripData, list);
-  if (legs?.length > 1) {
-    const longest = legs.reduce((a, l) => (l.toNextMinutes > a.toNextMinutes ? l : a), legs[0]);
-    if (sp === longest && longest.toNextMinutes >= 30) tips.push('이 날 가장 긴 이동 구간입니다. 앞뒤 일정에 시간 여유를 두세요.');
-  }
   return tips;
+}
+
+/** D-167: 일정 조율 팁은 의미 있을 때만 1줄 — 종일시설 날 · 가장 긴 구간이 30분 이상인 날. 해당 없으면 null. */
+function adjustTip(tripData, day, list) {
+  const fac = getFacilitySpot(tripData, day, list);
+  if (fac) return list.length === 1 ? `이날은 ${fac.name}만 넣었습니다. 다른 일정을 더하지 않고 하루를 쓰도록 구성했습니다.` : `이날은 ${fac.name}에서 하루 대부분을 보내도록 구성했고, 나머지 장소는 곁들이는 일정입니다.`;
+  const { legs } = legSummary(tripData, list);
+  if (!legs?.length) return null;
+  const longest = legs.reduce((a, l) => (l.toNextMinutes > a.toNextMinutes ? l : a), legs[0]);
+  if (longest.toNextMinutes < 30) return null;
+  const idx = list.indexOf(longest);
+  return `${longest.name}에서 ${list[idx + 1].name}까지 구간이 이날 가장 깁니다. 이 구간 앞뒤로 시간 여유를 두면 일정이 덜 빠듯합니다.`;
 }
 
 const tipHtml = (t) => `<p style="margin:6px 0 10px;padding:8px 12px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:14px;line-height:1.7">📌 ${esc(t)}</p>\n`;
@@ -171,7 +179,7 @@ export async function buildGroundedCourse(content, keyword) {
   const days = [...byDay.keys()].sort((a, b) => a - b);
   const straight = tripData.distanceSource === 'straight';
 
-  const descMap = await collectDescriptions(tripData.spots);
+  const descMap = await collectDescriptions(tripData.spots, tripData.region);
   const sourcesMap = new Map();
   for (const d of descMap.values()) sourcesMap.set(d.source.url, d.source);
   logger.info(`[groundedCourse] ${keyword}: 근거 설명 ${descMap.size}곳 / 전체 ${tripData.spots.length}곳, 출처 문서 ${sourcesMap.size}개`);
@@ -234,10 +242,10 @@ export async function buildGroundedCourse(content, keyword) {
     });
     const mapUrl = tripData.dayImageUrls?.[d - 1];
     if (mapUrl) html += `<div class="blog-img-wrap"><img src="${esc(mapUrl)}" alt="${d}일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>\n`;
-    if (!fac && list.length >= 3) {
-      const tip = `체력이나 시간이 부족하면 그날 마지막 장소(${last.name})는 빼도 앞 동선은 그대로 이어집니다.`;
-      html += `<p style="margin:10px 0 14px;line-height:1.8">🔁 <b>일정 조율 팁</b> — ${esc(tip)}</p>\n`;
-      body += `\n일정 조율 팁: ${tip}`;
+    const adj = adjustTip(tripData, d, list);
+    if (adj) {
+      html += `<p style="margin:10px 0 14px;line-height:1.8">🔁 <b>일정 조율 팁</b> — ${esc(adj)}</p>\n`;
+      body += `\n일정 조율 팁: ${adj}`;
     }
     html += `{{DAY_EXTRA_${d}}}`;
     sections.push({ level: 2, heading: `${d}일차 — ${themes.get(d)}`, id: `day${d}`, day: d, body, html, generated: 'code' });
@@ -258,7 +266,7 @@ export async function buildGroundedCourse(content, keyword) {
   const closing = `${keyword} 코스는 ${tripData.spots.length}곳을 ${days.length}일에 나눠 담았습니다. 이동 시간은 장소 아래 한 줄과 위의 요약표에서 확인하세요.`;
   const srcList = [...sourcesMap.values()];
   const srcHtml = (srcList.length
-    ? `<p style="margin:14px 0 4px;font-size:13px;color:#64748b">출처: ${srcList.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener nofollow">${esc(s.title)}</a>`).join(' · ')} — ${srcList.some((s) => s.lang === 'ko') ? '한국어 ' : ''}${srcList.some((s) => s.lang === 'en') ? '영어 ' : ''}위키백과 (CC BY-SA 4.0). 설명은 위 문서를 바탕으로 요약했습니다.</p>\n`
+    ? `<p style="margin:14px 0 4px;font-size:13px;color:#64748b">출처: ${srcList.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener nofollow">${esc(s.title)}</a>`).join(' · ')} — 위키백과·위키보야주 문서(CC BY-SA)를 바탕으로 요약했습니다.</p>\n`
     : '') + `<p style="margin:0 0 14px;font-size:13px;color:#64748b">동선·이동 시간은 트레쥴 코스 데이터 기준입니다.</p>`;
   sections.push({ level: 2, heading: '마무리', id: 'closing', body: closing, html: `<p style="margin:0 0 14px;line-height:1.9">${esc(closing)}</p>\n${srcHtml}`, generated: 'code' });
   text.push(closing);

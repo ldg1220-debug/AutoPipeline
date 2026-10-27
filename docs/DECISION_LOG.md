@@ -2346,3 +2346,8 @@
 - **썸네일**: 기본 `THUMBNAIL_SOURCE=map`(gpt-image-1 접근 불가, 288 로그).
 - **미착수(2·3단계)**: 근거 설명 3곳 미만 스킵 게이트, 문장 단위 사실 검증 패스(LLM), QA 규칙 교체, Wikimedia 사진·캡션, 위키보야주.
 - **관련 파일**: `src/utils/placeFacts.js`, `src/utils/groundedCourse.js`, `src/agents/blog_content_enhancer.js`, `src/agents/monetizer.js`, `src/agents/qa_editor.js`, `src/agents/blog_asset_builder.js`, `.env.example`
+
+### D-167: 템플릿 1단계 검토 반영 — 좌표 기반 위키 매칭 · 추출식 대체 폐지 · 메타 평점 문구 제거
+- **결정**: (1) 장소→위키 매칭을 좌표 기반 geosearch(반경 300m)로 먼저 한다: 이름 유사도(일반 접미어 정규화) 또는 문서 분류가 장소 종류(수족관·전망대·시장·공원·사찰·성…)와 맞는 가장 가까운 문서 채택 → 실패 시 이름 검색(좌표 1km) → 영어 위키 geosearch(영어 근거를 한국어로 재작성) → 위키보야주 지역 문서 보기·하기 항목(좌표 150m). 식당·카페·숙소는 조회하지 않는다 (2) 추출식 대체 폐지: LLM 재작성이 없으면 그 장소는 코스상 역할 1문장만(개발용 `COURSE_GROUNDED_OFFLINE_PREVIEW=on`에서만 발췌 미리보기) (3) 재작성 프롬프트에 구성(무엇인지→무엇을 하는지→근거에 있을 때 언제) 명시 (4) 일정 조율 팁은 의미 있을 때만: 종일시설 날, 가장 긴 구간 30분 이상. "마지막 장소는 빼도" 문구 삭제 (5) 메타 설명의 "평점·리뷰 수와 함께 정리했습니다" 제거(일차별 동선·이동 정보로 교체), QA가 코스 글의 제목·메타에 평점·리뷰 문구가 있으면 반려.
+- **버린 대안**: 분류(카테고리)만으로 모든 장소 채택 — 일반 "명소"는 이웃 장소 문서가 잘못 붙어(신세카이 시장 ↔ 쓰텐카쿠) 이름이 맞을 때만 채택.
+- **관련 파일**: `src/utils/placeFacts.js`, `src/utils/groundedCourse.js`, `src/agents/qa_editor.js`, `src/agents/blog_content_enhancer.js`

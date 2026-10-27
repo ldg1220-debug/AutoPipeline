@@ -1405,7 +1405,7 @@ async function pass2Outline(keyword, category, intent, hook, benchmarkCtx = '', 
   // 계속 실패했다. trip_data가 있으면 코드로 결정론적으로 만든다 — 키워드가
   // 앞에 그대로 들어가므로 항상 일치한다.
   if (tripData?.spots?.length && outline) {
-    outline.meta_description = `${keyword} — 실제 코스 ${tripData.spots.length}곳, 평점·리뷰수·이동시간까지 정리했습니다.`;
+    outline.meta_description = `${keyword} — 실제 코스 ${tripData.spots.length}곳, 일차별 동선·이동시간까지 정리했습니다.`;
   }
   outline = sanitizeOutlineTransport(outline, tripData);
   return outline;
@@ -2317,13 +2317,11 @@ export async function regenerateFailedSections(content, failedHeadings, { regenS
 // D-142(AU1F781): 코스 글(trip_data 있음)은 LLM 본문 생성(Pass 1~5)을 생략하고 코드 블록만으로 조립한다.
 // 스위치 COURSE_LLM_BODY=on 이면 기존 경로(비교용).
 function buildCourseMeta(tripData, keyword) {
-  const reps = [...tripData.spots]
-    .filter((sp) => sp.category !== '숙소' && sp.name)
-    .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0))
-    .slice(0, 3).map((sp) => sp.name);
+  // D-167: 평점·리뷰 문구 제거 — 일차별 대표 명소와 이동 정보만 쓴다.
+  const reps = dayLandmarks(tripData).slice(0, 3).map((m) => m.name);
   const km = typeof tripData.totalDistanceKm === 'number' ? `, 이동 합계 ${tripData.totalDistanceKm}km` : '';
   const days = tripData.days ? `, ${tripData.days}일 일정` : '';
-  return `${keyword} 코스 ${tripData.spots.length}곳${reps.length ? `(${reps.join('·')} 등)` : ''}${days}${km} — 평점·리뷰 수와 함께 정리했습니다.`;
+  return `${keyword} 코스 ${tripData.spots.length}곳${reps.length ? `(${reps.join('·')} 등)` : ''}${days}${km} — 일차별 동선과 이동 정보를 정리했습니다.`;
 }
 
 function assembleCourseDraft(content) {

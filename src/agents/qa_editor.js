@@ -642,6 +642,8 @@ function validateBlogStructure(content) {
   if (content.trip_data?.spots?.length) {
     const t = sections.map((s) => s.body ?? '').concat(faq.map((f) => f.a ?? '')).join(' ');
     if (/★|리뷰\s*[0-9]/.test(t)) issues.push('코스 글에 평점(★)·리뷰 수 표기가 남아 있음 — 평점·리뷰는 본문에 쓰지 않는다');
+    // D-167: 메타 설명·제목(og:description 원천)에도 평점·리뷰 문구가 남지 않게 한다.
+    if (/평점|리뷰\s*수|★/.test(`${draft.meta_description ?? ''} ${draft.title ?? ''}`)) issues.push('메타 설명·제목에 평점·리뷰 문구가 남아 있음 — 코스 글에는 쓰지 않는다');
   }
 
   // D-155(AUTOPI1): 소문자 단독 "google"(항목별 출처 표기) 금지 — 출처는 "Google Maps" 블록으로만 표기.
