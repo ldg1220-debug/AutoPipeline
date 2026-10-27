@@ -23,17 +23,17 @@ const GEO_RADIUS_M = 300;
 const NAME_MAX_KM = 1;
 const WIKI_THROTTLE_MS = 1000;
 
-// 장소 종류 → 위키 문서 분류(카테고리) 단어. 종류가 구체적일 때만 분류로 채택한다(일반 "명소"는 이름이 맞아야 함).
+// 장소 종류 → 위키 문서 분류(카테고리) 단어. 종류가 구체적일 때만 분류로 채택한다. 명소/유적·유적은 문화재 분류가 너무 넓어(박물관 소장품 문서가 붙음 — 실측) 이름이 맞아야만 채택한다.
 const CATEGORY_WORDS = {
   ko: {
     수족관: /수족관|아쿠아리움/, 동물원: /동물원/, 전망대: /전망대|타워|고층|빌딩|마천루/, 시장: /시장|상점가/,
     공원: /공원|정원/, 테마파크: /놀이공원|테마파크|유원지/, '사원·성당': /사찰|신사|절|성당|교회|사원/,
-    '명소/유적': /(^|[^가-힣])성(\s|$)|궁전|유적|문화재|사적/, 유적: /성|궁전|유적|문화재|사적/, 섬: /섬/, 해변: /해변|해수욕장/, 스파: /온천|스파/,
+    섬: /섬/, 해변: /해변|해수욕장/, 스파: /온천|스파/,
   },
   en: {
     수족관: /aquarium/i, 동물원: /\bzoo/i, 전망대: /tower|skyscraper|observation|building/i, 시장: /market|shopping street/i,
     공원: /park|garden/i, 테마파크: /amusement|theme park/i, '사원·성당': /temple|shrine|church|cathedral|mosque/i,
-    '명소/유적': /castle|palace|historic|heritage/i, 유적: /castle|palace|historic|heritage/i, 섬: /island/i, 해변: /beach/i, 스파: /onsen|spa/i,
+    섬: /island/i, 해변: /beach/i, 스파: /onsen|spa/i,
   },
 };
 // 이름에서 떼어내고 비교하는 일반 접미어(시장·전망대 등). 핵심 이름이 같으면 이름 일치로 본다.
@@ -194,7 +194,7 @@ async function voyageLookup(spot, regionKo) {
  */
 export async function fetchWikiFact(spot, { kind, region } = {}) {
   if (!spot?.name) return null;
-  const key = `v2|${cacheKey(spot, kind)}`; // v2: 지역 접두어 제거 매칭
+  const key = `v3|${cacheKey(spot, kind)}`; // v3: 유적 분류 채택 제거
   const hit = readCache('all', key);
   if (hit) return hit.result;
   let failed = false;
