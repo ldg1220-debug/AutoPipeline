@@ -1,0 +1,250 @@
+<meta charset=utf-8><style>
+/* 포스트 전체 래퍼 — 기본 스킨에서도 가독성 확보 */
+.mae-wrap{max-width:780px;margin:0 auto;font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:16px;line-height:1.9;color:#1e293b;word-break:keep-all}
+.mae-wrap p{margin:0 0 14px}
+/* 헤더 진입 배너 */
+.mae-hero{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#fff;border-radius:14px;padding:28px 24px 22px;margin:0 0 28px;position:relative;overflow:hidden}
+.mae-hero::before{content:'';position:absolute;right:-20px;top:-20px;width:160px;height:160px;background:rgba(255,255,255,.04);border-radius:50%}
+.mae-hero .hero-tag{font-size:12px;background:rgba(255,255,255,.18);padding:3px 12px;border-radius:20px;display:inline-block;margin-bottom:10px;letter-spacing:.5px}
+.mae-hero .hero-title{margin:0 0 8px;font-size:22px;font-weight:700;line-height:1.4}
+.mae-hero p{margin:0;font-size:14px;opacity:.85;line-height:1.7}
+/* 소개 */
+.blog-intro{background:#f8fafc;border-radius:10px;padding:16px 20px;color:#475569;margin:0 0 20px;font-size:15px;line-height:1.8;border-left:4px solid #94a3b8}
+/* TL;DR */
+.tldr-box{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:12px;padding:20px 24px;margin:0 0 28px;box-shadow:0 4px 20px rgba(30,58,138,.25)}
+.tldr-box h4{margin:0 0 10px;font-size:14px;opacity:.8;letter-spacing:.5px;text-transform:uppercase}
+.tldr-box ul{margin:0;padding-left:20px;font-size:14px;line-height:2}
+.tldr-box li::marker{color:#93c5fd}
+/* 섹션 헤더 */
+.section-hdr{display:flex;align-items:center;gap:10px;margin:36px 0 8px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}
+.section-hdr .s-num{background:var(--cat-color,#2563eb);color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;flex-shrink:0;letter-spacing:.3px}
+.section-hdr h2,.section-hdr h3{margin:0;font-size:19px;color:#0f172a;font-weight:700}
+/* 이미지 */
+.blog-img-wrap{margin:18px 0 8px;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1)}
+.blog-img-wrap img{width:100%;display:block}
+.photo-credit{font-size:11px;color:#94a3b8;text-align:right;margin-top:4px}
+/* callout */
+.callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:13px 18px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px;line-height:1.8;color:#1e40af}
+/* 키워드 하이라이트 */
+.keyword-mark{background:#fef3c7;padding:1px 5px;border-radius:3px;font-weight:700;color:#92400e}
+/* 인포카드 */
+.info-card-wrap{margin:20px 0;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.info-card-wrap img{width:100%;display:block}
+/* FAQ */
+.faq-wrap{margin:24px 0}
+.faq-item{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:18px 22px;margin:12px 0;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.faq-item:hover{border-color:#93c5fd;box-shadow:0 2px 12px rgba(59,130,246,.1)}
+.faq-q{font-weight:700;color:#1e3a8a;margin-bottom:8px;font-size:15px}
+.faq-q::before{content:'Q. ';color:#3b82f6}
+.faq-a{color:#374151;font-size:14px;line-height:1.8}
+/* 제휴 */
+.affiliate-block{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;margin:18px 0}
+.affiliate-block ul{margin:8px 0 0;padding-left:20px;line-height:1.9}
+/* 키워드 태그 */
+.keyword-tags{margin:24px 0;display:flex;flex-wrap:wrap;gap:8px}
+.keyword-tag{background:#e0e7ff;color:#3730a3;font-size:12px;padding:5px 14px;border-radius:20px;font-weight:600}
+/* CTA */
+.cta-box{background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);color:#fff;border-radius:14px;padding:32px 24px;text-align:center;margin:36px 0;box-shadow:0 6px 24px rgba(30,58,138,.3)}
+.cta-box h3{margin:0 0 10px;font-size:20px;font-weight:700}
+.cta-box p{margin:0 0 16px;font-size:14px;opacity:.9;line-height:1.7}
+/* 트레쥴 코스 CTA(본문 중간·푸터 공용) — 지시서 2026-09-16 §3: 광고 배너처럼 보이던
+   .cta-box 대신 연회색 + 왼쪽 세로선의 슬림한 한 줄 링크로 축소 */
+.tradule-cta{background:#f8fafc;border-left:4px solid #2563eb;border-radius:0 8px 8px 0;padding:14px 18px;margin:28px 0;font-size:15px}
+.tradule-cta a{color:#1e40af;font-weight:600;text-decoration:none}
+.timeline-table{margin:24px 0}
+.timeline-table h4{margin:0 0 10px;font-size:16px}
+.timeline-table h5{margin:16px 0 8px;font-size:14px;font-weight:700;color:#374151}
+.timeline-table table{width:100%;border-collapse:collapse;font-size:14px;margin-bottom:12px}
+.timeline-table th,.timeline-table td{border:1px solid #e5e7eb;padding:8px 10px;text-align:left}
+.timeline-table th{background:#f9fafb;font-weight:600}
+.distance-disclosure{font-size:12px;color:#9ca3af;margin:-8px 0 16px}
+.partners-disclosure{font-size:12px;color:#9ca3af;margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb}
+.fact-sources{font-size:13px;color:#6b7280;margin:20px 0;padding:12px 16px;background:#f9fafb;border-radius:8px}
+.fact-sources p{margin:0 0 6px}
+.fact-sources ul{margin:0;padding-left:18px}
+.fact-sources a{color:#4b5563}
+.related-posts{margin:28px 0}
+.related-posts-title{font-size:17px;font-weight:700;color:#1e293b;margin-bottom:12px}
+.related-cards{display:flex;flex-wrap:wrap;gap:10px}
+.related-card{display:flex;flex-direction:column;gap:4px;flex:1 1 200px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;text-decoration:none;transition:box-shadow .15s}
+.related-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08);border-color:#94a3b8}
+.related-card-kw{font-size:11px;color:#64748b;background:#e0e7ff;padding:2px 8px;border-radius:20px;align-self:flex-start;font-weight:600}
+.related-card-title{font-size:14px;color:#1e293b;font-weight:600;line-height:1.4}
+/* ── 카테고리 테마: 여행 (#0284c7) ── */
+:root { --cat-color: #0284c7; }
+
+/* TL;DR 박스 — 카테고리 primary 색 적용 */
+.tldr-box {
+  background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%) !important;
+}
+
+/* callout 박스 — 카테고리 라이트 색상 */
+.callout {
+  background: #f0f9ff !important;
+  border-left-color: #0284c7 !important;
+  color: #0369a1 !important;
+}
+
+/* FAQ 섹션 배경 */
+.faq-wrap {
+  border-top: 3px solid #0284c7;
+  padding-top: 12px;
+}
+.faq-q { color: #0369a1 !important; }
+
+/* 키워드 태그 */
+.keyword-tag {
+  background: #f0f9ff !important;
+  color: #0369a1 !important;
+}
+
+/* 제휴 블록 강조 */
+.affiliate-block {
+  border-color: #bae6fd !important;
+  background: #f0f9ff !important;
+}
+
+/* 시즌 효과 */
+.tldr-box {
+      background: linear-gradient(135deg, #7c2d12 0%, #ea580c 100%) !important;
+    }
+</style>
+
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"경주 2박3일 일정 짜기 — 경주 월정교 들르는 14곳","author":{"@type":"Person","name":"매일읽어주는남자"},"publisher":{"@type":"Organization","name":"매일읽어주는남자","logo":{"@type":"ImageObject","url":""}},"datePublished":"2026-10-27","keywords":"경주 2박3일","mainEntityOfPage":{"@type":"WebPage","@id":"경주-2박3일"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"하루에 몇 곳을 도나요?","acceptedAnswer":{"@type":"Answer","text":"하루 평균 4.7곳이고, 가장 많은 날은 1일차(5곳)입니다."}},{"@type":"Question","name":"걸어서 다닐 수 있나요?","acceptedAnswer":{"@type":"Answer","text":"이동 구간 11개 중 6개가 도보입니다. 1일차는 도보만으로 이어집니다."}},{"@type":"Question","name":"일차별 대표 명소는 어디인가요?","acceptedAnswer":{"@type":"Answer","text":"1일차 경주 월정교·경주 황리단길, 2일차 보문관광단지·경주보문관광단지, 3일차 국립경주박물관입니다."}}]}</script>
+<meta property="og:title" content="경주 2박3일 일정 짜기 — 경주 월정교 들르는 14곳" />
+<meta property="og:description" content="경주 2박3일 코스 14곳(경주 월정교·보문관광단지·국립경주박물관 등), 3일 일정, 이동 합계 29.3km — 일차별 동선과 이동 정보를 정리했습니다." />
+<meta property="og:type" content="article" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="경주 2박3일 일정 짜기 — 경주 월정교 들르는 14곳" />
+
+<div class="mae-wrap">
+<p class="course-lead" style="margin:0 0 24px;font-size:17px;line-height:1.8;color:#1e293b">경주 2박3일은 1일차 경주 월정교·경주 황리단길 중심 → 2일차 보문관광단지·경주보문관광단지 중심 → 3일차 국립경주박물관 중심 순서로 구성한 코스입니다. 1일차는 도보만으로 이어지는 날이라 걸으며 둘러보기 좋은 코스입니다.</p>
+
+<!-- AdSense: title_below -->
+<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXX" data-ad-slot="0000000000" data-ad-format="auto" data-full-width-responsive="true"></ins>
+<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+
+<div class="blog-img-wrap">
+<img src="https://www.tradule.co.kr/api/content/course-map?region=%EA%B2%BD%EC%A3%BC&days=3&v=478f4636c4" alt="경주 3일 코스 지도" loading="lazy" />
+<p class="photo-credit">코스 지도 · 트레쥴</p>
+</div>
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">1</span>
+<h2 id="overview">경주 2박3일 전체 동선 한눈에 보기</h2>
+</div>
+
+<ul class="course-toc" style="margin:0 0 16px;padding-left:20px;line-height:1.9"><li><a href="#day1">1일차 — 경주 월정교·경주 황리단길 중심</a></li><li><a href="#day2">2일차 — 보문관광단지·경주보문관광단지 중심</a></li><li><a href="#day3">3일차 — 국립경주박물관 중심</a></li><li><a href="#faq">자주 묻는 질문</a></li></ul><div class="timeline-table"><table>
+<thead><tr><th>일차</th><th>테마</th><th>핵심 장소</th><th>이동 수단</th><th>하루 이동 합계</th></tr></thead>
+<tbody>
+<tr><td>1일차</td><td>경주 월정교·경주 황리단길 중심</td><td>경주 월정교, 경주 황리단길, 경주중앙시장</td><td>도보</td><td>약 30분</td></tr>
+<tr><td>2일차</td><td>보문관광단지·경주보문관광단지 중심</td><td>보문관광단지, 경주보문관광단지, 경주월드</td><td>도보·차량</td><td>약 26분</td></tr>
+<tr><td>3일차</td><td>국립경주박물관 중심</td><td>국립경주박물관</td><td>차량</td><td>약 37분</td></tr>
+</tbody>
+</table></div>
+<p style="font-size:12px;color:#5E5E5E;margin:4px 0 16px">장소 정보 제공: <span translate="no" style="white-space:nowrap;font-family:Roboto,sans-serif;font-weight:400">Google Maps</span></p><div class="tradule-cta"><a href="https://www.tradule.co.kr/course/%EA%B2%BD%EC%A3%BC/2%EB%B0%953%EC%9D%BC?utm_source=maeilg&utm_medium=blog&utm_campaign=%EA%B2%BD%EC%A3%BC-2%EB%B0%953%EC%9D%BC" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a><br><span style="font-size:13px;color:#64748b">평점·사진은 트레쥴에서 장소를 누르면 볼 수 있어요.</span></div>
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">2</span>
+<h2 id="day1">1일차 — 경주 월정교·경주 황리단길 중심</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">1일차는 경주 월정교에서 시작해 영양숯불갈비에서 마칩니다. 모두 5곳입니다.</p>
+<h3 style="margin:22px 0 8px">경주 월정교 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주 춘양교지와 월정교지는 대한민국 경상북도 경주시 인왕동과 교동, 국립경주박물관의 서편과 교촌 한옥마을 남편의 강바닥에 그 터가 남아있습니다. 2004년 11월 27일 대한민국의 사적 제457호로 지정되었습니다. 1일차 첫 일정으로 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 백년손님까지 도보 10분</p>
+<h3 style="margin:22px 0 8px">백년손님 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주 월정교에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 경주 황리단길까지 도보 5분</p>
+<h3 style="margin:22px 0 8px">경주 황리단길 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">백년손님에서 이어 들르는 3번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 경주중앙시장까지 도보 10분</p>
+<h3 style="margin:22px 0 8px">경주중앙시장 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주 황리단길에서 이어 들르는 4번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 영양숯불갈비까지 도보 5분</p>
+<h3 style="margin:22px 0 8px">영양숯불갈비 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주중앙시장에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<div class="blog-img-wrap"><img src="https://www.tradule.co.kr/api/content/course-map?region=%EA%B2%BD%EC%A3%BC&amp;days=3&amp;day=1&amp;v=478f4636c4" alt="1일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>
+
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">3</span>
+<h2 id="day2">2일차 — 보문관광단지·경주보문관광단지 중심</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">2일차는 보문관광단지에서 시작해 경주성동시장에서 마칩니다. 모두 4곳입니다.</p>
+<h3 style="margin:22px 0 8px">보문관광단지 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">보문관광단지는 대한민국의 경상북도 경주시 보덕동에 위치한 관광지로, 보문호수를 중심으로 조성된 관광·휴양지로, 숙박시설과 문화·레저시설 등이 집적된 종합 관광단지입니다. 2일차 첫 일정으로 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 경주보문관광단지까지 도보 2분</p>
+<h3 style="margin:22px 0 8px">경주보문관광단지 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">보문관광단지에서 이어 들르는 2번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 경주월드까지 도보 10분</p>
+<h3 style="margin:22px 0 8px">경주월드 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주월드는 경상북도 경주시 천군동에 위치한 테마파크입니다. 이 테마파크의 옆에 위치한 워터파크는 캘리포니아비치로 지난 2008년 6월에 개장한 워터파크입니다. 경주보문관광단지에서 이어 들르는 3번째 장소입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 경주성동시장까지 차량 14분</p>
+<h3 style="margin:22px 0 8px">경주성동시장 <span style="font-size:14px;font-weight:400;color:#64748b">(명소)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주성동시장은 대한민국 경상북도 경주시에 있는 시장입니다. 원화로 입구에 위치하며 경주와 인근 지역에서 생산된 농작물, 채소, 과일, 해산물을 판매합니다. 경주월드에서 이어지는 2일차 마지막 일정입니다.</p>
+<div class="blog-img-wrap"><img src="https://www.tradule.co.kr/api/content/course-map?region=%EA%B2%BD%EC%A3%BC&amp;days=3&amp;day=2&amp;v=478f4636c4" alt="2일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>
+
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">4</span>
+<h2 id="day3">3일차 — 국립경주박물관 중심</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">3일차는 국립경주박물관에서 시작해 경주 용황 광 옛날통닭에서 마칩니다. 모두 5곳입니다.</p>
+<h3 style="margin:22px 0 8px">국립경주박물관 <span style="font-size:14px;font-weight:400;color:#64748b">(명소/유적)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">경주 죽동리 청동기 일괄은 대한민국 경상북도 경주시, 국립경주박물관에 있는 철기 시대의 청동용구입니다. 1993년 1월 15일 대한민국의 보물 제1152호로 지정되었습니다. 3일차 첫 일정으로 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 점심밥상저녁술상까지 차량 8분</p>
+<h3 style="margin:22px 0 8px">점심밥상저녁술상 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">국립경주박물관에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 아무카페까지 차량 8분</p>
+<h3 style="margin:22px 0 8px">아무카페 <span style="font-size:14px;font-weight:400;color:#64748b">(카페)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">점심밥상저녁술상에서 이어 쉬어 가도록 넣은 카페입니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 효은옥 경주분점까지 차량 7분</p>
+<h3 style="margin:22px 0 8px">효은옥 경주분점 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">아무카페에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<p style="margin:0 0 6px;font-size:14px;color:#475569">→ 다음 장소 경주 용황 광 옛날통닭까지 차량 14분</p>
+<h3 style="margin:22px 0 8px">경주 용황 광 옛날통닭 <span style="font-size:14px;font-weight:400;color:#64748b">(식사)</span></h3>
+<p style="margin:0 0 10px;line-height:1.9">효은옥 경주분점에서 이어 들르는 식사 장소로, 같은 날 동선 안에 넣었습니다.</p>
+<div class="blog-img-wrap"><img src="https://www.tradule.co.kr/api/content/course-map?region=%EA%B2%BD%EC%A3%BC&amp;days=3&amp;day=3&amp;v=478f4636c4" alt="3일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>
+
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">5</span>
+<h2 id="checklist">떠나기 전 체크리스트</h2>
+</div>
+
+<ul style="margin:0 0 14px;padding-left:20px;line-height:1.9"><li>도보 구간이 있어 오래 걸어도 편한 신발을 준비하세요.</li><li>각 장소의 영업시간과 휴무일은 방문 전에 공식 안내에서 한 번 더 확인하세요.</li><li>대중교통·차량 구간이 있는 날은 이동 시간을 넉넉히 잡으세요.</li></ul>
+
+<div class="section-hdr" style="--cat-color:#2563eb">
+<span class="s-num">6</span>
+<h2 id="closing">마무리</h2>
+</div>
+
+<p style="margin:0 0 14px;line-height:1.9">경주 2박3일 코스는 14곳을 3일에 나눠 담았습니다. 이동 시간은 장소 아래 한 줄과 위의 요약표에서 확인하세요.</p>
+<p style="margin:14px 0 4px;font-size:13px;color:#64748b">출처: <a href="https://ko.wikipedia.org/wiki/%EA%B2%BD%EC%A3%BC_%EC%B6%98%EC%96%91%EA%B5%90%EC%A7%80%EC%99%80_%EC%9B%94%EC%A0%95%EA%B5%90%EC%A7%80" target="_blank" rel="noopener nofollow">경주 춘양교지와 월정교지</a> · <a href="https://ko.wikipedia.org/wiki/%EB%B3%B4%EB%AC%B8%EA%B4%80%EA%B4%91%EB%8B%A8%EC%A7%80" target="_blank" rel="noopener nofollow">보문관광단지</a> · <a href="https://ko.wikipedia.org/wiki/%EA%B2%BD%EC%A3%BC%EC%9B%94%EB%93%9C" target="_blank" rel="noopener nofollow">경주월드</a> · <a href="https://ko.wikipedia.org/wiki/%EA%B2%BD%EC%A3%BC%EC%84%B1%EB%8F%99%EC%8B%9C%EC%9E%A5" target="_blank" rel="noopener nofollow">경주성동시장</a> · <a href="https://ko.wikipedia.org/wiki/%EA%B2%BD%EC%A3%BC_%EC%A3%BD%EB%8F%99%EB%A6%AC_%EC%B2%AD%EB%8F%99%EA%B8%B0_%EC%9D%BC%EA%B4%84" target="_blank" rel="noopener nofollow">경주 죽동리 청동기 일괄</a> — 위키백과·위키보야주 문서(CC BY-SA)를 바탕으로 요약했습니다.</p>
+<p style="margin:0 0 14px;font-size:13px;color:#64748b">동선·이동 시간은 트레쥴 코스 데이터 기준입니다.</p>
+
+<!-- AdSense: mid_content -->
+<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXX" data-ad-slot="0000000000" data-ad-format="auto" data-full-width-responsive="true"></ins>
+<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+
+<h2 id="faq">자주 묻는 질문 (FAQ)</h2>
+<div class="faq-wrap">
+<div class="faq-item"><div class="faq-q">하루에 몇 곳을 도나요?</div><div class="faq-a">하루 평균 4.7곳이고, 가장 많은 날은 1일차(5곳)입니다.</div></div>
+<div class="faq-item"><div class="faq-q">걸어서 다닐 수 있나요?</div><div class="faq-a">이동 구간 11개 중 6개가 도보입니다. 1일차는 도보만으로 이어집니다.</div></div>
+<div class="faq-item"><div class="faq-q">일차별 대표 명소는 어디인가요?</div><div class="faq-a">1일차 경주 월정교·경주 황리단길, 2일차 보문관광단지·경주보문관광단지, 3일차 국립경주박물관입니다.</div></div>
+</div>
+
+<div class="keyword-tags">
+<span class="keyword-tag">#경주 2박3일</span>
+</div>
+
+<div class="tradule-cta"><a href="https://www.tradule.co.kr/course/%EA%B2%BD%EC%A3%BC/2%EB%B0%953%EC%9D%BC?utm_source=maeilg&utm_medium=blog&utm_campaign=%EA%B2%BD%EC%A3%BC-2%EB%B0%953%EC%9D%BC" target="_blank" rel="noopener">이 코스를 지도에서 일자별로 보고 내 일정으로 저장하기 → 트레쥴</a><br><span style="font-size:13px;color:#64748b">평점·사진은 트레쥴에서 장소를 누르면 볼 수 있어요.</span></div>
+
+<!-- AdSense: post_end -->
+<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXX" data-ad-slot="0000000000" data-ad-format="auto" data-full-width-responsive="true"></ins>
+<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+</div>
