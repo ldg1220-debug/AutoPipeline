@@ -829,6 +829,7 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         // D-166: 근거 설명 템플릿 — 코드가 만든 HTML을 그대로 쓴다. {{ATTRIBUTION}}·{{DAY_EXTRA_n}} 자리만 치환한다.
         contentHtml = s.html
           .replace('{{ATTRIBUTION}}', extras.ratingAttrHtml ?? '')
+          .replace('{{NEXT_DAY_LINK}}', extras.nextDayLinkHtml ?? '')
           .replace(/\{\{DAY_EXTRA_(\d+)\}\}/g, (_, d) => extras.dayAffiliate?.get(Number(d)) ?? '');
       } else if (dayMatch) {
         // 본문 = "코드 목록\n\n해설" — 목록은 표로 대체하고 해설만 남긴다.
@@ -1007,8 +1008,14 @@ async function monetizeBlogDraft(content) {
       }
     }
   }
+  // D-168: "하루 더 있다면" 링크 — days+1 코스 페이지가 200일 때만(buildTraduleCoursePageUrl이 확인)
+  let nextDayLinkHtml = '';
+  if (blog_draft.grounded && blog_draft.next_days) {
+    const nextUrl = await buildTraduleCoursePageUrl({ ...content.trip_data, days: blog_draft.next_days }, blog_draft.slug);
+    if (nextUrl) nextDayLinkHtml = `<a href="${nextUrl}" target="_blank" rel="noopener">트레쥴에서 ${blog_draft.next_days}일 코스 보기</a>`;
+  }
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
-    { dayAffiliate: placeAff.byDay, ratingAttrHtml: blog_draft.grounded ? ratingAttributionHtml(content.trip_data) : '', afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
+    { dayAffiliate: placeAff.byDay, ratingAttrHtml: blog_draft.grounded ? ratingAttributionHtml(content.trip_data) : '', nextDayLinkHtml, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면

@@ -77,7 +77,7 @@ async function api(host, params) {
 }
 
 const DETAIL_PROPS = {
-  action: 'query', prop: 'extracts|coordinates|pageprops|categories|info', exintro: 1, explaintext: 1, exsentences: 6, exlimit: 'max',
+  action: 'query', prop: 'extracts|coordinates|pageprops|categories|info|pageimages', piprop: 'name', exintro: 1, explaintext: 1, exsentences: 6, exlimit: 'max',
   inprop: 'url', colimit: 'max', cllimit: 'max', clshow: '!hidden', ppprop: 'disambiguation',
 };
 async function pageDetails(lang, ids) {
@@ -101,7 +101,7 @@ function categoryMatches(lang, kind, pg) {
   if (!re) return false;
   return (pg.categories ?? []).some((c) => re.test(String(c.title).replace(/^[^:]+:/, '')));
 }
-const toResult = (lang, pg, via) => ({ lang, title: pg.title, extract: String(pg.extract).replace(/\s+/g, ' ').trim().slice(0, 900), url: pg.fullurl, via });
+const toResult = (lang, pg, via) => ({ lang, pageimage: pg.pageimage ?? null, title: pg.title, extract: String(pg.extract).replace(/\s+/g, ' ').trim().slice(0, 900), url: pg.fullurl, via });
 
 async function geoLookup(lang, spot, kind, region) {
   if (typeof spot.lat !== 'number' || typeof spot.lng !== 'number') return null;
@@ -135,6 +135,24 @@ async function nameLookup(lang, spot) {
     return toResult(lang, pg, 'name');
   }
   return null;
+}
+
+// ── 사진: 위키백과 문서 대표 이미지 → Commons 라이선스 확인 (CC0·PD·CC BY·CC BY-SA 만) ─────────────────────
+const FREE_LICENSE = /^(cc0|public domain|pd\b|pdm|cc[- ]by(?![- ]?(nc|nd))(?:[- ]sa)?\b)/i;
+async function commonsPhoto(fileName) {
+  if (!fileName) return null;
+  const data = await api('commons.wikimedia.org', {
+    action: 'query', titles: `File:${fileName}`, prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: 960,
+  });
+  const ii = data?.query?.pages?.[0]?.imageinfo?.[0];
+  if (!ii) return null;
+  const meta = ii.extmetadata ?? {};
+  const license = String(meta.LicenseShortName?.value ?? '').trim();
+  if (!FREE_LICENSE.test(license) || /\b(nc|nd)\b/i.test(license)) return null;
+  const strip = (h) => String(h ?? '').replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+  const artist = strip(meta.Artist?.value).slice(0, 80);
+  if (!artist) return null; // 작성자 표기가 없으면 쓰지 않는다(캡션 필수)
+  return { url: ii.thumburl || ii.url, license, artist, pageUrl: ii.descriptionurl };
 }
 
 // ── 위키보야주(영어) 지역 문서의 보기·하기 항목 ───────────────────────────
@@ -194,7 +212,7 @@ async function voyageLookup(spot, regionKo) {
  */
 export async function fetchWikiFact(spot, { kind, region } = {}) {
   if (!spot?.name) return null;
-  const key = `v3|${cacheKey(spot, kind)}`; // v3: 유적 분류 채택 제거
+  const key = `v4|${cacheKey(spot, kind)}`; // v4: 사진 포함
   const hit = readCache('all', key);
   if (hit) return hit.result;
   let failed = false;
@@ -203,6 +221,7 @@ export async function fetchWikiFact(spot, { kind, region } = {}) {
   if (!result) result = await attempt(() => nameLookup('ko', spot));
   if (!result) result = await attempt(() => geoLookup('en', spot, kind, region));
   if (!result) result = await attempt(() => voyageLookup(spot, region));
+  if (result?.pageimage) result.photo = await attempt(() => commonsPhoto(result.pageimage));
   if (!failed || result) writeCache('all', key, result);
   return result;
 }

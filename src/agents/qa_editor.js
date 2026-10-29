@@ -642,6 +642,8 @@ function validateBlogStructure(content) {
   if (content.trip_data?.spots?.length) {
     const t = sections.map((s) => s.body ?? '').concat(faq.map((f) => f.a ?? '')).join(' ');
     if (/★|리뷰\s*[0-9]/.test(t)) issues.push('코스 글에 평점(★)·리뷰 수 표기가 남아 있음 — 평점·리뷰는 본문에 쓰지 않는다');
+    // D-168: 지어낸 수치 패턴("100명에게 물었더니", "만족도 1.5배", "평균 30%") 반려
+    if (/\d+\s*명(에게|한테)\s*물었|만족도\s*[\d.]+\s*배|평균\s*\d+\s*%/.test(t)) issues.push('근거 없는 수치 표현("N명에게 물었더니", "만족도 N배", "평균 N%") 발견');
     // D-167: 메타 설명·제목(og:description 원천)에도 평점·리뷰 문구가 남지 않게 한다.
     if (/평점|리뷰\s*수|★/.test(`${draft.meta_description ?? ''} ${draft.title ?? ''}`)) issues.push('메타 설명·제목에 평점·리뷰 문구가 남아 있음 — 코스 글에는 쓰지 않는다');
   }
@@ -670,7 +672,12 @@ function validateBlogStructure(content) {
   // 재실행(비용 2배)했고 재작성본은 오히려 더 짧은 2,199자로 통과): 2일 이하 코스는 스팟이 적어 사실만으로 채울 분량이
   // 원래 적다 — 최소 분량을 2400자로 낮춘다.
   // D-146: 코드 조립 초안(blog_draft.assembled==='code')은 사실 블록만이라 분량이 원래 적다 — LLM으로 채우면 창작이 들어가므로 기준을 2000자로 낮춘다(서울 2박3일 실측: 분량 미달 → LLM "장소별 상세" 추가 → 주어 없는 문장·비문).
-  const minTotalChars = draft.grounded ? 2000 : draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
+  const minTotalChars = draft.grounded ? 2500 : draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
+  // D-168 게이트: 근거 설명 명소 ≥ 3 · 사진 ≥ 2 — 못 넘으면 지어서 채우지 말고 반려(조립 글은 재생성 없이 드랍).
+  if (draft.grounded) {
+    if ((draft.grounded_count ?? 0) < 3) issues.push(`장소 설명 근거 부족: 근거 설명이 붙은 장소 ${draft.grounded_count ?? 0}곳 (최소 3곳)`);
+    if ((draft.grounded_photos ?? 0) < 2) issues.push(`사진 부족: 무료 라이선스 사진 ${draft.grounded_photos ?? 0}장 (최소 2장)`);
+  }
   if (totalChars < minTotalChars) {
     issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${minTotalChars}자 — AdSense 콘텐츠 가치 기준)`);
   }

@@ -2380,7 +2380,7 @@ async function assembleGroundedDraft(content) {
   logger.info(`[blog_content_enhancer] Done: ${kw} (${wordCount}자, 근거 설명 ${g.groundedCount}곳)`);
   return {
     ...base,
-    blog_draft: { ...base.blog_draft, sections: g.sections, faq: g.faq, lead: g.lead, grounded: true, grounded_count: g.groundedCount, word_count: wordCount },
+    blog_draft: { ...base.blog_draft, ...(g.title ? { title: g.title } : {}), sections: g.sections, faq: g.faq, lead: g.lead, grounded: true, grounded_count: g.groundedCount, grounded_photos: g.photoCount, next_days: g.nextDays, word_count: wordCount },
   };
 }
 
