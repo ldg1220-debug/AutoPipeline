@@ -94,11 +94,19 @@ const usable = (pg) => !(pg.pageprops && 'disambiguation' in pg.pageprops) && pg
  */
 function nameScore(spotName, title, region) {
   const strip = (n) => (region && String(n).startsWith(region) && String(n).length > region.length + 1 ? String(n).slice(region.length) : String(n));
-  const a = coreName(strip(spotName)); const b = coreName(strip(title));
-  if (normName(strip(spotName)) === normName(strip(title)) || (a.length >= 2 && a === b)) return 3;
-  if (a.length < 3 || b.length < 3) return 0;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  return long.includes(short) && short.length / long.length >= 0.7 ? 2 : 0;
+  // 지역 접두어를 뗀 이름과 뗀 않은 이름을 둘 다 비교한다("오사카 성" ↔ "오사카성"은 접두어를 떼면 "성"만 남아 일치하지 못함)
+  let best = 0;
+  for (const [x, y] of [[spotName, title], [strip(spotName), strip(title)]]) {
+    const a = coreName(x); const b = coreName(y);
+    let sc = 0;
+    if (normName(x) === normName(y) || (a.length >= 2 && a === b)) sc = 3;
+    else if (a.length >= 3 && b.length >= 3) {
+      const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+      if (long.includes(short) && short.length / long.length >= 0.7) sc = 2;
+    }
+    best = Math.max(best, sc);
+  }
+  return best;
 }
 const nameMatches = (spotName, title, region) => nameScore(spotName, title, region) > 0;
 function categoryMatches(lang, kind, pg) {
@@ -106,7 +114,7 @@ function categoryMatches(lang, kind, pg) {
   if (!re) return false;
   return (pg.categories ?? []).some((c) => re.test(String(c.title).replace(/^[^:]+:/, '')));
 }
-const toResult = (lang, pg, via) => ({ lang, pageimage: pg.pageimage ?? null, title: pg.title, extract: String(pg.extract).replace(/\s+/g, ' ').trim().slice(0, 900), url: pg.fullurl, via });
+const toResult = (lang, pg, via) => ({ lang, coord: pg.coordinates?.[0] ? { lat: pg.coordinates[0].lat, lng: pg.coordinates[0].lon } : null, pageimage: pg.pageimage ?? null, title: pg.title, extract: String(pg.extract).replace(/\s+/g, ' ').trim().slice(0, 900), url: pg.fullurl, via });
 
 async function geoLookup(lang, spot, kind, region) {
   if (typeof spot.lat !== 'number' || typeof spot.lng !== 'number') return null;
@@ -207,6 +215,8 @@ async function voyageLookup(spot, regionKo) {
     .filter((x) => x.km <= 0.15)
     .sort((a, b) => a.km - b.km)[0];
   if (!near) return null;
+  // 이름 확인 없이 좌표만으로 붙이면 "추억의달동네" → "Folk Craft Village" 같은 오매칭이 난다(D-171): 스팟 이름에 로마자가 있고 항목 이름과 일치할 때만
+  if (!/[A-Za-z]{3,}/.test(spot.name) || nameScore(spot.name, near.l.name, '') === 0) return null;
   return { lang: 'en', title: `${title} (Wikivoyage) — ${near.l.name}`, extract: near.l.content.slice(0, 900), url: `https://en.wikivoyage.org/wiki/${encodeURIComponent(title)}`, via: 'voyage' };
 }
 
@@ -218,7 +228,7 @@ async function voyageLookup(spot, regionKo) {
  */
 export async function fetchWikiFact(spot, { kind, region } = {}) {
   if (!spot?.name) return null;
-  const key = `v5|${cacheKey(spot, kind)}`; // v5: 이름 점수·500m
+  const key = `v6|${cacheKey(spot, kind)}`; // v6: 이름 점수 양방향·보야주 이름 확인
   const hit = readCache('all', key);
   if (hit) return hit.result;
   let failed = false;

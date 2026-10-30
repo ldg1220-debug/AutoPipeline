@@ -127,6 +127,19 @@ async function collectDescriptions(spots, region) {
     if (!fact) continue;
     targets.push({ id: ++id, sp, name: sp.name, kind, extract: fact.extract, fact });
   }
+  // D-171 ①: 같은 문서가 두 스팟에 붙으면(해유관·덴포잔 관람차 → Kaiyukan) 문서 좌표에 가장 가까운 스팟 하나만 유지한다
+  const byDoc = new Map();
+  for (const t of targets) { const k = t.fact.url; if (!byDoc.has(k)) byDoc.set(k, []); byDoc.get(k).push(t); }
+  const dropped = new Set();
+  const km = (a, b) => Math.hypot((a.lat - b.lat) * 111, (a.lng - b.lng) * 111 * Math.cos((a.lat * Math.PI) / 180));
+  for (const group of byDoc.values()) {
+    if (group.length < 2) continue;
+    const c = group[0].fact.coord;
+    const pri = (t) => ({ name: 0, 'geo-name': 0, 'geo-category': 1, voyage: 2 }[t.fact.via] ?? 2);
+    const winner = [...group].sort((x, y) => pri(x) - pri(y) || (c && typeof x.sp.lat === 'number' && typeof y.sp.lat === 'number' ? km(c, { lat: x.sp.lat, lng: x.sp.lng }) - km(c, { lat: y.sp.lat, lng: y.sp.lng }) : 0))[0];
+    for (const t of group) if (t !== winner) { dropped.add(t); logger.info(`[factcheck] removed doc="${t.fact.title}" reason=같은 문서가 여러 스팟에 매칭(유지: ${winner.name}) place=${t.name}`); }
+  }
+  for (let i = targets.length - 1; i >= 0; i -= 1) if (dropped.has(targets[i])) targets.splice(i, 1);
   const llm = await rewriteWithLlm(targets);
   const preview = process.env.COURSE_GROUNDED_OFFLINE_PREVIEW === 'on'; // 개발용: LLM 없이 발췌문으로 미리보기(운영 금지)
   const out = new Map();
