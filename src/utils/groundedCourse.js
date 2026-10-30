@@ -25,6 +25,12 @@ function josa(word, withBatchim, without) {
   if (code >= 0xac00 && code <= 0xd7a3) return (code - 0xac00) % 28 === 0 ? without : withBatchim;
   return `${withBatchim}(${without})`;
 }
+/** "~(으)로" 선택: 받침이 없거나 ㄹ받침이면 "로", 아니면 "으로". */
+function ro(word) {
+  const code = String(word ?? '').trim().slice(-1).charCodeAt(0);
+  if (code >= 0xac00 && code <= 0xd7a3) { const j = (code - 0xac00) % 28; return j === 0 || j === 8 ? '로' : '으로'; }
+  return '(으)로';
+}
 const HYPE = /최고|유명|대표적|손꼽|꼭\s*가|필수|명물|인기/;
 
 // ── 근거 문서 정리 ─────────────────────────────────────────────────────────
@@ -123,7 +129,6 @@ async function collectDescriptions(spots, region) {
 
 // ── 코스 데이터 기반 문장·구조 ─────────────────────────────────────────────
 const MAX_PHOTOS = 6;
-const DAY_START_MIN = 9 * 60 + 30; // 09:30 (권장 예시)
 
 /** D-168 §2 ①: 머무는 시간(분) 코드 상수 — 일반 관람 소요 범위, "권장 예시"로만 표기한다. null = 종일. */
 function stayMinutes(sp, kind) {
@@ -137,8 +142,6 @@ function stayMinutes(sp, kind) {
   if (kind === '해변') return 60;
   return 60; // 사원·성당·유적·시장·일반 명소
 }
-const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-const round5 = (m) => Math.round(m / 5) * 5;
 
 function legSummary(tripData, list) {
   if (tripData.distanceSource === 'straight') return { minutes: 0, modes: [], legs: [] };
@@ -147,37 +150,56 @@ function legSummary(tripData, list) {
   return { minutes: legs.reduce((a, l) => a + l.toNextMinutes, 0), modes, legs };
 }
 
-/** 하루 시간표: 09:30 + 머무는 시간 + 이동 분 (5분 단위). 종일 시설은 "종일". */
+/**
+ * D-169(AU 2026-10-30 ①): 분 단위 시간표 대신 "시간대 블록"(오전·점심·오후·해 질 녘~저녁·저녁)으로 배분한다.
+ * 규칙: 첫 식사 = 점심, 두 번째 식사 = 저녁, 그날 마지막이 전망대면 "해 질 녘~저녁", 나머지는 순서대로 오전→오후. 종일 시설은 "하루 종일".
+ */
 function buildTimetable(tripData, day, list) {
   const straight = tripData.distanceSource === 'straight';
-  let cur = DAY_START_MIN;
-  const rows = [];
-  list.forEach((sp, i) => {
-    const kind = inferSpotKind(sp);
-    const stay = stayMinutes(sp, kind);
-    const start = round5(cur);
-    let time;
-    if (stay === null) { time = `${hhmm(start)}~ 종일`; cur = 24 * 60; } else { cur = start + stay; time = `${hhmm(start)}–${hhmm(round5(cur))}`; }
+  const fac = getFacilitySpot(tripData, day, list);
+  const kinds = list.map((sp) => inferSpotKind(sp));
+  const mealIdx = kinds.map((k, i) => (k === '식사' ? i : -1)).filter((i) => i >= 0);
+  const lunch = mealIdx[0] ?? -1; const dinner = mealIdx[1] ?? -1;
+  const half = Math.ceil(list.length / 2);
+  const rows = list.map((sp, i) => {
+    const kind = kinds[i]; const stay = stayMinutes(sp, kind);
+    let block;
+    if (fac && sp === fac) block = '하루 종일';
+    else if (i === lunch) block = '점심';
+    else if (i === dinner) block = '저녁';
+    else if (i === list.length - 1 && kind === '전망대') block = '해 질 녘~저녁';
+    else if (lunch >= 0) block = i < lunch ? '오전' : (dinner >= 0 && i > dinner ? '저녁' : '오후');
+    else block = i < half ? '오전' : '오후';
     const next = list[i + 1];
     let move = '—';
     if (next) {
-      if (isBoatLeg(sp, next)) { move = '배편 (시간 미확인)'; } else if (!straight && typeof sp.toNextMinutes === 'number') { move = `${legModeLabel(sp)} ${sp.toNextMinutes}분`; cur += sp.toNextMinutes; }
+      if (isBoatLeg(sp, next)) move = '배편 (시간 미확인)';
+      else if (!straight && typeof sp.toNextMinutes === 'number') move = `${legModeLabel(sp)} ${sp.toNextMinutes}분`;
     }
-    rows.push({ sp, kind, time, move, stay });
+    return { sp, kind, time: block, move, stay };
   });
-  const endMin = rows.some((r) => r.stay === null) ? null : round5(cur);
-  return { rows, endMin };
+  return { rows, blocks: new Set(rows.map((r) => r.time)) };
 }
 
-function dayPeriod(endMin) {
-  if (endMin === null) return '종일';
-  if (endMin <= 12 * 60 + 30) return '오전';
-  if (endMin <= 18 * 60) return '오전~오후';
-  return '오전~저녁';
+function dayPeriod(blocks) {
+  if (blocks.has('하루 종일')) return '종일';
+  if (blocks.has('저녁') || blocks.has('해 질 녘~저녁')) return '오전~저녁';
+  if (blocks.has('오후') || blocks.has('점심')) return '오전~오후';
+  return '오전';
+}
+
+/** 일차 제목의 행동 — 그날 카테고리 구성에서만 도출, 해당 없으면 null(생략). */
+function dayAction(tripData, day, list) {
+  const kinds = list.map((sp) => inferSpotKind(sp));
+  if (getFacilitySpot(tripData, day, list) || kinds.includes('테마파크')) return '하루 종일';
+  if (kinds.includes('해변')) return '해변 산책';
+  if (kinds[kinds.length - 1] === '전망대') return '전망대 야경';
+  if (kinds.includes('시장')) return '시장 먹거리';
+  if (kinds.filter((k) => ['사원·성당', '유적', '명소/유적'].includes(k)).length >= 2) return '역사 산책';
+  return null;
 }
 
 const isSightKind = (sp) => !sp.lodging && sp.category !== '숙소' && SIGHT_KINDS.has(inferSpotKind(sp));
-const ACTION = { 시장: '시장 구경', 전망대: '전망 보기', 공원: '산책', 수족관: '수족관 관람', 동물원: '동물원 관람', 테마파크: '하루 종일 즐기기', 해변: '해변 시간', 섬: '섬 다녀오기', 스파: '스파', '사원·성당': '둘러보기', '명소/유적': '둘러보기', 유적: '둘러보기', 명소: '둘러보기' };
 
 /** 권역 이름 = 그날 대표 명소 2개를 묶은 "A·B 일대" (지어낸 동네 이름 금지). */
 function districtOf(tripData, day, list, regionName) {
@@ -282,8 +304,7 @@ export async function buildGroundedCourse(content, keyword) {
 
   // ── 목차 + 시간표
   const toc = `<ul class="course-toc" style="margin:0 0 16px;padding-left:20px;line-height:1.9">` +
-    `<li><a href="#districts">${esc(region)} 코스의 권역</a></li>` +
-    days.map((d) => `<li><a href="#day${d}">${d}일차 ${dayPeriod(tt.get(d).endMin)}: ${esc(dist.get(d).short)}</a></li>`).join('') +
+        days.map((d) => `<li><a href="#day${d}">${d}일차 ${dayPeriod(tt.get(d).blocks)}: ${esc(dist.get(d).short)}</a></li>`).join('') +
     `<li><a href="#situations">상황별로 바꾸기</a></li><li><a href="#faq">자주 묻는 질문</a></li></ul>`;
   const rowsHtml = days.flatMap((d) => tt.get(d).rows.map((r, i) => {
     const d0 = descMap.get(r.sp);
@@ -291,33 +312,31 @@ export async function buildGroundedCourse(content, keyword) {
     return `<tr>${i === 0 ? `<td rowspan="${tt.get(d).rows.length}">${d}일차</td>` : ''}<td>${r.time}</td><td>${esc(r.sp.name)}</td><td>${straight ? '—' : esc(r.move)}</td><td>${esc(point)}</td></tr>`;
   })).join('\n');
   const overviewHtml = toc +
-    `<p style="margin:0 0 8px;font-size:13px;color:#64748b">시간은 09:30 시작을 가정한 <b>권장 예시</b>입니다. 머무는 시간은 장소 종류별 일반 관람 소요 범위이며 실제 방문 상황에 따라 달라집니다.</p>\n` +
-    `<div class="timeline-table"><table>\n<thead><tr><th>일차</th><th>시간(권장 예시)</th><th>장소</th><th>이동</th><th>핵심 포인트</th></tr></thead>\n<tbody>\n${rowsHtml}\n</tbody>\n</table></div>\n{{ATTRIBUTION}}`;
+    `<p style="margin:0 0 8px;font-size:13px;color:#64748b">시간대는 식사·마지막 장소의 종류와 순서로 나눈 <b>권장 예시</b>입니다. 장소별 머무는 시간은 아래 각 장소에 종류별 일반 관람 소요 범위로 적었고, 실제 방문 상황에 따라 달라집니다.</p>\n` +
+    `<div class="timeline-table"><table>\n<thead><tr><th>일차</th><th>시간대(권장)</th><th>장소</th><th>이동</th><th>핵심 포인트</th></tr></thead>\n<tbody>\n${rowsHtml}\n</tbody>\n</table></div>\n{{ATTRIBUTION}}`;
   const overviewText = days.map((d) => `${d}일차: ${tt.get(d).rows.map((r) => `${r.time} ${r.sp.name}`).join(', ')}`).join('\n');
   sections.push({ level: 2, heading: `한눈에 보는 ${keyword} 시간표`, id: 'overview', body: `${lead}\n${overviewText}`, html: overviewHtml, generated: 'code' });
-
-  // ── 권역 설명 (트레쥴 좌표·이동 데이터 사실만)
-  const distBody = days.map((d) => {
-    const list = byDay.get(d); const l = ls.get(d);
-    const parts = [`${d}일차 권역은 ${dist.get(d).name}입니다. 장소 ${list.length}곳을 한 날에 묶었습니다.`];
-    if (facOf(d)) parts.push(`${facOf(d).name} 하나가 하루를 차지하는 날입니다.`);
-    else if (l.legs.length) {
-      const modeKr = l.modes.map((m) => modeLabel(m)).join('·');
-      parts.push(isWalkDay(d) ? '구간 이동이 모두 도보로 이어집니다.' : `구간 이동 수단은 ${modeKr}가 섞여 있습니다.`.replace(/([가-힣])가 섞여/, (m, c) => `${c}${(c.charCodeAt(0) - 0xac00) % 28 === 0 ? '가' : '이'} 섞여`));
-    }
-    return parts.join(' ');
-  });
-  sections.push({ level: 2, heading: `${region} 코스의 권역 — 왜 이렇게 나눴나`, id: 'districts', body: distBody.join('\n'), html: `<ul style="margin:0 0 14px;padding-left:20px;line-height:1.9">${distBody.map((t) => `<li>${esc(t)}</li>`).join('')}</ul><p style="margin:0 0 14px;font-size:13px;color:#64748b">권역 이름은 그날 코스의 대표 장소를 묶어 붙였고, 이동 수단은 트레쥴 좌표 기준 계산 값입니다.</p>`, generated: 'code' });
 
   // ── 일차별
   let usedPhotos = 0;
   for (const d of days) {
-    const list = byDay.get(d); const fac = facOf(d); const { rows, endMin } = tt.get(d);
-    const action = fac ? ACTION.테마파크 : (ACTION[inferSpotKind(dist.get(d).rep)] ?? '둘러보기');
-    const heading = `${d}일차 ${dayPeriod(endMin)}: ${dist.get(d).short} — ${action}`;
+    const list = byDay.get(d); const fac = facOf(d); const { rows, blocks } = tt.get(d);
+    const action = dayAction(tripData, d, list);
+    const heading = `${d}일차 ${dayPeriod(blocks)}: ${dist.get(d).short}${action ? ` — ${action}` : ''}`;
     const intro = fac
       ? `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다.${list.length > 1 ? ` 함께 넣은 곳: ${list.filter((x) => x !== fac).map((x) => x.name).join('·')}.` : ''}`
-      : `${d}일차는 ${list[0].name}에서 시작해 ${list[list.length - 1].name}에서 마칩니다. 모두 ${list.length}곳이고, 아래 장소 순서대로 이동합니다.`;
+      : [
+        `${d}일차는 ${list[0].name}에서 시작해 ${list[list.length - 1].name}에서 마칩니다. 모두 ${list.length}곳이고, 아래 장소 순서대로 이동합니다.`,
+        // 권역 성격: 대표 장소에 위키 근거 설명(핵심 포인트)이 있을 때만, 그리고 데이터 사실 한 문장
+        (descMap.get(dist.get(d).rep)?.point ? `이날의 중심은 ${dist.get(d).rep.name}(${descMap.get(dist.get(d).rep).point})입니다.` : ''),
+        (() => {
+          const l = ls.get(d); if (!l.legs.length) return '';
+          const walks = l.legs.filter((x) => x.toNextMode === 'walk');
+          const maxWalk = walks.length ? Math.max(...walks.map((x) => x.toNextMinutes)) : 0;
+          if (walks.length === l.legs.length) return `장소끼리는 모두 도보 ${maxWalk}분 안입니다.`;
+          return walks.length ? `도보 구간은 모두 ${maxWalk}분 안이고, 나머지는 ${(() => { const t = l.modes.filter((m) => m !== 'walk').map((m) => modeLabel(m)).join('·'); return t + ro(t); })()} 이동합니다.` : '';
+        })(),
+      ].filter(Boolean).join(' ');
     let html = `<p style="margin:0 0 14px;line-height:1.9">${esc(intro)}</p>\n`;
     let body = intro;
     const eat = [];
