@@ -69,10 +69,21 @@ function factcheckSentences(sentences, extract, spotName) {
     const badNum = nums.find((n) => !src.includes(n.replace(/[,.]$/, '')));
     if (badNum) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거에 없는 숫자(${badNum}) place=${spotName}`); continue; }
     if (HYPE.test(s) && !HYPE.test(src)) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거에 없는 과장 표현 place=${spotName}`); continue; }
+    // D-171 ③: 최상급·범위 표현(가장·최초·최대·최고·유일·제일·세계)은 원문 발췌에 같은 표현이 있을 때만 — 첨성대 "세계에서 가장 오래된"(원문은 동양 기준) 방지
+    const badSuper = ['가장', '최초', '최대', '최고', '유일', '제일', '세계'].find((w) => s.includes(w) && !src.includes(w));
+    if (badSuper) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거에 없는 최상급·범위 표현(${badSuper}) place=${spotName}`); continue; }
+    // D-171 ②: 문장의 내용어가 근거 발췌에 충분히 있어야 한다(근거에 없는 "기념품을 구매하고 공연을 관람" 같은 문장 방지). 한국어 근거만 검사한다.
+    if (/[가-힣]/.test(src)) {
+      const toks = (s.match(/[가-힣A-Za-z0-9]{2,}/g) ?? []).map((t) => t.replace(/(으로는|에서는|에서|에는|이라는|입니다|있습니다|합니다|됩니다|하는|할|수|있는|로|으로|은|는|이|가|을|를|의|과|와|도|에)$/, '')).filter((t) => t.length >= 2 && !GENERIC_TOKENS.has(t) && !normForOverlap(spotName).includes(normForOverlap(t)));
+      const found = toks.filter((t) => src.includes(t));
+      if (toks.length >= 3 && found.length / toks.length < 0.5) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거와 겹치는 내용어 부족(${found.length}/${toks.length}) place=${spotName}`); continue; }
+    }
     kept.push(s);
   }
   return kept;
 }
+const GENERIC_TOKENS = new Set(['곳', '이곳', '장소', '여행', '관광', '방문', '일대', '지역', '주변', '근처', '다양한', '함께', '또한', '위해', '통해', '대한', '여러', '있다', '있습니다', '볼', '보기']);
+const normForOverlap = (t) => String(t).replace(/\s+/g, '');
 
 async function rewriteWithLlm(items) {
   if (!config.openai?.apiKey || !items.length) return null;
@@ -80,7 +91,7 @@ async function rewriteWithLlm(items) {
     `아래 각 장소의 "근거"만 사용해 한국어 존댓말로 2~4문장 설명을 씁니다.\n` +
     `구성: 이 장소가 무엇인지 → 무엇을 보거나 하는 곳인지 → (근거에 있을 때만) 언제 가면 좋은지.\n` +
     `규칙: 근거에 없는 사실(연도·수치·가격·영업시간·순위·"최고/유명/인기" 같은 평가)은 절대 쓰지 마세요. 영어 근거는 한국어로 옮겨 쓰되 내용을 더하지 마세요. 직접 다녀온 경험처럼 쓰지 마세요. 근거가 빈약하면 1~2문장만 쓰세요.\n` +
-    `"point"에는 이 장소의 핵심 포인트를 20자 이내 명사구로(근거에서만) 쓰세요.\n반드시 JSON {"items":[{"id":번호,"sentences":["문장1","문장2"],"point":"핵심 포인트"}]} 만 출력하세요.\n\n` +
+    `"point"에는 이 장소의 핵심 포인트를 20자 이내 명사구로(근거에서만) 쓰세요.\n첫 문장은 이 장소만의 사실(연대·특징·볼거리 중 하나)로 시작하고, "~에 위치한 ~입니다"·"이곳에서는 ~할 수 있습니다" 같은 틀을 여러 장소에 반복하지 마세요. 둘째 문장은 근거에 있을 때만 관람 포인트·시간대를 쓰세요. 문법이 어색해지면 근거의 첫 문장을 그대로 쓰세요.\n반드시 JSON {"items":[{"id":번호,"name":"장소 이름 그대로","sentences":["문장1","문장2"],"point":"핵심 포인트"}]} 만 출력하세요.\n\n` +
     items.map((it) => `[${it.id}] ${it.name} (${it.kind ?? '장소'})\n근거: ${cleanExtract(it.extract)}`).join('\n\n');
   try {
     await throttle(1500, 'openai');
@@ -88,7 +99,16 @@ async function rewriteWithLlm(items) {
       model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.3, response_format: { type: 'json_object' },
     }, { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 90000 }));
     const parsed = JSON.parse(res.data.choices[0].message.content);
-    return new Map((parsed.items ?? []).map((x) => [Number(x.id), { sentences: (x.sentences ?? []).map(String), point: String(x.point ?? '').slice(0, 24) }]));
+    // id와 함께 되돌려 준 장소 이름이 입력과 다르면 그 항목은 버린다(한 칸 밀린 매칭 방지, D-171)
+    const byId = new Map(items.map((it) => [it.id, it]));
+    const out = new Map();
+    for (const x of parsed.items ?? []) {
+      const it = byId.get(Number(x.id));
+      if (!it) continue;
+      if (String(x.name ?? '').replace(/\s+/g, '') !== it.name.replace(/\s+/g, '')) { logger.info(`[factcheck] removed reason=LLM 응답의 장소 이름 불일치(id ${x.id}: "${x.name}" ≠ "${it.name}")`); continue; }
+      out.set(it.id, { sentences: (x.sentences ?? []).map(String), point: String(x.point ?? '').slice(0, 24) });
+    }
+    return out;
   } catch (err) {
     logger.warn(`[groundedCourse] 설명 재작성 실패 → 추출식으로 대체: ${err.message}`);
     return null;
@@ -122,6 +142,25 @@ async function collectDescriptions(spots, region) {
     if (!sentences.length) continue;
     out.set(t.sp, { sentences, point, extract: t.extract, photo: t.fact.photo ?? null, source: { title: t.fact.title, url: t.fact.url, lang: t.fact.lang, via: t.fact.via } });
   }
+  // D-171 ④: 반복 틀은 글당 최대 2회 — 초과분 문장은 버리되 장소마다 최소 한 문장은 남긴다
+  const frames = [/위치한\s*[가-힣A-Za-z0-9\s]*입니다/, /이곳에서는\s*[^.]*수 있습니다/];
+  for (const re of frames) {
+    let used = 0;
+    for (const [sp, d] of out) {
+      const hit = d.sentences.filter((x) => re.test(x));
+      if (!hit.length) continue;
+      used += 1;
+      if (used > 2) {
+        const rest = d.sentences.filter((x) => !re.test(x));
+        if (rest.length) { logger.info(`[factcheck] removed="${hit[0].slice(0, 40)}" reason=반복 문장 틀 초과 place=${sp.name}`); d.sentences = rest; }
+      }
+    }
+  }
+  // 스팟별 설명 출처 기록 (보고용)
+  for (const t of targets) {
+    const d = out.get(t.sp);
+    logger.info(`[groundedCourse] 출처 spot="${t.name}" doc="${t.fact.title}" via=${t.fact.via} photo=${t.fact.photo ? 'Y' : 'N'} 설명=${d ? d.sentences.length + '문장' : '없음'}`);
+  }
   logger.info(`[groundedCourse] 근거 문서 ${targets.length}곳 / 설명 확정 ${out.size}곳 (조회 대상 ${spots.filter((sp) => !NO_DESC_KINDS.has(inferSpotKind(sp)) && !sp.lodging).length}곳)`);
   return out;
 }
@@ -131,8 +170,8 @@ async function collectDescriptions(spots, region) {
 const MAX_PHOTOS = 6;
 
 /** D-168 §2 ①: 머무는 시간(분) 코드 상수 — 일반 관람 소요 범위, "권장 예시"로만 표기한다. null = 종일. */
-function stayMinutes(sp, kind) {
-  if (kind === '테마파크') return null;
+function stayMinutes(sp, kind, isFacility = false) {
+  if (kind === '테마파크') return isFacility ? null : 180; // D-171 ⑨: 종일 시설이 아닌 테마파크는 최소 180분
   if (kind === '식사') return 60;
   if (kind === '카페') return 40;
   if (kind === '섬') return 240;
@@ -142,6 +181,9 @@ function stayMinutes(sp, kind) {
   if (kind === '해변') return 60;
   return 60; // 사원·성당·유적·시장·일반 명소
 }
+
+/** 이동 수단 표기 통일 — "차량 기준"도 "차량"으로 (D-171 ⑫) */
+function mvLabel(sp) { const k = legModeKey(sp); return modeLabel(k === 'car_fallback' ? 'car' : k); }
 
 function legSummary(tripData, list) {
   if (tripData.distanceSource === 'straight') return { minutes: 0, modes: [], legs: [] };
@@ -162,7 +204,7 @@ function buildTimetable(tripData, day, list) {
   const lunch = mealIdx[0] ?? -1; const dinner = mealIdx[1] ?? -1;
   const half = Math.ceil(list.length / 2);
   const rows = list.map((sp, i) => {
-    const kind = kinds[i]; const stay = stayMinutes(sp, kind);
+    const kind = kinds[i]; const stay = stayMinutes(sp, kind, !!(fac && sp === fac));
     let block;
     if (fac && sp === fac) block = '하루 종일';
     else if (i === lunch) block = '점심';
@@ -174,7 +216,7 @@ function buildTimetable(tripData, day, list) {
     let move = '—';
     if (next) {
       if (isBoatLeg(sp, next)) move = '배편 (시간 미확인)';
-      else if (!straight && typeof sp.toNextMinutes === 'number') move = `${legModeLabel(sp)} ${sp.toNextMinutes}분`;
+      else if (!straight && typeof sp.toNextMinutes === 'number') move = `${mvLabel(sp)} ${sp.toNextMinutes}분`;
     }
     return { sp, kind, time: block, move, stay };
   });
@@ -339,18 +381,32 @@ export async function buildGroundedCourse(content, keyword) {
       ].filter(Boolean).join(' ');
     let html = `<p style="margin:0 0 14px;line-height:1.9">${esc(intro)}</p>\n`;
     let body = intro;
-    const eat = [];
     rows.forEach((r, i) => {
       const sp = r.sp; const kind = r.kind;
       const next = list[i + 1];
-      if (kind === '식사' || kind === '카페') { eat.push({ sp, kind, hint: roleHint(d, list, i) }); return; }
+      const mvText = next ? (isBoatLeg(sp, next) ? '배편 (시간 미확인)' : (!straight && typeof sp.toNextMinutes === 'number') ? `${mvLabel(sp)} ${sp.toNextMinutes}분` : null) : null;
+      if (kind === '식사' || kind === '카페') {
+        // D-171 ⑧: 식사·카페는 순서 자리에 한 줄로 — "🍽 점심 — 우렁각시 (다음 장소까지 도보 2분)"
+        const label = kind === '카페' ? '☕ 카페' : `🍽 ${r.time === '점심' || r.time === '저녁' ? r.time : '식사'}`;
+        const line = `${label} — ${sp.name}${mvText ? ` (${next.name}까지 ${mvText})` : ''}`;
+        html += `<p style="margin:14px 0 14px;padding:8px 12px;background:#f8fafc;border-radius:6px;line-height:1.7">${esc(line)}</p>\n`;
+        body += `\n${line}`;
+        return;
+      }
       const desc = descMap.get(sp);
       const stayTxt = r.stay === null ? '하루 종일' : `머무는 시간 ${r.stay}분(권장)`;
-      const tag = desc ? timeTag(desc.extract) : null;
+      let tag = desc ? timeTag(desc.extract) : null;
+      // D-171 ⑨: 시간대 표기가 실제 배치(블록)와 어긋나면 생략한다
+      if (tag && !(((tag === '아침' || tag === '이른 아침') && r.time === '오전') || ((tag === '야경' || tag === '일몰') && /해 질|저녁/.test(r.time)))) tag = null;
       html += `<h3 style="margin:22px 0 8px">${esc(sp.name)} <span style="font-size:14px;font-weight:400;color:#64748b">· ${esc(kind ?? '장소')} · ${stayTxt}${tag ? ` · 추천 시간대 ${tag}(위키 문서 기준)` : ''}</span></h3>\n`;
-      const para = [...(desc?.sentences ?? []), (i === 0 && list.length === 1) ? '' : roleLine(d, list, i)].filter(Boolean).join(' ');
-      html += `<p style="margin:0 0 10px;line-height:1.9">${esc(para)}</p>\n`;
-      body += `\n${sp.name}(${kind ?? '장소'}, ${stayTxt}): ${para}`;
+      // D-171 ②⑤: 근거 문서가 있는 장소에만 설명 문장, 순서 안내 문장("…번째로 넣었습니다")은 쓰지 않는다
+      const para = (desc?.sentences ?? []).join(' ');
+      if (para) {
+        html += `<p style="margin:0 0 10px;line-height:1.9">${esc(para)}</p>\n`;
+        body += `\n${sp.name}(${kind ?? '장소'}, ${stayTxt}): ${para}`;
+      } else {
+        body += `\n${sp.name}(${kind ?? '장소'}, ${stayTxt})`;
+      }
       const ph = photos.get(sp);
       if (ph) {
         usedPhotos += 1;
@@ -359,17 +415,11 @@ export async function buildGroundedCourse(content, keyword) {
       if (next && isBoatLeg(sp, next)) { const t = '다음 장소는 배편으로 이동합니다. 배 시간은 현지에서 확인하세요.'; html += tipHtml(t); body += `\n팁: ${t}`; }
       if (fac && sp === fac) { const t = list.length === 1 ? '이날은 이곳만 넣었습니다. 다른 일정을 더하지 않고 하루를 쓰도록 구성했습니다.' : '이날은 이곳을 중심으로 하루를 보내도록 구성했습니다.'; html += tipHtml(t); body += `\n팁: ${t}`; }
       if (next) {
-        const mv = isBoatLeg(sp, next) ? '배편 (시간 미확인)' : (!straight && typeof sp.toNextMinutes === 'number') ? `${legModeLabel(sp)} ${sp.toNextMinutes}분` : null;
-        const line = mv ? `→ 다음: ${next.name} ${mv}` : `→ 다음: ${next.name}`;
+        const line = mvText ? `→ 다음: ${next.name} ${mvText}` : `→ 다음: ${next.name}`;
         html += `<p style="margin:0 0 6px;font-size:14px;color:#475569">${esc(line)}</p>\n`;
         body += `\n${line}`;
       }
     });
-    if (eat.length) {
-      html += `<h3 style="margin:22px 0 8px">이 권역에서 먹고 쉬기</h3>\n<ul style="margin:0 0 12px;padding-left:20px;line-height:1.9">` +
-        eat.map((e) => `<li>${esc(e.sp.name)} (${e.kind} · ${esc(e.hint)})</li>`).join('') + `</ul>\n`;
-      body += `\n먹고 쉬기: ${eat.map((e) => `${e.sp.name}(${e.kind}, ${e.hint})`).join(', ')}`;
-    }
     const mapUrl = tripData.dayImageUrls?.[d - 1];
     if (mapUrl) html += `<div class="blog-img-wrap"><img src="${esc(mapUrl)}" alt="${d}일차 동선 지도" loading="lazy" style="width:100%;height:auto;display:block;" /></div>\n`;
     const longest = ls.get(d).legs.length ? ls.get(d).legs.reduce((a, l) => (l.toNextMinutes > a.toNextMinutes ? l : a)) : null;
@@ -394,8 +444,11 @@ export async function buildGroundedCourse(content, keyword) {
     if (longWalk.length) bits.push(`${longWalk.map(([d, m]) => `${d}일차는 도보 이동이 합계 ${m}분`).join(', ')}이라 걷는 양이 많습니다.`);
     sit.push(['아이와 함께', bits.join(' ')]);
   }
-  const night = days.map((d) => { const l = byDay.get(d); const last = l[l.length - 1]; return inferSpotKind(last) === '전망대' ? [d, last] : null; }).filter(Boolean);
-  if (night.length) sit.push(['야경을 넣고 싶다면', `그날 마지막 일정이 전망대로 분류된 날: ${night.map(([d, sp]) => `${d}일차 ${sp.name}`).join(', ')}. 해가 진 뒤의 시간에 맞추려면 시간표에서 이 일정 시각을 뒤로 옮기면 됩니다.`]);
+  // D-171 ⑩: 야경 후보 = 그날 마지막이 전망대인 곳 + 위키 원문에 야경·야간 조명이 있는 곳
+  const nightSet = new Map();
+  for (const d of days) { const l = byDay.get(d); const last = l[l.length - 1]; if (inferSpotKind(last) === '전망대') nightSet.set(last, d); }
+  for (const [sp, dsc] of descMap) { if (/야경|야간\s*조명|라이트\s*업|라이트업/.test(dsc.extract ?? '')) nightSet.set(sp, sp.day ?? 1); }
+  if (nightSet.size) sit.push(['야경을 넣고 싶다면', `해 질 무렵에 맞춰 가면 좋은 곳: ${[...nightSet].map(([sp, d]) => `${sp.name}(${d}일차)`).join(', ')}.`]);
   const more = await nextDayDistrict(content, tripData.days ?? days.length);
   if (more) sit.push(['하루 더 있다면', `트레쥴에서 ${(tripData.days ?? days.length) + 1}일 코스로 보면 ${more.name} 쪽이 추가됩니다. {{NEXT_DAY_LINK}}`]);
   if (sit.length) {
@@ -425,15 +478,16 @@ export async function buildGroundedCourse(content, keyword) {
 
   // ── FAQ 5개 (데이터로 답한다)
   const perDay = days.map((d) => [d, byDay.get(d).length]);
-  const avg = (perDay.reduce((a, [, n]) => a + n, 0) / perDay.length).toFixed(1);
+  const avgN = perDay.reduce((a, [, n]) => a + n, 0) / perDay.length; const avg = Number.isInteger(avgN) ? String(avgN) : avgN.toFixed(1);
+  const perDayText = `하루 ${Math.round(avgN)}곳 안팎`;
   const maxDay = perDay.reduce((a, b) => (b[1] > a[1] ? b : a));
   const rep = pickRepSpot(tripData.spots, isSightKind) ?? tripData.spots[0];
   const faq = [
     { q: `차 없이 ${region} 코스를 다닐 수 있나요?`, a: carLegs ? `코스에 차량 이동 구간이 ${carLegs}개 있습니다. 나머지 구간은 도보나 대중교통이며, 차량 구간은 대중교통·택시로 바꿀 수 있는지 따로 확인하세요.` : '코스에 차량 이동 구간이 없어 도보·대중교통만으로 이어집니다.' },
-    { q: '하루에 몇 곳을 도나요?', a: `하루 평균 ${avg}곳이고, 가장 많은 날은 ${maxDay[0]}일차(${maxDay[1]}곳)입니다.` },
+    { q: '하루에 몇 곳을 도나요?', a: `${perDayText}이고, 가장 많은 날은 ${maxDay[0]}일차(${maxDay[1]}곳)입니다.` },
     { q: `${rep.name}${josa(rep.name, '은', '는')} 몇 일차에 가나요?`, a: `${rep.day ?? 1}일차 ${byDay.get(rep.day ?? 1).indexOf(rep) + 1}번째 일정입니다.` },
     { q: '비가 오면 어떻게 하나요?', a: indoor.length ? `코스 안의 박물관·수족관·시장·전망대 계열(${indoor.map((sp) => sp.name).join(', ')})을 먼저 묶는 방법이 있습니다.` : '이 코스에는 실내 위주로 분류된 장소가 없어, 비 오는 날의 대안은 따로 정하지 못했습니다.' },
-    { q: '여행 기간은 어느 정도가 적당한가요?', a: `이 코스는 ${days.length}일에 ${tripData.spots.length}곳(하루 평균 ${avg}곳)으로 구성했습니다. 더 느긋하게 보려면 ${more ? `${(tripData.days ?? days.length) + 1}일 코스(${more.name} 추가)를 살펴보세요.` : '하루 더 긴 코스를 트레쥴에서 확인해 보세요.'}` },
+    { q: '여행 기간은 어느 정도가 적당한가요?', a: `이 코스는 ${days.length}일에 ${tripData.spots.length}곳(${perDayText})으로 구성했습니다. 더 느긋하게 보려면 ${more ? `${(tripData.days ?? days.length) + 1}일 코스(${more.name} 추가)를 살펴보세요.` : '하루 더 긴 코스를 트레쥴에서 확인해 보세요.'}` },
   ].map((f) => ({ ...f, generated: 'code' }));
 
   // ── 제목(20~32자): 권역1·권역2 + 시간표

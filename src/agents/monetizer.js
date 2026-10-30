@@ -1108,11 +1108,11 @@ async function monetizeBlogDraft(content) {
     // 위치하는 사례가 실측됐음 — 공정위 지침상 "고지 미흡"으로 판정될 수 있는 위치.
     // 제휴 링크가 있을 때만(hasAffiliate) 여기 노출하고, 링크 카드 옆(buildAffiliateBlock
     // 내부)에도 동일 문구를 남겨 "링크 근처 재고지" 권장사항도 함께 충족한다.
-    hasAffiliate ? PARTNERS_DISCLOSURE : '',
+    (hasAffiliate || (blog_draft.grounded && coupangPrep.count > 0)) ? PARTNERS_DISCLOSURE : '', // D-171 ⑬: 근거 템플릿은 쿠팡 고지를 상단 1회만
     adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
     tldrHtml ? ratingAttributionHtml(content.trip_data) : '', // D-155: 평점이 나오는 한눈에 보기 아래 출처
-    coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 쿠팡 링크가 있으면 TL;DR 아래 대가성 고지
+    (!blog_draft.grounded && coupangPrep.count > 0) ? PARTNERS_DISCLOSURE : '', // D-144: 쿠팡 링크가 있으면 TL;DR 아래 대가성 고지
     distanceDisclosureHtml,                       // 임시 조치(2026-09-08): 직선거리 기준 고지 (거리 언급 직후 1회)
     courseMapHtml,                                // §2(2026-09-08): 코스 지도 (트레쥴 워터마크) — 본문 첫 이미지
     timelineHtml,                                 // B-3: 동선 타임라인 표
@@ -1127,7 +1127,7 @@ async function monetizeBlogDraft(content) {
     faqHtml,
     sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
-    coupangPrep.count > 0 ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지
+    (!blog_draft.grounded && coupangPrep.count > 0) ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
     travelpayoutsFooterHtml,                      // 순위 5 §1: 푸터 배치 (본문 중간 1회 + 여기 1회)
@@ -1147,7 +1147,8 @@ async function monetizeBlogDraft(content) {
     blog_draft: {
       ...blog_draft,
       monetized_html: html,
-      has_affiliate:  hasAffiliate,
+      // D-171 ⑭: 최종 HTML에 제휴 링크(rel=sponsored)가 하나라도 있으면 true — Klook 등 장소 제휴 링크가 있는데 false이던 문제
+      has_affiliate:  hasAffiliate || /rel="nofollow sponsored/.test(html),
     },
   };
 }

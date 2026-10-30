@@ -2372,15 +2372,25 @@ function assembleCourseDraft(content) {
   };
 }
 
+/** D-171 ⑦: 종단·교구 접두어 제거("대한불교조계종 석굴암" → "석굴암") — 표·H3·제목·목차 모두 같은 이름을 쓰도록 trip_data 단계에서 정리한다. */
+function cleanPlaceName(name) {
+  return String(name ?? '').replace(/^(?:대한불교|한국불교)?\s*(?:조계종|태고종|천태종|진각종|관음종|총지종|원효종)\s+/, '').replace(/^(?:대한불교|한국불교)\s+/, '').trim() || name;
+}
+
 async function assembleGroundedDraft(content) {
-  const base = assembleCourseDraft(content); // 제목·슬러그·메타·JSON-LD는 기존 코드 조립과 같다
-  const kw = titleKeyword(content.keyword, content.trip_data);
-  const g = await buildGroundedCourse(content, kw);
+  const cleaned = { ...content, trip_data: { ...content.trip_data, spots: content.trip_data.spots.map((sp) => ({ ...sp, name: cleanPlaceName(sp.name) })) } };
+  const base = assembleCourseDraft(cleaned); // 제목·슬러그·메타는 기존 코드 조립과 같다(정리된 이름 기준)
+  const kw = titleKeyword(content.keyword, cleaned.trip_data);
+  const g = await buildGroundedCourse(cleaned, kw);
   const wordCount = g.sections.reduce((sum, s) => sum + (s.body?.length ?? 0), 0);
-  logger.info(`[blog_content_enhancer] Done: ${kw} (${wordCount}자, 근거 설명 ${g.groundedCount}곳)`);
+  const title = g.title || base.blog_draft.title;
+  logger.info(`[blog_content_enhancer] Done: ${kw} (${wordCount}자 기록용, 근거 설명 ${g.groundedCount}곳, 사진 ${g.photoCount}장)`);
   return {
     ...base,
-    blog_draft: { ...base.blog_draft, ...(g.title ? { title: g.title } : {}), sections: g.sections, faq: g.faq, lead: g.lead, grounded: true, grounded_count: g.groundedCount, grounded_photos: g.photoCount, next_days: g.nextDays, word_count: wordCount },
+    blog_draft: {
+      ...base.blog_draft, title, json_ld: buildJsonLd(title, kw, kw.replace(/\s+/g, '-')), // D-171 ⑭: JSON-LD headline을 실제 제목과 같게
+      sections: g.sections, faq: g.faq, lead: g.lead, grounded: true, grounded_count: g.groundedCount, grounded_photos: g.photoCount, next_days: g.nextDays, word_count: wordCount,
+    },
   };
 }
 

@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_ROOT = path.resolve(__dirname, '../../output/cache/wiki');
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GEO_RADIUS_M = 300;
-const NAME_MAX_KM = 1;
+const NAME_MAX_KM = 0.5; // D-171: 이름이 맞아도 위키 좌표가 있으면 스팟 500m 안일 때만
 const WIKI_THROTTLE_MS = 1000;
 
 // 장소 종류 → 위키 문서 분류(카테고리) 단어. 종류가 구체적일 때만 분류로 채택한다. 명소/유적·유적은 문화재 분류가 너무 넓어(박물관 소장품 문서가 붙음 — 실측) 이름이 맞아야만 채택한다.
@@ -88,14 +88,19 @@ async function pageDetails(lang, ids) {
 
 const usable = (pg) => !(pg.pageprops && 'disambiguation' in pg.pageprops) && pg.extract && pg.extract.length >= 40 && !DISAMBIG_PATTERN.test(pg.extract.slice(0, 200));
 
-function nameMatches(spotName, title, region) {
-  // 지역명 접두어("경주 월정교" → "월정교")는 비교에서 뺀다.
+/**
+ * 스팟 이름 ↔ 문서 제목 점수. 3 = 정규화 후 같음, 2 = 한쪽이 다른 쪽을 포함하되 짧은 쪽이 긴 쪽의 70% 이상, 0 = 불일치.
+ * "불국사" ↔ "경주 불국사 사리탑", "덴포잔 관람차" ↔ "덴포잔"처럼 하위 대상·상위 지역 문서는 비율에서 걸러진다(D-171).
+ */
+function nameScore(spotName, title, region) {
   const strip = (n) => (region && String(n).startsWith(region) && String(n).length > region.length + 1 ? String(n).slice(region.length) : String(n));
   const a = coreName(strip(spotName)); const b = coreName(strip(title));
-  if (normName(spotName) === normName(title)) return true;
-  if (a.length < 2 || b.length < 2) return false;
-  return a === b || (Math.min(a.length, b.length) >= 3 && (a.includes(b) || b.includes(a)));
+  if (normName(strip(spotName)) === normName(strip(title)) || (a.length >= 2 && a === b)) return 3;
+  if (a.length < 3 || b.length < 3) return 0;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return long.includes(short) && short.length / long.length >= 0.7 ? 2 : 0;
 }
+const nameMatches = (spotName, title, region) => nameScore(spotName, title, region) > 0;
 function categoryMatches(lang, kind, pg) {
   const re = CATEGORY_WORDS[lang]?.[kind];
   if (!re) return false;
@@ -112,7 +117,9 @@ async function geoLookup(lang, spot, kind, region) {
   const dist = new Map(hits.map((h) => [h.pageid, h.dist]));
   pages.sort((x, y) => (dist.get(x.pageid) ?? 9e9) - (dist.get(y.pageid) ?? 9e9));
   // (a) 이름 유사도 — 한국어 위키만 한글 이름과 비교한다(영어 문서는 로마자 이름이 있을 때만)
-  const nameOk = pages.find((pg) => (lang === 'ko' || /[A-Za-z]{3,}/.test(spot.name)) && nameMatches(spot.name, pg.title, region));
+  const nameOk = pages
+    .filter((pg) => (lang === 'ko' || /[A-Za-z]{3,}/.test(spot.name)) && nameScore(spot.name, pg.title, region) > 0)
+    .sort((x, y) => nameScore(spot.name, y.title, region) - nameScore(spot.name, x.title, region) || (dist.get(x.pageid) ?? 9e9) - (dist.get(y.pageid) ?? 9e9))[0];
   if (nameOk) return toResult(lang, nameOk, 'geo-name');
   // (b) 분류가 장소 종류와 맞는 가장 가까운 문서 — 종류가 구체적일 때만
   const catOk = pages.find((pg) => categoryMatches(lang, kind, pg));
@@ -120,17 +127,16 @@ async function geoLookup(lang, spot, kind, region) {
   return null;
 }
 
-async function nameLookup(lang, spot) {
-  const data = await api(`${lang}.wikipedia.org`, { ...DETAIL_PROPS, generator: 'search', gsrsearch: spot.name, gsrlimit: 3 });
+async function nameLookup(lang, spot, region) {
+  const data = await api(`${lang}.wikipedia.org`, { ...DETAIL_PROPS, generator: 'search', gsrsearch: spot.name, gsrlimit: 5 });
   const pages = (data?.query?.pages ?? []).sort((a, b) => (a.index ?? 9) - (b.index ?? 9)).filter(usable);
-  const want = normName(spot.name);
-  for (const pg of pages) {
-    const have = normName(pg.title);
-    const exact = have === want;
-    const loose = !exact && ((want.length >= 4 && have.includes(want)) || (have.length >= 4 && want.includes(have)));
-    if (!exact && !loose) continue;
+  const ranked = pages
+    .map((pg) => ({ pg, sc: nameScore(spot.name, pg.title, region) }))
+    .filter((x) => x.sc > 0)
+    .sort((a, b) => b.sc - a.sc);
+  for (const { pg, sc } of ranked) {
     const c = pg.coordinates?.[0];
-    if (loose && !c) continue; // 부분 포함은 좌표가 있어야만 — "치토세"(식당) → "유라 치토세"(인물) 오매칭 방지
+    if (sc < 3 && !c) continue; // 부분 포함은 좌표가 있어야만 — "치토세"(식당) → "유라 치토세"(인물) 오매칭 방지
     if (c && typeof spot.lat === 'number' && typeof spot.lng === 'number' && haversineKm(c.lat, c.lon, spot.lat, spot.lng) > NAME_MAX_KM) continue;
     return toResult(lang, pg, 'name');
   }
@@ -212,13 +218,13 @@ async function voyageLookup(spot, regionKo) {
  */
 export async function fetchWikiFact(spot, { kind, region } = {}) {
   if (!spot?.name) return null;
-  const key = `v4|${cacheKey(spot, kind)}`; // v4: 사진 포함
+  const key = `v5|${cacheKey(spot, kind)}`; // v5: 이름 점수·500m
   const hit = readCache('all', key);
   if (hit) return hit.result;
   let failed = false;
   const attempt = async (fn) => { try { return await fn(); } catch (err) { failed = true; logger.warn(`[placeFacts] 조회 실패 "${spot.name}": ${err.message}`); return null; } };
   let result = await attempt(() => geoLookup('ko', spot, kind, region));
-  if (!result) result = await attempt(() => nameLookup('ko', spot));
+  if (!result) result = await attempt(() => nameLookup('ko', spot, region));
   if (!result) result = await attempt(() => geoLookup('en', spot, kind, region));
   if (!result) result = await attempt(() => voyageLookup(spot, region));
   if (result?.pageimage) result.photo = await attempt(() => commonsPhoto(result.pageimage));
