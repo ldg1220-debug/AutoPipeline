@@ -672,13 +672,18 @@ function validateBlogStructure(content) {
   // 재실행(비용 2배)했고 재작성본은 오히려 더 짧은 2,199자로 통과): 2일 이하 코스는 스팟이 적어 사실만으로 채울 분량이
   // 원래 적다 — 최소 분량을 2400자로 낮춘다.
   // D-146: 코드 조립 초안(blog_draft.assembled==='code')은 사실 블록만이라 분량이 원래 적다 — LLM으로 채우면 창작이 들어가므로 기준을 2000자로 낮춘다(서울 2박3일 실측: 분량 미달 → LLM "장소별 상세" 추가 → 주어 없는 문장·비문).
-  const minTotalChars = draft.grounded ? 2500 : draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
+  const minTotalChars = draft.assembled === 'code' ? 1500 : ((content.trip_data?.days ?? 3) <= 2 ? 2400 : BLOG_MIN_TOTAL_CHARS);
   // D-168 게이트: 근거 설명 명소 ≥ 3 · 사진 ≥ 2 — 못 넘으면 지어서 채우지 말고 반려(조립 글은 재생성 없이 드랍).
   if (draft.grounded) {
     if ((draft.grounded_count ?? 0) < 3) issues.push(`장소 설명 근거 부족: 근거 설명이 붙은 장소 ${draft.grounded_count ?? 0}곳 (최소 3곳)`);
     if ((draft.grounded_photos ?? 0) < 2) issues.push(`사진 부족: 무료 라이선스 사진 ${draft.grounded_photos ?? 0}장 (최소 2장)`);
   }
-  if (totalChars < minTotalChars) {
+  // D-170: 근거 경로(grounded) 코스 글은 글자 수로 반려하지 않는다 — 내용 게이트(근거 설명 ≥3 · 사진 ≥2 · 시간표 · FAQ 5)로 판정하고 글자 수는 기록만 한다.
+  if (draft.grounded) {
+    if (!sections.some((sec) => /시간표/.test(sec.heading ?? ''))) issues.push('시간표 섹션이 없음');
+    if ((faq ?? []).length < 5) issues.push(`FAQ 부족: ${(faq ?? []).length}개 (최소 5개)`);
+    logger.info(`[qa_editor] 근거 경로 코스 글 분량 기록(반려 기준 아님): ${content.keyword} ${totalChars}자`);
+  } else if (totalChars < minTotalChars) {
     issues.push(`글 전체 분량 부족: ${totalChars}자 (최소 ${minTotalChars}자 — AdSense 콘텐츠 가치 기준)`);
   }
 
