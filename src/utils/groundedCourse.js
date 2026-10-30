@@ -180,22 +180,26 @@ const isSightKind = (sp) => !sp.lodging && sp.category !== '숙소' && SIGHT_KIN
 const ACTION = { 시장: '시장 구경', 전망대: '전망 보기', 공원: '산책', 수족관: '수족관 관람', 동물원: '동물원 관람', 테마파크: '하루 종일 즐기기', 해변: '해변 시간', 섬: '섬 다녀오기', 스파: '스파', '사원·성당': '둘러보기', '명소/유적': '둘러보기', 유적: '둘러보기', 명소: '둘러보기' };
 
 /** 권역 이름 = 그날 대표 명소 2개를 묶은 "A·B 일대" (지어낸 동네 이름 금지). */
-function districtOf(tripData, day, list) {
+function districtOf(tripData, day, list, regionName) {
   const fac = getFacilitySpot(tripData, day, list);
   if (fac) return { name: fac.name, short: fac.name, rep: fac };
   const a = pickRepSpot(list, isSightKind);
-  const b = list.find((sp) => isSightKind(sp) && sp !== a);
+  const base = (n) => String(n).replace(/\s+/g, '').replace(regionName ?? '', '');
+  const b = list.find((sp) => isSightKind(sp) && sp !== a && a && !base(sp.name).includes(base(a.name)) && !base(a.name).includes(base(sp.name)));
   const first = a ?? list[0];
-  const names = [first.name, b?.name].filter(Boolean);
+  const trim = (n) => (regionName && String(n).startsWith(regionName) && String(n).length > regionName.length + 1 ? String(n).slice(regionName.length).trim() : String(n));
+  const names = [trim(first.name), b ? trim(b.name) : null].filter(Boolean);
   return { name: `${names.join('·')} 일대`, short: names.join('·'), rep: first };
 }
 
 function roleHint(day, list, i) {
-  const sp = list[i]; const prev = list[i - 1];
+  const prev = list[i - 1];
   if (i === 0) return `${day}일차 첫 일정`;
   if (i === list.length - 1) return `${day}일차 마지막 일정`;
   return `${prev.name} 다음 순서`;
 }
+/** 장소 문단 끝 문장 — 조사 오류를 피해 "…로 넣었습니다" 형태를 쓴다. */
+const roleLine = (day, list, i) => (i === 0 ? `${day}일차 첫 일정으로 넣었습니다.` : i === list.length - 1 ? `${day}일차 마지막 일정으로 넣었습니다.` : `${list[i - 1].name} 다음 순서로 넣었습니다.`);
 
 const TIME_TAG = [[/야경/, '야경'], [/일몰|노을/, '일몰'], [/새벽|일출/, '이른 아침'], [/아침/, '아침']];
 /** 추천 시간대는 위키 근거 문장에 해당 단어가 있을 때만. */
@@ -220,8 +224,9 @@ async function nextDayDistrict(content, days) {
     if (maxDay <= days) return null;
     const list = byDay.get(maxDay);
     const have = new Set(content.trip_data.spots.map((x) => x.name));
-    if (list.every((sp) => have.has(sp.name))) return null;
-    return districtOf({ spots, days: maxDay, dayTotals: brief.dayTotals, distanceSource: brief.distanceSource }, maxDay, list);
+        const fresh = list.filter((sp) => !have.has(sp.name) && isSightKind(sp));
+    if (!fresh.length) return null; // 3일 코스에 이미 있던 장소만이면 "추가되는 권역"이라고 쓰지 않는다
+    return districtOf({ spots, days: maxDay, dayTotals: brief.dayTotals, distanceSource: brief.distanceSource }, maxDay, fresh, content.trip_data.region);
   } catch (err) {
     logger.warn(`[groundedCourse] 하루 더 코스 조회 실패 → 생략: ${err.message}`);
     return null;
@@ -248,7 +253,7 @@ export async function buildGroundedCourse(content, keyword) {
   for (const [sp, d] of descMap) { if (d.photo && photos.size < MAX_PHOTOS) photos.set(sp, d.photo); }
   logger.info(`[groundedCourse] ${keyword}: 근거 설명 ${descMap.size}곳 / 전체 ${tripData.spots.length}곳, 출처 문서 ${sourcesMap.size}개, 사진 ${photos.size}장`);
 
-  const dist = new Map(days.map((d) => [d, districtOf(tripData, d, byDay.get(d))]));
+  const dist = new Map(days.map((d) => [d, districtOf(tripData, d, byDay.get(d), region)]));
   const tt = new Map(days.map((d) => [d, buildTimetable(tripData, d, byDay.get(d))]));
   const ls = new Map(days.map((d) => [d, legSummary(tripData, byDay.get(d))]));
   const facOf = (d) => getFacilitySpot(tripData, d, byDay.get(d));
@@ -261,9 +266,9 @@ export async function buildGroundedCourse(content, keyword) {
   const dn = (d) => dist.get(d).name;
   let s1;
   if (walkDays.length && carDays.length) {
-    s1 = `${region}은 걸어서 이어지는 ${walkDays.map((d) => `${dn(d)}(${d}일차)`).join('·')}와 차량 이동이 필요한 ${carDays.map((d) => `${dn(d)}(${d}일차)`).join('·')}로 나뉩니다.`;
+    s1 = `${region}${josa(region, '은', '는')} 걸어서 이어지는 ${walkDays.map((d) => `${dn(d)}(${d}일차)`).join('·')}와 차량 이동이 필요한 ${carDays.map((d) => `${dn(d)}(${d}일차)`).join('·')}로 나뉩니다.`;
   } else {
-    s1 = `${region}은 ${days.map((d) => `${d}일차 ${dn(d)}`).join(' → ')} 순서로 하루에 한 권역씩 돌도록 구성했습니다.`;
+    s1 = `${region}${josa(region, '은', '는')} ${days.map((d) => `${d}일차 ${dn(d)}`).join(' → ')} 순서로 하루에 한 권역씩 돌도록 구성했습니다.`;
   }
   const facDays = days.filter((d) => facOf(d));
   const boat = tripData.spots.some((sp, i, arr) => arr[i + 1] && (sp.day ?? 1) === (arr[i + 1].day ?? 1) && isBoatLeg(sp, arr[i + 1]));
@@ -298,7 +303,7 @@ export async function buildGroundedCourse(content, keyword) {
     if (facOf(d)) parts.push(`${facOf(d).name} 하나가 하루를 차지하는 날입니다.`);
     else if (l.legs.length) {
       const modeKr = l.modes.map((m) => modeLabel(m)).join('·');
-      parts.push(isWalkDay(d) ? '구간 이동이 모두 도보로 이어집니다.' : `구간 이동은 ${modeKr}을(를) 섞어 씁니다.`);
+      parts.push(isWalkDay(d) ? '구간 이동이 모두 도보로 이어집니다.' : `구간 이동 수단은 ${modeKr}가 섞여 있습니다.`.replace(/([가-힣])가 섞여/, (m, c) => `${c}${(c.charCodeAt(0) - 0xac00) % 28 === 0 ? '가' : '이'} 섞여`));
     }
     return parts.join(' ');
   });
@@ -324,7 +329,7 @@ export async function buildGroundedCourse(content, keyword) {
       const stayTxt = r.stay === null ? '하루 종일' : `머무는 시간 ${r.stay}분(권장)`;
       const tag = desc ? timeTag(desc.extract) : null;
       html += `<h3 style="margin:22px 0 8px">${esc(sp.name)} <span style="font-size:14px;font-weight:400;color:#64748b">· ${esc(kind ?? '장소')} · ${stayTxt}${tag ? ` · 추천 시간대 ${tag}(위키 문서 기준)` : ''}</span></h3>\n`;
-      const para = [...(desc?.sentences ?? []), (i === 0 && list.length === 1) ? '' : `${roleHint(d, list, i)}으로 넣었습니다.`].filter(Boolean).join(' ');
+      const para = [...(desc?.sentences ?? []), (i === 0 && list.length === 1) ? '' : roleLine(d, list, i)].filter(Boolean).join(' ');
       html += `<p style="margin:0 0 10px;line-height:1.9">${esc(para)}</p>\n`;
       body += `\n${sp.name}(${kind ?? '장소'}, ${stayTxt}): ${para}`;
       const ph = photos.get(sp);
@@ -366,14 +371,14 @@ export async function buildGroundedCourse(content, keyword) {
   const longWalk = days.filter((d) => !facOf(d)).map((d) => [d, ls.get(d).legs.filter((l) => l.toNextMode === 'walk').reduce((a, l) => a + l.toNextMinutes, 0)]).filter(([, m]) => m >= 45);
   if (kidSpots.length || longWalk.length) {
     const bits = [];
-    if (kidSpots.length) bits.push(`아이와 함께라면 ${kidSpots.map((sp) => `${sp.name}(${sp.day ?? 1}일차)`).join(', ')}을(를) 중심으로 보세요.`);
+    if (kidSpots.length) bits.push(`아이와 함께 가기 좋은 후보: ${kidSpots.map((sp) => `${sp.name}(${sp.day ?? 1}일차)`).join(', ')}.`);
     if (longWalk.length) bits.push(`${longWalk.map(([d, m]) => `${d}일차는 도보 이동이 합계 ${m}분`).join(', ')}이라 걷는 양이 많습니다.`);
     sit.push(['아이와 함께', bits.join(' ')]);
   }
   const night = days.map((d) => { const l = byDay.get(d); const last = l[l.length - 1]; return inferSpotKind(last) === '전망대' ? [d, last] : null; }).filter(Boolean);
-  if (night.length) sit.push(['야경을 넣고 싶다면', `${night.map(([d, sp]) => `${d}일차 마지막 일정인 ${sp.name}`).join(', ')}은(는) 전망대로 분류된 장소입니다. 해가 진 뒤의 시간에 맞추려면 시간표의 이 일정 시각을 뒤로 옮기면 됩니다.`]);
+  if (night.length) sit.push(['야경을 넣고 싶다면', `그날 마지막 일정이 전망대로 분류된 날: ${night.map(([d, sp]) => `${d}일차 ${sp.name}`).join(', ')}. 해가 진 뒤의 시간에 맞추려면 시간표에서 이 일정 시각을 뒤로 옮기면 됩니다.`]);
   const more = await nextDayDistrict(content, tripData.days ?? days.length);
-  if (more) sit.push(['하루 더 있다면', `트레쥴에서 ${(tripData.days ?? days.length) + 1}일 코스로 보면 ${more.name}${josa(more.name, '이', '가')} 추가됩니다. {{NEXT_DAY_LINK}}`]);
+  if (more) sit.push(['하루 더 있다면', `트레쥴에서 ${(tripData.days ?? days.length) + 1}일 코스로 보면 ${more.name} 쪽이 추가됩니다. {{NEXT_DAY_LINK}}`]);
   if (sit.length) {
     const sitHtml = `<ul style="margin:0 0 14px;padding-left:20px;line-height:1.9">${sit.map(([k, t]) => `<li><b>${esc(k)}</b> — ${esc(t).replace('{{NEXT_DAY_LINK}}', '{{NEXT_DAY_LINK}}')}</li>`).join('')}</ul>`;
     sections.push({ level: 2, heading: '상황별로 바꾸기', id: 'situations', body: sit.map(([k, t]) => `${k}: ${t.replace('{{NEXT_DAY_LINK}}', '')}`).join('\n'), html: sitHtml, nextDays: more ? (tripData.days ?? days.length) + 1 : null, generated: 'code' });
@@ -414,7 +419,8 @@ export async function buildGroundedCourse(content, keyword) {
 
   // ── 제목(20~32자): 권역1·권역2 + 시간표
   const t1 = dist.get(days[0]).short; const t2 = days[1] ? dist.get(days[1]).short : '';
-  const candidates = [`${keyword} 코스 | ${[t1, t2].filter(Boolean).join('·')} 동선 + 시간표`, `${keyword} 코스 | ${t1} 동선 + 시간표`, `${keyword} 코스 | ${t1} 동선·시간표`];
+  const first1 = (n) => String(n).split('·')[0];
+  const candidates = [`${keyword} 코스 | ${[t1, t2].filter(Boolean).join('·')} 동선 + 시간표`, `${keyword} 코스 | ${t1} 동선 + 시간표`, `${keyword} 코스 | ${first1(t1)}${t2 ? `·${first1(t2)}` : ''} 동선 + 시간표`, `${keyword} 코스 | ${first1(t1)} 동선 + 시간표`, `${keyword} 코스 | ${first1(t1)} 동선·시간표`];
   const title = candidates.find((t) => t.length >= 20 && t.length <= 32) ?? null;
 
   return { sections, faq, lead, title, groundedCount: descMap.size, photoCount: usedPhotos, sources: srcList, nextDays: more ? (tripData.days ?? days.length) + 1 : null };
