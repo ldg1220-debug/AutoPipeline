@@ -129,7 +129,7 @@ async function collectDescriptions(spots, region) {
   }
   // D-171 ①: 같은 문서가 두 스팟에 붙으면(해유관·덴포잔 관람차 → Kaiyukan) 문서 좌표에 가장 가까운 스팟 하나만 유지한다
   const byDoc = new Map();
-  for (const t of targets) { const k = t.fact.url; if (!byDoc.has(k)) byDoc.set(k, []); byDoc.get(k).push(t); }
+  for (const t of targets) { const k = t.fact.pageimage || t.fact.url; if (!byDoc.has(k)) byDoc.set(k, []); byDoc.get(k).push(t); }
   const dropped = new Set();
   const km = (a, b) => Math.hypot((a.lat - b.lat) * 111, (a.lng - b.lng) * 111 * Math.cos((a.lat * Math.PI) / 180));
   for (const group of byDoc.values()) {

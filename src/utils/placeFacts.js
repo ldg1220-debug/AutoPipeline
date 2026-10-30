@@ -129,6 +129,8 @@ async function geoLookup(lang, spot, kind, region) {
     .filter((pg) => (lang === 'ko' || /[A-Za-z]{3,}/.test(spot.name)) && nameScore(spot.name, pg.title, region) > 0)
     .sort((x, y) => nameScore(spot.name, y.title, region) - nameScore(spot.name, x.title, region) || (dist.get(x.pageid) ?? 9e9) - (dist.get(y.pageid) ?? 9e9))[0];
   if (nameOk) return toResult(lang, nameOk, 'geo-name');
+  // (b) 분류 채택은 한국어 위키에서만 — 영어 문서는 한글 이름과 비교할 수 없어 "덴포잔 관람차" → Kaiyukan 같은 오매칭이 난다(D-171)
+  if (lang !== 'ko') return null;
   // (b) 분류가 장소 종류와 맞는 가장 가까운 문서 — 종류가 구체적일 때만
   const catOk = pages.find((pg) => categoryMatches(lang, kind, pg));
   if (catOk) return toResult(lang, catOk, 'geo-category');
