@@ -44,6 +44,7 @@
     "perf:review:28d": "node -e \"import('./src/agents/performance_reviewer.js').then(m=>m.runPerformanceReview({daysBack:28}))\"",
     "blog:pipeline": "node scripts/run-blog-pipeline.js",
     "blog:pipeline:auto": "node scripts/run-blog-pipeline.js --auto",
+    "test:guard": "node --test test/unattendedGuard.test.js",
     "blog:login": "node scripts/tistory-login.js",
     "blog:setup-categories": "node scripts/setup-tistory-categories.js",
     "blog:setup-pages": "node scripts/setup-blog-pages.js",

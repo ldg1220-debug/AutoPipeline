@@ -21,6 +21,7 @@ import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import { recordSparseRegions } from '../src/utils/sparseRegions.js';
+import { preflight, filterDuplicates, selectFinalPost, recordLoginRequired, MAX_CANDIDATES_PER_RUN } from '../src/utils/unattendedGuard.js';
 import { installApiUsageTracking } from '../src/utils/apiUsage.js';
 import db from '../src/db/db.js';
 import path from 'path';
@@ -92,6 +93,14 @@ const singleMode = args.includes('--single') || Boolean(forceKeyword);
 // --force-keyword로 이미 처리할 키워드가 정해졌으면 후보가 사실상 1개뿐이라 대화형
 // 선택 화면(120초 대기)이 의미가 없다 — autoMode로 취급해 즉시 진행한다.
 const autoMode = args.includes('--auto') || !process.stdin.isTTY || Boolean(forceKeyword);
+// 무인 실행 안전장치(지시서 2026-11-03): --auto 로 자동 선정 + 실제 발행하는 실행에만 적용한다.
+// (--force-keyword 직접 발행·--draft-only 초안은 사람이 지켜보는 실행이라 제외)
+// 하루 2편 상한 · 실행당 1편 · 로그인 만료 사전 점검 · 중복 발행 금지 · 근거 경로(COURSE_GROUNDED_DESC=on)+내용 게이트 통과 글만.
+const unattended = args.includes('--auto') && !forceKeyword && !draftOnly;
+if (unattended) process.env.COURSE_GROUNDED_DESC = 'on';
+const publishedRowsForGuard = () => db
+  .prepare(`SELECT keyword, title, status, published_at FROM blog_posts WHERE status = 'published'`)
+  .all();
 
 /**
  * 각 키워드를 서로 내용이 겹치지 않는 독립적인 글 주제 2~3개로 확장한다.
@@ -630,6 +639,16 @@ async function main() {
     console.error('[blog:pipeline] 중단: OPENAI_API_KEY가 없습니다. 프로젝트 폴더(AutoPipeline)의 .env 파일과 현재 위치를 확인하세요. (메뉴 8번 = 환경변수 확인)');
     process.exit(1);
   }
+  // 무인 실행 사전 점검: 하루 상한(KST) → 티스토리 로그인. 실패하면 LLM 비용을 쓰기 전에 즉시 종료.
+  if (unattended) {
+    const pf = await preflight({ rows: publishedRowsForGuard() });
+    if (!pf.ok) {
+      logger.warn(`[blog:pipeline] 무인 사전 점검 중단 (${pf.code}): ${pf.message}`);
+      console.log(`[blog:pipeline] ${pf.message}`);
+      process.exit(pf.code === 'login_required' ? 2 : 0);
+    }
+    logger.info(`[blog:pipeline] 무인 사전 점검 통과 — 오늘 발행 ${pf.count}편, 이번 실행 최대 1편`);
+  }
   if (forceKeyword) logger.info(`[blog:pipeline] --force-keyword: "${forceKeyword}" (카테고리: ${forceCategory})`);
 
   // Part 1: Keyword Miner
@@ -1081,6 +1100,14 @@ async function main() {
     logger.warn(`[blog:pipeline] Part 1.7 Tradule Source 실패 (계속 진행, trip_data 없이): ${err.message}`);
   }
 
+  // 무인 실행: 기존 발행 기록(기간 제한 없음)과 같은 키워드 / 같은 지역+일수는 제외하고, 후보는 첫 키워드 + 재시도 1개까지만.
+  if (unattended) {
+    const { kept, dropped } = filterDuplicates(contentData.contents, publishedRowsForGuard(), extractRegion);
+    for (const d of dropped) logger.info(`[blog:pipeline] 무인 중복 방지: "${d.keyword}" 제외 — ${d.reason}`);
+    contentData.contents = kept.slice(0, MAX_CANDIDATES_PER_RUN);
+    logger.info(`[blog:pipeline] 무인 후보 ${contentData.contents.length}개 (게이트 실패 시 다음 키워드 1회만 재시도)`);
+  }
+
   if (!contentData.contents.length) {
     logger.warn('[blog:pipeline] Part 1.7 이후 남은 키워드 없음. 종료.');
     process.exit(0);
@@ -1216,6 +1243,18 @@ async function main() {
     qaData = draftData;
   }
 
+  // 무인 실행: 내용 게이트(QA) 통과 + 근거 경로 코스 글만, 그중 1편. 못 넘으면 발행하지 않는다.
+  if (unattended) {
+    const { selected, rejected } = selectFinalPost(qaData.contents);
+    for (const r of rejected) logger.warn(`[blog:pipeline] 무인 게이트 탈락, 발행 안 함: "${r.keyword}" (${r.blog_qa?.status === 'REJECTED' ? 'QA 반려' : '근거 경로 글 아님'})`);
+    qaData = { ...qaData, contents: selected };
+    if (!selected.length) {
+      logger.warn('[blog:pipeline] 무인 실행: 게이트를 통과한 글 없음 — 이번 실행은 발행하지 않고 종료.');
+      process.exit(0);
+    }
+    logger.info(`[blog:pipeline] 무인 실행: 발행 대상 1편 확정 — "${selected[0].keyword}"`);
+  }
+
   // Part 3: Asset Builder
   let assetData;
   try {
@@ -1297,6 +1336,10 @@ async function main() {
   await writeJSON(`${outDir}/blog/published_${date}.json`, publishedData);
   const pubCount = publishedData.contents?.filter((c) => c.blog_publish?.status === 'published').length ?? 0;
   logger.info(`[blog:pipeline] Part 5 완료. 발행: ${pubCount}개`);
+  // 발행기는 세션 만료 시 blog_publish 없이 그대로 돌려준다 → 무인 실행이면 로그인 필요로 기록.
+  if (unattended && pubCount === 0 && (publishedData.contents ?? []).some((c) => !c.blog_publish)) {
+    recordLoginRequired('발행 단계에서 세션 만료 감지');
+  }
 
   // Part 6: Analytics (매일 실행 — 단독 실행 시 조건 없음)
   try {
