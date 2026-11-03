@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const node = (file, ...args) => ({ cmd: process.execPath, args: [path.join(ROOT, 'scripts', file), ...args] });
+const cmdFile = (file) => ({ cmd: 'cmd.exe', args: ['/c', path.join(ROOT, 'scripts', file)] });
 
 const ITEMS = [
   { label: '블로그 로그인 (티스토리)',                       build: () => node('tistory-login.js') },
@@ -27,6 +28,9 @@ const ITEMS = [
     build: (v) => node('unpublish-post.js', ...v.split(/[\s,]+/).filter(Boolean), '--yes') },
   { label: '트레쥴 지역 스냅샷 갱신',                         build: () => node('refresh-tradule-regions.js') },
   { label: '지역별 일수 검색량 리포트 (검색광고 API만 · LLM 비용 0)', build: () => node('region-days-volume.js') },
+  // 번호가 밀리지 않도록 맨 끝에 추가 (다른 안내문이 "메뉴 N번"을 가리킴)
+  { label: '자동 발행 스케줄 등록 (매일 09:20·17:20, Windows 작업 스케줄러)', confirm: true, build: () => cmdFile('install-schedule.cmd') },
+  { label: '자동 발행 스케줄 해제',                           confirm: true, build: () => cmdFile('uninstall-schedule.cmd') },
 ];
 
 const PRINT_ONLY = Boolean(process.env.AB_PRINT);

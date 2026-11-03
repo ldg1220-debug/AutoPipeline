@@ -16,6 +16,8 @@ import logger from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SESSION_PATH = path.resolve(__dirname, '../../data/tistory_session.json');
+/** 영구 브라우저 프로필(user-data-dir) — 카카오/티스토리 "로그인 상태 유지" 쿠키가 여기 남는다. data/ 는 .gitignore 대상. */
+export const PROFILE_DIR = path.resolve(__dirname, '../../data/browser_profile');
 
 async function loadCookies() {
   // 1순위: 파일
@@ -74,5 +76,71 @@ export async function isLoggedIn(page) {
     return !loginBtn;
   } catch {
     return false;
+  }
+}
+
+/** 영구 프로필이 이미 만들어져 있는가 (메뉴 1번 로그인 1회 후 true). */
+export async function hasPersistentProfile() {
+  try { return (await fs.readdir(PROFILE_DIR)).length > 0; } catch { return false; }
+}
+
+/**
+ * 영구 프로필로 브라우저 컨텍스트를 연다 (msedge → chrome → 번들 chromium 순).
+ * 비밀번호는 저장·자동 입력하지 않는다 — 로그인은 사람이 1회 하고, 이후엔 프로필의 쿠키만 쓴다.
+ */
+export async function launchPersistentTistory({ headless = true, profileDir = PROFILE_DIR } = {}) {
+  await fs.mkdir(profileDir, { recursive: true });
+  let lastErr;
+  for (const channel of ['msedge', 'chrome', undefined]) {
+    try {
+      return await chromium.launchPersistentContext(profileDir, { headless, ...(channel ? { channel } : {}) });
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr ?? new Error('브라우저를 열 수 없음');
+}
+
+/** 컨텍스트의 티스토리 쿠키를 data/tistory_session.json 에 저장 (발행기가 읽는 파일과 동기화). */
+export async function saveSessionCookies(context, sessionPath = SESSION_PATH) {
+  const raw = await context.cookies(['https://tistory.com', 'https://www.tistory.com']);
+  if (!raw.length) return 0;
+  const cookies = raw.map((c) => ({
+    name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires ?? -1,
+    httpOnly: c.httpOnly ?? false, secure: c.secure ?? true, sameSite: c.sameSite ?? 'Lax',
+  }));
+  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+  await fs.writeFile(sessionPath, JSON.stringify(cookies, null, 2), 'utf-8');
+  return cookies.length;
+}
+
+/**
+ * 예약 실행마다 호출: 영구 프로필로 티스토리를 열어 로그인 여부를 확인하고,
+ * 로그인돼 있으면 갱신된 쿠키를 저장해 세션을 연장한다.
+ * 프로필이 아직 없으면(메뉴 1번 미실행) 기존 쿠키 파일 방식으로 확인만 한다.
+ * @returns {Promise<boolean>}
+ */
+export async function verifyAndRefreshSession() {
+  if (!(await hasPersistentProfile())) {
+    let browser = null;
+    for (const channel of ['msedge', 'chrome', undefined]) {
+      try { browser = await chromium.launch({ headless: true, ...(channel ? { channel } : {}) }); break; } catch { /* 다음 */ }
+    }
+    if (!browser) throw new Error('브라우저를 열 수 없음');
+    try {
+      const context = await createTistoryContext(browser);
+      if (!context) return false;
+      return await isLoggedIn(await context.newPage());
+    } finally { await browser.close().catch(() => {}); }
+  }
+  const context = await launchPersistentTistory({ headless: true });
+  try {
+    const page = context.pages()[0] ?? await context.newPage();
+    // 관리 페이지 접근 — 로그인/카카오 페이지로 튕기면 만료
+    await page.goto('https://www.tistory.com/manage', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const expired = /\/auth\/login|accounts\.kakao\.com/.test(page.url()) || Boolean(await page.$('a[href*="login"]'));
+    if (expired) return false;
+    await saveSessionCookies(context);
+    return true;
+  } finally {
+    await context.close().catch(() => {});
   }
 }
