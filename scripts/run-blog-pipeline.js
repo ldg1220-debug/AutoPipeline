@@ -21,7 +21,7 @@ import { writeJSON } from '../src/utils/fileIO.js';
 import { config } from '../src/config/index.js';
 import logger from '../src/utils/logger.js';
 import { recordSparseRegions } from '../src/utils/sparseRegions.js';
-import { preflight, filterDuplicates, selectFinalPost, recordLoginRequired, MAX_CANDIDATES_PER_RUN } from '../src/utils/unattendedGuard.js';
+import { preflight, filterDuplicates, selectFinalPost, recordLoginRequired, notifyLoginRequiredOnce, MAX_CANDIDATES_PER_RUN } from '../src/utils/unattendedGuard.js';
 import { installApiUsageTracking } from '../src/utils/apiUsage.js';
 import db from '../src/db/db.js';
 import path from 'path';
@@ -1363,6 +1363,7 @@ async function main() {
   // 발행기는 세션 만료 시 blog_publish 없이 그대로 돌려준다 → 무인 실행이면 로그인 필요로 기록.
   if (unattended && pubCount === 0 && (publishedData.contents ?? []).some((c) => !c.blog_publish)) {
     recordLoginRequired('발행 단계에서 세션 만료 감지');
+    await notifyLoginRequiredOnce();
   }
 
   // Part 6: Analytics (매일 실행 — 단독 실행 시 조건 없음)

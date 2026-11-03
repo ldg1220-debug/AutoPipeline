@@ -1,5 +1,5 @@
 @echo off
-rem Register the unattended-publish tasks (10:20 and 19:40 daily) in Windows Task Scheduler.
+rem Register the unattended-publish tasks (09:20 and 17:20 daily) in Windows Task Scheduler.
 rem Run from the user account that holds the Tistory login + .env (no admin rights needed).
 setlocal
 chcp 65001 >nul

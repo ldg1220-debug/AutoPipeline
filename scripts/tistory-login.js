@@ -11,7 +11,7 @@ import readline from 'readline';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { chromium } from 'playwright';
+import { launchPersistentTistory } from '../src/utils/playwright_session.js';
 
 const __dirname  = path.dirname(fileURLToPath(import.meta.url));
 const SESSION_PATH = path.resolve(__dirname, '../data/tistory_session.json');
@@ -55,15 +55,14 @@ async function saveAndReport(cookies) {
 
 async function playwrightLogin() {
   console.log('\n[ 크롬 창이 열립니다 — 카카오/티스토리 계정으로 로그인하세요 ]');
-  console.log('  로그인 완료 후 자동으로 쿠키가 저장됩니다.\n');
+  console.log('  ★ 카카오 로그인 화면의 "로그인 상태 유지"를 반드시 체크하세요 (자동 발행이 이 로그인을 계속 씁니다).');
+  console.log('  로그인 완료 후 자동으로 쿠키가 저장됩니다. 이후엔 만료 알림이 올 때만 다시 실행하면 됩니다.');
+  console.log('  (비밀번호는 저장하지 않습니다. 로그인 정보는 data/browser_profile 폴더에만 남습니다.)\n');
 
-  // 시스템 Chrome 우선, 없으면 Playwright 내장 Chromium
-  const browser = await chromium.launch({ headless: false, channel: 'chrome' }).catch(() =>
-    chromium.launch({ headless: false })
-  );
-
-  const context = await browser.newContext();
-  const page    = await context.newPage();
+  // 영구 프로필(user-data-dir) — 예약 실행이 같은 프로필로 세션을 열어 쿠키를 갱신한다.
+  const context = await launchPersistentTistory({ headless: false });
+  const browser = { close: () => context.close() };
+  const page    = context.pages()[0] ?? await context.newPage();
   await page.goto('https://www.tistory.com/auth/login');
 
   console.log('  로그인 대기 중... (최대 3분)');

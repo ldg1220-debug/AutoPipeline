@@ -29,7 +29,7 @@ const ITEMS = [
   { label: '트레쥴 지역 스냅샷 갱신',                         build: () => node('refresh-tradule-regions.js') },
   { label: '지역별 일수 검색량 리포트 (검색광고 API만 · LLM 비용 0)', build: () => node('region-days-volume.js') },
   // 번호가 밀리지 않도록 맨 끝에 추가 (다른 안내문이 "메뉴 N번"을 가리킴)
-  { label: '자동 발행 스케줄 등록 (매일 10:20·19:40, Windows 작업 스케줄러)', confirm: true, build: () => cmdFile('install-schedule.cmd') },
+  { label: '자동 발행 스케줄 등록 (매일 09:20·17:20, Windows 작업 스케줄러)', confirm: true, build: () => cmdFile('install-schedule.cmd') },
   { label: '자동 발행 스케줄 해제',                           confirm: true, build: () => cmdFile('uninstall-schedule.cmd') },
 ];
 

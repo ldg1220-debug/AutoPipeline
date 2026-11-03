@@ -14,8 +14,8 @@ import {
 const REGIONS = ['오사카', '세부', '도쿄', '경주'];
 const extractRegion = (t) => REGIONS.find((r) => String(t ?? '').includes(r)) ?? null;
 
-// 2026-11-03 10:30 KST = 2026-11-03T01:30Z
-const NOW = new Date('2026-11-03T01:30:00Z');
+// 2026-11-03 09:30 KST = 2026-11-03T00:30Z (첫 예약 09:20 직후)
+const NOW = new Date('2026-11-03T00:30:00Z');
 const row = (keyword, published_at, extra = {}) => ({ keyword, title: keyword, status: 'published', published_at, ...extra });
 
 test('KST 날짜: UTC 15:00 이후는 다음 날', () => {
@@ -80,16 +80,62 @@ test('로그인 만료: 발행 중단 + logs 에 "로그인 필요" 기록', asy
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'));
   const origErr = console.error; console.error = () => {};
   try {
-    const r = await preflight({ rows: [], now: NOW, loginCheck: async () => false, logDir: dir });
+    const sent = [];
+    const notify = async (m) => { sent.push(m); };
+    const r = await preflight({ rows: [], now: NOW, loginCheck: async () => false, logDir: dir, notify });
     assert.equal(r.ok, false);
     assert.equal(r.code, 'login_required');
     const log = fs.readFileSync(path.join(dir, 'login-required.log'), 'utf8');
     assert.match(log, /로그인 필요/);
-    assert.match(log, /2026-11-03 10:30:00 KST/);
-    // 확인 중 예외도 안전하게 중단
-    const r2 = await preflight({ rows: [], now: NOW, loginCheck: async () => { throw new Error('boom'); }, logDir: dir });
+    assert.match(log, /2026-11-03 09:30:00 KST/);
+    // 확인 중 예외도 안전하게 중단 (알림은 보내지 않음 — 만료가 확정된 게 아니므로)
+    const r2 = await preflight({ rows: [], now: NOW, loginCheck: async () => { throw new Error('boom'); }, logDir: dir, notify });
     assert.equal(r2.code, 'login_required');
+    assert.equal(sent.length, 1);
   } finally { console.error = origErr; fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('로그인 만료 알림: 만료당 1회만, 로그인 복구 후 다시 만료되면 다시 알림', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'));
+  const origErr = console.error; console.error = () => {};
+  try {
+    const sent = [];
+    const notify = async (m) => { sent.push(m); };
+    const expired = () => preflight({ rows: [], now: NOW, loginCheck: async () => false, logDir: dir, notify });
+    const r1 = await expired();
+    const r2 = await expired(); // 같은 만료가 이어지는 다음 예약 실행
+    assert.equal(r1.alerted, true);
+    assert.equal(r2.alerted, false);
+    assert.deepEqual(sent, ['티스토리 로그인 필요']);
+    // 로그인 복구(점검 통과) → 상태 초기화
+    const ok = await preflight({ rows: [], now: NOW, loginCheck: async () => true, logDir: dir, notify });
+    assert.equal(ok.ok, true);
+    // 다시 만료 → 다시 1회 알림
+    const r3 = await expired();
+    assert.equal(r3.alerted, true);
+    assert.equal(sent.length, 2);
+  } finally { console.error = origErr; fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('알림 전송이 실패해도 발행 중단 결과는 그대로', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'));
+  const origErr = console.error; console.error = () => {};
+  try {
+    const r = await preflight({ rows: [], now: NOW, loginCheck: async () => false, logDir: dir, notify: async () => { throw new Error('telegram down'); } });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'login_required');
+  } finally { console.error = origErr; fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('스케줄 시각: 09:20·17:20 (이전 10:20·19:40 흔적 없음)', () => {
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const ps1 = fs.readFileSync(path.join(root, 'scripts/install-schedule.ps1'), 'utf8');
+  assert.match(ps1, /'Publish-0920' = '09:20'/);
+  assert.match(ps1, /'Publish-1720' = '17:20'/);
+  assert.doesNotMatch(ps1, /\$times\s*=.*(10:20|19:40)/);
+  const un = fs.readFileSync(path.join(root, 'scripts/uninstall-schedule.cmd'), 'utf8');
+  assert.match(un, /Publish-0920/);
+  assert.match(un, /Publish-1720/);
 });
 
 test('사전 점검: 상한 도달이면 로그인 확인조차 하지 않고 종료', async () => {

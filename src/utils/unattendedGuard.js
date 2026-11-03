@@ -5,7 +5,8 @@
  * 규칙(지시서 2026-11-03):
  *  - 하루(KST 날짜) 발행 상한 2편, 한 번 실행에 최대 1편
  *  - 같은 키워드 / 같은 지역+일수 글은 다시 발행하지 않는다(기간 제한 없이 발행 기록 전체 대조)
- *  - 티스토리 로그인 만료면 발행 시도 자체를 중단하고 logs 에 "로그인 필요" 기록
+ *  - 티스토리 로그인 만료면 발행 시도 자체를 중단하고 logs 에 "로그인 필요" 기록 + notifier 로 만료당 1회 알림
+ *  - 로그인은 영구 브라우저 프로필(data/browser_profile)로 유지하고 예약 실행마다 쿠키를 갱신(세션 연장). 비밀번호 자동 입력은 쓰지 않는다
  *  - 코스 글은 근거 경로(grounded) + 내용 게이트(QA 승인)를 통과한 것만, 게이트 실패 시 다음 키워드 1회만 재시도
  */
 import fs from 'fs';
@@ -117,31 +118,43 @@ export function recordLoginRequired(detail = '', now = new Date(), dir = LOGS_DI
   return line;
 }
 
-/** 실제 티스토리 로그인 상태 확인 (브라우저 사용, 테스트에서는 주입으로 대체). */
+/** 실제 티스토리 로그인 확인 + 세션 연장 (영구 프로필 → 쿠키 갱신). 테스트에서는 주입으로 대체. */
 export async function checkTistoryLogin() {
-  const { createTistoryContext, isLoggedIn } = await import('./playwright_session.js');
-  const { chromium } = await import('playwright');
-  // blog_publisher.js 와 같은 순서(msedge → chrome → 번들 chromium)로 브라우저를 연다.
-  let browser = null;
-  for (const channel of ['msedge', 'chrome', undefined]) {
-    try { browser = await chromium.launch(channel ? { headless: true, channel } : { headless: true }); break; } catch { /* 다음 */ }
-  }
-  if (!browser) throw new Error('브라우저를 열 수 없음');
+  const { verifyAndRefreshSession } = await import('./playwright_session.js');
+  return verifyAndRefreshSession();
+}
+
+const ALERT_STATE = 'login-alert.state';
+
+/**
+ * 로그인 만료 알림을 "만료당 1회"만 보낸다. 상태 파일이 있으면(이미 알림) 건너뛰고,
+ * 로그인 확인에 성공하면 clearLoginAlertState 로 지워 다음 만료 때 다시 알린다.
+ * @param {{notify?:(msg:string)=>Promise<void>, dir?:string, now?:Date}} [opts] notify 기본값: notifier 의 sendLoginRequiredAlert
+ * @returns {Promise<boolean>} 실제로 보냈는지
+ */
+export async function notifyLoginRequiredOnce({ notify, dir = LOGS_DIR, now = new Date() } = {}) {
+  const stateFile = path.join(dir, ALERT_STATE);
+  if (fs.existsSync(stateFile)) return false;
   try {
-    const context = await createTistoryContext(browser);
-    if (!context) return false;
-    const page = await context.newPage();
-    return await isLoggedIn(page);
-  } finally {
-    await browser.close().catch(() => {});
-  }
+    const send = notify ?? (await import('./notifier.js')).sendLoginRequiredAlert;
+    await send('티스토리 로그인 필요');
+  } catch { /* 알림 실패는 무시 — logs 기록은 이미 남음 */ }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(stateFile, now.toISOString(), 'utf8');
+  } catch { /* 무시 */ }
+  return true;
+}
+
+export function clearLoginAlertState(dir = LOGS_DIR) {
+  try { fs.rmSync(path.join(dir, ALERT_STATE), { force: true }); } catch { /* 무시 */ }
 }
 
 /**
  * 파이프라인 시작 전 점검: 하루 상한 → 로그인. 하나라도 실패하면 ok=false (호출부가 즉시 종료).
  * @returns {Promise<{ok:boolean, code?:'daily_limit'|'login_required', message?:string, count?:number}>}
  */
-export async function preflight({ rows, now = new Date(), loginCheck = checkTistoryLogin, logDir = LOGS_DIR } = {}) {
+export async function preflight({ rows, now = new Date(), loginCheck = checkTistoryLogin, logDir = LOGS_DIR, notify } = {}) {
   const daily = checkDailyLimit(rows, now);
   if (!daily.ok) {
     return { ok: false, code: 'daily_limit', count: daily.count, message: `오늘(KST ${daily.date}) 이미 ${daily.count}편 발행 — 하루 상한 ${daily.limit}편 도달, 종료합니다.` };
@@ -150,7 +163,9 @@ export async function preflight({ rows, now = new Date(), loginCheck = checkTist
   try { loggedIn = await loginCheck(); } catch (err) { loggedIn = false; recordLoginRequired(`확인 실패: ${err.message}`, now, logDir); return { ok: false, code: 'login_required', message: '티스토리 로그인 확인 실패 — 발행 중단' }; }
   if (!loggedIn) {
     recordLoginRequired('', now, logDir);
-    return { ok: false, code: 'login_required', message: '티스토리 로그인 필요 — 발행 중단 (메뉴 1번 실행)' };
+    const alerted = await notifyLoginRequiredOnce({ notify, dir: logDir, now });
+    return { ok: false, code: 'login_required', alerted, message: '티스토리 로그인 필요 — 발행 중단 (메뉴 1번 실행)' };
   }
+  clearLoginAlertState(logDir);
   return { ok: true, count: daily.count };
 }

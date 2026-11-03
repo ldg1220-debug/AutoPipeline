@@ -76,6 +76,17 @@ export async function sendErrorAlert(stage, errorMessage) {
 }
 
 /**
+ * 티스토리 로그인 만료 알림 (무인 발행 중단). 텔레그램이 설정돼 있을 때만 전송, 아니면 로그만.
+ * (현재 notifier 에 있는 채널은 텔레그램뿐 — 메일 등은 없음)
+ */
+export async function sendLoginRequiredAlert(message = '티스토리 로그인 필요') {
+  await sendTelegram([
+    `🔑 *${message}*`,
+    '무인 자동 발행을 중단했습니다. PC에서 메뉴 1번(블로그 로그인)으로 로그인하면 다음 예약부터 다시 발행됩니다.',
+  ].join('\n'));
+}
+
+/**
  * 구독자 마일스톤 달성 알림.
  */
 export async function sendSubscriberAlert(channelName, subscribers, milestone) {
