@@ -1105,7 +1105,7 @@ async function main() {
     const { kept, dropped } = filterDuplicates(contentData.contents, publishedRowsForGuard(), extractRegion);
     for (const d of dropped) logger.info(`[blog:pipeline] 무인 중복 방지: "${d.keyword}" 제외 — ${d.reason}`);
     contentData.contents = kept.slice(0, MAX_CANDIDATES_PER_RUN);
-    logger.info(`[blog:pipeline] 무인 후보 ${contentData.contents.length}개 (게이트 실패 시 다음 키워드 1회만 재시도)`);
+    logger.info(`[blog:pipeline] 무인 후보 ${contentData.contents.length}개 (순차 생성: 게이트 실패 시에만 다음 키워드 1회 재시도)`);
   }
 
   if (!contentData.contents.length) {
@@ -1120,6 +1120,9 @@ async function main() {
     process.exit(0);
   }
 
+  // Part 2~2.5(+무인 게이트): 후보 단위로 실행할 수 있게 함수로 묶는다. 통과한 글이 없으면 null.
+  // 무인 실행은 후보를 순차로 1개씩만 생성한다(첫 키워드가 통과하면 두 번째는 LLM을 쓰지 않음 — D-172).
+  async function draftAndGate(contentData) {
   // Part 2: Content Enhancer
   const draftData = await enhanceAllBlogDrafts(contentData);
   await writeJSON(`${outDir}/blog/draft_${date}.json`, draftData);
@@ -1235,8 +1238,8 @@ async function main() {
     }
 
     if (qaData.contents.length === 0) {
-      logger.warn('[blog:pipeline] QA 통과 항목 없음 (재작성 포함). 종료.');
-      process.exit(0);
+      logger.warn('[blog:pipeline] QA 통과 항목 없음 (재작성 포함).');
+      return null;
     }
   } catch (err) {
     logger.warn(`[blog:pipeline] Part 2.5 QA 실패 (${err.message}). 원본으로 계속.`);
@@ -1249,10 +1252,31 @@ async function main() {
     for (const r of rejected) logger.warn(`[blog:pipeline] 무인 게이트 탈락, 발행 안 함: "${r.keyword}" (${r.blog_qa?.status === 'REJECTED' ? 'QA 반려' : '근거 경로 글 아님'})`);
     qaData = { ...qaData, contents: selected };
     if (!selected.length) {
-      logger.warn('[blog:pipeline] 무인 실행: 게이트를 통과한 글 없음 — 이번 실행은 발행하지 않고 종료.');
-      process.exit(0);
+      logger.warn('[blog:pipeline] 무인 실행: 이 후보는 게이트를 통과하지 못함.');
+      return null;
     }
     logger.info(`[blog:pipeline] 무인 실행: 발행 대상 1편 확정 — "${selected[0].keyword}"`);
+  }
+  return { draftData, qaData };
+  }
+
+  let draftData;
+  let qaData;
+  {
+    let result = null;
+    if (unattended) {
+      // 순차 생성: 첫 후보가 게이트를 통과하면 끝, 탈락했을 때만 다음 키워드로 1회 재시도(LLM 비용 최대 1편분 추가).
+      const candidates = contentData.contents.slice(0, MAX_CANDIDATES_PER_RUN);
+      for (let i = 0; i < candidates.length && !result; i++) {
+        if (i > 0) logger.info(`[blog:pipeline] 무인 실행: 앞 후보 게이트 탈락 → 다음 키워드 "${candidates[i].keyword}" 1회 재시도`);
+        result = await draftAndGate({ ...contentData, contents: [candidates[i]] });
+      }
+      if (!result) logger.warn('[blog:pipeline] 무인 실행: 게이트를 통과한 글 없음 — 이번 실행은 발행하지 않고 종료.');
+    } else {
+      result = await draftAndGate(contentData);
+    }
+    if (!result) process.exit(0);
+    ({ draftData, qaData } = result);
   }
 
   // Part 3: Asset Builder
