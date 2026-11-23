@@ -2378,3 +2378,8 @@
 - **버린 대안**: `src/utils/scheduler.js`(CRON_SCHEDULE) 재사용 — app.js가 블로그 외 파이프라인까지 포함. 서버 실행 — 쿠키·키가 PC `.env`에만 있음. 후보 2개를 한 번에 동시 생성 — 매번 LLM 비용이 2배가 되어 트래픽이 적은 지금은 비용 절감이 우선(초안: 동시 생성 → 2026-11-03 순차로 변경).
 - **근거**: 사람이 안 눌러도 하루 1~2편. 게이트 실패·로그인 만료 시 "안 올리는 쪽"으로 실패. 사용자 로그온 상태에서만 실행, 절전 시 깨우기. 작업 시각은 PC 로컬 시간이므로 PC 시간대가 KST여야 한다.
 - **관련 파일**: `src/utils/unattendedGuard.js`, `scripts/run-blog-pipeline.js`, `scripts/scheduled-publish.cmd`, `scripts/install-schedule.cmd`/`.ps1`, `scripts/uninstall-schedule.cmd`, `scripts/menu.js`, `test/unattendedGuard.test.js`, `docs/UNATTENDED_PUBLISH.md`
+
+### D-172: 코스 글 레이아웃·광고·에셋 정리 (전면 검토 후속)
+- **결정**: 근거 템플릿에서 (1) 애드센스를 시간표 아래 · 가운데 일차 앞(2일 이상) · FAQ 앞 3곳으로(기존 제목 아래·본문 중간·글 끝 슬롯 끔) (2) 섹션 번호 배지 제거 (3) 쿠팡 준비물·숙소·eSIM 제휴는 "떠나기 전 체크리스트" 한 곳, 시설 입장권은 일차 끝 유지, eSIM 푸터 반복 제거 (4) 코스 글 인포카드 생성 중단(티스토리가 data: 이미지를 지원하지 않아 발행마다 제거됨) (5) 썸네일은 트레쥴 지도 + "{지역} {N박M일}" 96px·부제 48px, 지도 실패 시 본문 Commons 사진으로 대체, 지도 하단 Google 로고·지도 데이터 표기는 가리지 않음.
+- **근거**: 291 모바일 실측 — 첫 화면은 스킨의 네이버 지도 광고, 애드센스 슬롯 위치가 콘텐츠 흐름과 무관, 제휴 블록 분산, 인포카드 미노출, 썸네일 글씨가 목록에서 안 읽힘·생성 실패 시 검은 화면. Google 모바일 권장(첫 화면엔 읽을 내용 우선, 큰 광고는 첫 화면 아래).
+- **관련 파일**: `src/agents/monetizer.js`, `src/agents/blog_asset_builder.js`, `src/utils/groundedCourse.js`

@@ -392,6 +392,23 @@ async function fetchSectionImages(sections, keyword, category, destDir, sharedGl
   return paths;
 }
 
+/** D-172: 썸네일 제목 합성 — "{지역} {N박M일}"을 크게(96px), "|" 뒤 부제를 작게(48px, 최대 2줄). 목록 썸네일에서도 읽히는 크기. */
+async function composeTitleThumbnail(srcPath, rawTitle, outPath) {
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const [head, sub = ''] = rawTitle.split(/\s*[|—]\s*/);
+  const main = esc(head.replace(/\s*코스$/, '').slice(0, 14));
+  const subLines = [sub.slice(0, 22), sub.slice(22, 44)].filter(Boolean).map(esc);
+  // 지도 하단의 Google 로고·지도 데이터 표기(약 40px)는 가리지 않는다(지도 약관상 표시 유지)
+  const BAND_BOTTOM = 588;
+  const bandTop = BAND_BOTTOM - 150 - subLines.length * 60;
+  const font = 'Malgun Gothic, Noto Sans KR, Apple SD Gothic Neo, sans-serif';
+  const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="${bandTop}" width="1200" height="${BAND_BOTTOM - bandTop}" fill="#0f172a" fill-opacity="0.78"/>` +
+    `<text x="60" y="${bandTop + 110}" font-size="96" font-weight="800" fill="#ffffff" font-family="${font}">${main}</text>` +
+    subLines.map((t, k) => `<text x="62" y="${bandTop + 180 + k * 60}" font-size="48" font-weight="600" fill="#e2e8f0" font-family="${font}">${t}</text>`).join('') + `</svg>`;
+  await sharp(srcPath).resize(1200, 630, { fit: 'cover' }).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toFile(outPath);
+  return outPath;
+}
+
 // ── ③ 인포그래픽 카드 (Playwright 스크린샷) ──────────────────────────────
 
 /**
@@ -720,21 +737,21 @@ async function buildAssets(content, sharedGlobalIds = null) {
   const skipThumb = process.env.AP_SKIP_THUMBNAIL === '1';
   // D-153(AUAFF21 §5): 썸네일 소스 스위치 THUMBNAIL_SOURCE = map(기본 D-166 — 트레쥴 코스 지도 + 제목; gpt-image-1 접근 불가) | dalle | pexels(DALL-E·HTML 건너뛰고 Pexels 직행)
   const thumbSource = String(process.env.THUMBNAIL_SOURCE ?? 'map').toLowerCase();
-  if (thumbSource === 'map' && !skipThumb && content.trip_data?.imageUrl) {
-    try {
-      const raw = path.join(assetDir, 'thumbnail_map_raw.jpg');
-      const out = path.join(assetDir, 'thumbnail.jpg');
-      await downloadImage(content.trip_data.imageUrl, raw);
-      const title = String(content.blog_draft?.title ?? content.keyword).replace(/[<>&]/g, '');
-      const lines = [title.slice(0, 17), title.slice(17, 34)].filter(Boolean);
-      const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="380" width="1200" height="250" fill="#0f172a" fill-opacity="0.72"/>` +
-        lines.map((t, i) => `<text x="60" y="${470 + i * 70}" font-size="56" font-weight="700" fill="#ffffff" font-family="Malgun Gothic, Noto Sans KR, Apple SD Gothic Neo, sans-serif">${t}</text>`).join('') + `</svg>`;
-      await sharp(raw).resize(1200, 630, { fit: 'cover' }).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 88 }).toFile(out);
-      await fs.unlink(raw).catch(() => {});
-      result.thumbnail = out;
-      logger.info(`[blog_asset_builder] Thumbnail (트레쥴 지도+제목): ${content.keyword}`);
-    } catch (err) {
-      logger.warn(`[blog_asset_builder] map 썸네일 실패 → DALL-E 경로로 진행: ${err.message}`);
+  if (thumbSource === 'map' && !skipThumb && content.trip_data?.spots?.length) {
+    // D-172: 트레쥴 지도 + 큰 제목(지역·일수 크게, 부제 작게). 지도를 못 받으면 본문의 Commons 사진으로 대체 — 검은 빈 썸네일 방지
+    const commonsPhoto = (content.blog_draft?.sections ?? []).map((sec) => String(sec.html ?? '').match(/src="(https:\/\/upload\.wikimedia\.org\/[^"]+)"/)?.[1]).find(Boolean);
+    for (const [label, src] of [['트레쥴 지도', content.trip_data.imageUrl], ['Commons 사진', commonsPhoto]]) {
+      if (!src || result.thumbnail) continue;
+      try {
+        const raw = path.join(assetDir, 'thumbnail_src_raw.jpg');
+        const out = path.join(assetDir, 'thumbnail.jpg');
+        await downloadImage(src.replace(/&amp;/g, '&'), raw);
+        result.thumbnail = await composeTitleThumbnail(raw, String(content.blog_draft?.title ?? content.keyword), out);
+        await fs.unlink(raw).catch(() => {});
+        logger.info(`[blog_asset_builder] Thumbnail (${label}+제목): ${content.keyword}`);
+      } catch (err) {
+        logger.warn(`[blog_asset_builder] ${label} 썸네일 실패: ${err.message}`);
+      }
     }
   }
   // 1. 썸네일 — DALL-E 3 우선, 실패 시 Pexels 폴백
@@ -812,7 +829,8 @@ async function buildAssets(content, sharedGlobalIds = null) {
   }
 
   // 4. ③ 인포그래픽 카드 — 핵심 수치 추출 → Playwright 스크린샷
-  if (config.openai.apiKey) {
+  // D-172: 코스 글은 생성하지 않는다 — 티스토리가 data: 이미지를 지원하지 않아 발행 때마다 제거되어 독자에게 보이지 않았다
+  if (config.openai.apiKey && !content.trip_data?.spots?.length) {
     try {
       await throttle(500);
       const stats = buildStatsFromTripData(content.trip_data) ?? await extractKeyStats(content);

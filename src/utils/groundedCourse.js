@@ -478,7 +478,7 @@ export async function buildGroundedCourse(content, keyword) {
   if (boat) checks.push('섬으로 가는 배편은 운항 시간이 다를 수 있으니 현지에서 확인하세요.');
   if (facDays.length) checks.push(`${facDays.map((d) => `${d}일차`).join('·')}는 한 시설에서 하루를 보내므로 입장 방식과 운영 시간을 공식 안내에서 미리 확인하세요.`);
   checks.push('각 장소의 영업시간과 휴무일은 방문 전에 공식 안내에서 한 번 더 확인하세요.');
-  sections.push({ level: 2, heading: '떠나기 전 체크리스트', id: 'checklist', body: checks.join('\n'), html: `<ul style="margin:0 0 14px;padding-left:20px;line-height:1.9">${checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>`, generated: 'code' });
+  sections.push({ level: 2, heading: '떠나기 전 체크리스트', id: 'checklist', body: checks.join('\n'), html: `<ul style="margin:0 0 14px;padding-left:20px;line-height:1.9">${checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>{{CHECKLIST_EXTRA}}`, generated: 'code' });
 
   // ── 마무리 + 출처
   const closing = `${keyword} 코스는 ${tripData.spots.length}곳을 ${days.length}일에 나눠 담았습니다. 시간표는 권장 예시이니 하루의 컨디션에 맞춰 조절하세요.`;

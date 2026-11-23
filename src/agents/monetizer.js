@@ -830,6 +830,7 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
         contentHtml = s.html
           .replace('{{ATTRIBUTION}}', extras.ratingAttrHtml ?? '')
           .replace('{{NEXT_DAY_LINK}}', extras.nextDayLinkHtml ?? '')
+          .replace('{{CHECKLIST_EXTRA}}', extras.checklistHtml ?? '')
           .replace(/\{\{DAY_EXTRA_(\d+)\}\}/g, (_, d) => extras.dayAffiliate?.get(Number(d)) ?? '');
       } else if (dayMatch) {
         // 본문 = "코드 목록\n\n해설" — 목록은 표로 대체하고 해설만 남긴다.
@@ -849,14 +850,17 @@ function renderSections(sections, affiliateMap, bodyImages = [], seoKeywords = [
 
       return (
         // ① 섹션 헤더: 번호 뱃지 + 카테고리 색상
+        // D-172: 근거 템플릿 중간 광고는 2일차 이상 코스에서 가운데 일차 앞에 1회
+        (s.html && s.day && (tripData?.days ?? 1) >= 2 && s.day === Math.floor((tripData?.days ?? 1) / 2) + 1 ? (extras.adBetweenDays ?? '') : '') +
         `<div class="section-hdr" style="--cat-color:${catColor}">\n` +
-        `<span class="s-num">${i + 1}</span>\n` +
+        (s.html ? '' : `<span class="s-num">${i + 1}</span>\n`) + // D-172: 근거 템플릿은 번호 배지 없이 H2만
         `<${tag}${s.id ? ` id="${s.id}"` : ''}>${s.heading}</${tag}>\n` +
         `</div>\n` +
         `${imageHtml}\n` +
         contentHtml +
         `${affiliateHtml}` +
         (/한눈에/.test(s.heading ?? '') ? (extras.afterGlanceHtml ?? '') : '') +
+        (s.id === 'overview' ? (extras.adAfterOverview ?? '') : '') +
         (i === lastDayIdx ? (extras.ratingAttrHtml ?? '') : '')
       );
     })
@@ -995,11 +999,14 @@ async function monetizeBlogDraft(content) {
       const budget = Math.min(MAX_COUPANG_PER_POST, MAX_TOTAL_AFFILIATE_PER_POST - placeAff.count - (travelpayoutsHtml ? 1 : 0));
       const picked = pickTravelCoupang(entries, derived, budget);
       const placed = placeTravelCoupang(picked, derived);
-      for (const [day, list] of placed.byDay) {
+      if (blog_draft.grounded) {
+        // D-172: 근거 템플릿은 준비물(쿠팡)을 "떠나기 전 체크리스트" 한 곳에 모은다 — 본문 곳곳에 흩지 않는다
+        coupangPrep.checklistHtml = `<p style="margin:0 0 14px;font-size:14px">🧳 준비물 — ${picked.map(coupangLineHtml).join(' · ')}</p>`;
+      } else for (const [day, list] of placed.byDay) {
         const html = `<p style="margin:0 0 14px;font-size:14px">🧳 ${list.map(coupangLineHtml).join(' · ')}</p>\n`;
         placeAff.byDay.set(day, (placeAff.byDay.get(day) ?? '') + html);
       }
-      if (placed.rest.length) coupangPrep.restHtml = `<p style="margin:0 0 14px;font-size:14px">🧳 ${placed.rest.map(coupangLineHtml).join(' · ')}</p>`;
+      if (!blog_draft.grounded && placed.rest.length) coupangPrep.restHtml = `<p style="margin:0 0 14px;font-size:14px">🧳 ${placed.rest.map(coupangLineHtml).join(' · ')}</p>`;
       coupangPrep.count = picked.length;
       coupangPrep.ids = picked.map((e) => e.id);
       if (picked.length) {
@@ -1015,7 +1022,16 @@ async function monetizeBlogDraft(content) {
     if (nextUrl) nextDayLinkHtml = `<a href="${nextUrl}" target="_blank" rel="noopener">트레쥴에서 ${blog_draft.next_days}일 코스 보기</a>`;
   }
   const sectionsHtml = renderSections(blog_draft.sections, affiliateMap, bodyImages, seoKeywords, catColor, content.trip_data,
-    { dayAffiliate: placeAff.byDay, ratingAttrHtml: blog_draft.grounded ? ratingAttributionHtml(content.trip_data) : '', nextDayLinkHtml, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
+    blog_draft.grounded
+      ? {
+        // D-172: 광고는 시간표 아래 · 일차 사이 · FAQ 앞 3곳, 제휴(준비물·숙소·eSIM)는 체크리스트 한 곳
+        dayAffiliate: placeAff.byDay, ratingAttrHtml: ratingAttributionHtml(content.trip_data), nextDayLinkHtml,
+        afterGlanceHtml: traduleCtaLine,
+        adAfterOverview: adsenseSlot('after_timetable'),
+        adBetweenDays: adsenseSlot('between_days'),
+        checklistHtml: `${coupangPrep.checklistHtml ?? ''}${placeAff.hotelHtml}${travelpayoutsHtml ?? ''}`,
+      }
+      : { dayAffiliate: placeAff.byDay, nextDayLinkHtml, afterGlanceHtml: `${traduleCtaLine}${placeAff.hotelHtml}${coupangPrep.restHtml}` });
   const faqHtml      = renderFaq(blog_draft.faq);
 
   // 2026-09-18: 지원금/이벤트성 키워드로 웹 검색 사실 검증(factSearch.js)을 거친 글이면
@@ -1109,7 +1125,7 @@ async function monetizeBlogDraft(content) {
     // 제휴 링크가 있을 때만(hasAffiliate) 여기 노출하고, 링크 카드 옆(buildAffiliateBlock
     // 내부)에도 동일 문구를 남겨 "링크 근처 재고지" 권장사항도 함께 충족한다.
     (hasAffiliate || (blog_draft.grounded && coupangPrep.count > 0)) ? PARTNERS_DISCLOSURE : '', // D-171 ⑬: 근거 템플릿은 쿠팡 고지를 상단 1회만
-    adsenseSlot('title_below'),
+    blog_draft.grounded ? '' : adsenseSlot('title_below'),
     tldrHtml,                                     // TL;DR 박스
     tldrHtml ? ratingAttributionHtml(content.trip_data) : '', // D-155: 평점이 나오는 한눈에 보기 아래 출처
     (!blog_draft.grounded && coupangPrep.count > 0) ? PARTNERS_DISCLOSURE : '', // D-144: 쿠팡 링크가 있으면 TL;DR 아래 대가성 고지
@@ -1119,19 +1135,20 @@ async function monetizeBlogDraft(content) {
     midBodyCta,                                   // §6(2026-09-18): 코스 표 바로 아래로 위치 이동
     infoCardHtml,                                 // 핵심 수치 인포그래픽
     sectionsHtml,                                 // 섹션 본문
-    travelpayoutsHtml,                            // 순위 5: 해외 코스 eSIM 제휴 (국내는 빈 문자열)
+    blog_draft.grounded ? '' : travelpayoutsHtml, // 순위 5: 해외 코스 eSIM 제휴 (근거 템플릿은 체크리스트 안)
     travelpayoutsDisclosure,                      // 위 블록이 실제로 있을 때만 고지
     placeAff.count > 0 && !travelpayoutsDisclosure ? TRAVELPAYOUTS_DISCLOSURE : '', // D-137: 장소 제휴 링크가 있을 때 고지
-    adsenseSlot('mid_content'),
+    blog_draft.grounded ? '' : adsenseSlot('mid_content'),
     conclusionAffiliate,
+    blog_draft.grounded ? adsenseSlot('before_faq') : '',
     faqHtml,
     sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     (!blog_draft.grounded && coupangPrep.count > 0) ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지
     tagCloudHtml,                                 // 키워드 태그 클라우드
     ctaBox,
-    travelpayoutsFooterHtml,                      // 순위 5 §1: 푸터 배치 (본문 중간 1회 + 여기 1회)
-    adsenseSlot('post_end'),
+    blog_draft.grounded ? '' : travelpayoutsFooterHtml, // 순위 5 §1: 푸터 배치 (근거 템플릿은 체크리스트 1회만)
+    blog_draft.grounded ? '' : adsenseSlot('post_end'),
   ].filter(Boolean).join('\n\n');
 
   const html = [
