@@ -85,20 +85,57 @@ function factcheckSentences(sentences, extract, spotName) {
 const GENERIC_TOKENS = new Set(['곳', '이곳', '장소', '여행', '관광', '방문', '일대', '지역', '주변', '근처', '다양한', '함께', '또한', '위해', '통해', '대한', '여러', '있다', '있습니다', '볼', '보기']);
 const normForOverlap = (t) => String(t).replace(/\s+/g, '');
 
+/**
+ * D-173: 설명 재작성 LLM — OpenAI(gpt-4o-mini) → Gemini(2.5-flash) → Claude 순으로 시도한다. 하나라도 성공하면 그 결과를 쓴다.
+ * Gemini 키는 헤더(x-goog-api-key)로 보낸다.
+ */
+async function callLlmJson(prompt) {
+  if (config.openai?.apiKey) {
+    try {
+      await throttle(1500, 'openai');
+      const res = await retryOn429(() => axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.3, response_format: { type: 'json_object' },
+      }, { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 90000 }));
+      return { provider: 'openai', json: JSON.parse(res.data.choices[0].message.content) };
+    } catch (err) { logger.warn(`[groundedCourse] OpenAI 재작성 실패 → 다음 모델: ${err.message}`); }
+  }
+  if (config.gemini?.apiKey) {
+    for (const model of ['gemini-2.5-flash', 'gemini-2.5-flash-lite']) {
+      try {
+        await throttle(1500, 'gemini');
+        const res = await retryOn429(() => axios.post(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          contents: [{ parts: [{ text: prompt }] }], generationConfig: { response_mime_type: 'application/json', temperature: 0.3 },
+        }, { headers: { 'x-goog-api-key': config.gemini.apiKey, 'Content-Type': 'application/json' }, timeout: 90000 }));
+        const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        return { provider: `gemini:${model}`, json: JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? '{}') };
+      } catch (err) { logger.warn(`[groundedCourse] Gemini(${model}) 재작성 실패 → 다음 모델: ${err.message}`); }
+    }
+  }
+  if (config.anthropic?.apiKey) {
+    try {
+      await throttle(1500, 'anthropic');
+      const res = await retryOn429(() => axios.post('https://api.anthropic.com/v1/messages', {
+        model: 'claude-sonnet-4-6', max_tokens: 4096, messages: [{ role: 'user', content: `${prompt}\n\n반드시 순수 JSON만 응답하세요.` }],
+      }, { headers: { 'x-api-key': config.anthropic.apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }, timeout: 90000 }));
+      const text = res.data.content?.[0]?.text ?? '';
+      return { provider: 'anthropic', json: JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? '{}') };
+    } catch (err) { logger.warn(`[groundedCourse] Claude 재작성 실패: ${err.message}`); }
+  }
+  return null;
+}
+
 async function rewriteWithLlm(items) {
-  if (!config.openai?.apiKey || !items.length) return null;
+  if (!items.length) return null;
   const prompt =
     `아래 각 장소의 "근거"만 사용해 한국어 존댓말로 2~4문장 설명을 씁니다.\n` +
     `구성: 이 장소가 무엇인지 → 무엇을 보거나 하는 곳인지 → (근거에 있을 때만) 언제 가면 좋은지.\n` +
     `규칙: 근거에 없는 사실(연도·수치·가격·영업시간·순위·"최고/유명/인기" 같은 평가)은 절대 쓰지 마세요. 영어 근거는 한국어로 옮겨 쓰되 내용을 더하지 마세요. 직접 다녀온 경험처럼 쓰지 마세요. 근거가 빈약하면 1~2문장만 쓰세요.\n` +
     `"point"에는 이 장소의 핵심 포인트를 20자 이내 명사구로(근거에서만) 쓰세요.\n첫 문장은 이 장소만의 사실(연대·특징·볼거리 중 하나)로 시작하고, "~에 위치한 ~입니다"·"이곳에서는 ~할 수 있습니다" 같은 틀을 여러 장소에 반복하지 마세요. 둘째 문장은 근거에 있을 때만 관람 포인트·시간대를 쓰세요. 문법이 어색해지면 근거의 첫 문장을 그대로 쓰세요.\n반드시 JSON {"items":[{"id":번호,"name":"장소 이름 그대로","sentences":["문장1","문장2"],"point":"핵심 포인트"}]} 만 출력하세요.\n\n` +
     items.map((it) => `[${it.id}] ${it.name} (${it.kind ?? '장소'})\n근거: ${cleanExtract(it.extract)}`).join('\n\n');
-  try {
-    await throttle(1500, 'openai');
-    const res = await retryOn429(() => axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.3, response_format: { type: 'json_object' },
-    }, { headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' }, timeout: 90000 }));
-    const parsed = JSON.parse(res.data.choices[0].message.content);
+  const r = await callLlmJson(prompt);
+  if (!r) { logger.warn('[groundedCourse] 설명 재작성: 사용 가능한 LLM 없음 → 설명 생략'); return null; }
+  logger.info(`[groundedCourse] 설명 재작성 모델: ${r.provider}`);
+  const parsed = r.json;
     // id와 함께 되돌려 준 장소 이름이 입력과 다르면 그 항목은 버린다(한 칸 밀린 매칭 방지, D-171)
     const byId = new Map(items.map((it) => [it.id, it]));
     const out = new Map();
@@ -109,10 +146,6 @@ async function rewriteWithLlm(items) {
       out.set(it.id, { sentences: (x.sentences ?? []).map(String), point: String(x.point ?? '').slice(0, 24) });
     }
     return out;
-  } catch (err) {
-    logger.warn(`[groundedCourse] 설명 재작성 실패 → 추출식으로 대체: ${err.message}`);
-    return null;
-  }
 }
 
 /** 장소별 근거 설명을 모은다. @returns Map<spot, {sentences, source:{title,url,lang}}> */
