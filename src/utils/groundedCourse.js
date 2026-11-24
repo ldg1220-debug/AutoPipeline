@@ -69,6 +69,8 @@ function factcheckSentences(sentences, extract, spotName) {
     const badNum = nums.find((n) => !src.includes(n.replace(/[,.]$/, '')));
     if (badNum) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거에 없는 숫자(${badNum}) place=${spotName}`); continue; }
     if (HYPE.test(s) && !HYPE.test(src)) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거에 없는 과장 표현 place=${spotName}`); continue; }
+    // D-174: 가격·입장료·요금·주차비 같은 변동 정보는 근거에 있어도 쓰지 않는다(경비·가격 금지 원칙)
+    if (/입장료|무료\s*입장|무료로|요금|가격|주차비|\d[\d,]*\s*(원|엔|달러|위안)/.test(s)) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=가격·요금 정보 place=${spotName}`); continue; }
     // D-171 ③: 최상급·범위 표현(가장·최초·최대·최고·유일·제일·세계)은 원문 발췌에 같은 표현이 있을 때만 — 첨성대 "세계에서 가장 오래된"(원문은 동양 기준) 방지
     const badSuper = ['가장', '최초', '최대', '최고', '유일', '제일', '세계'].find((w) => s.includes(w) && !src.includes(w));
     if (badSuper) { logger.info(`[factcheck] removed="${s.slice(0, 40)}" reason=근거에 없는 최상급·범위 표현(${badSuper}) place=${spotName}`); continue; }
@@ -290,14 +292,17 @@ function dayAction(tripData, day, list) {
 const isSightKind = (sp) => !sp.lodging && sp.category !== '숙소' && SIGHT_KINDS.has(inferSpotKind(sp));
 
 /** 권역 이름 = 그날 대표 명소 2개를 묶은 "A·B 일대" (지어낸 동네 이름 금지). */
-function districtOf(tripData, day, list, regionName) {
+function districtOf(tripData, day, list, regionName, hasDesc = () => false) {
   const fac = getFacilitySpot(tripData, day, list);
   if (fac) return { name: fac.name, short: fac.name, rep: fac };
   const a = pickRepSpot(list, isSightKind);
   const base = (n) => String(n).replace(/\s+/g, '').replace(regionName ?? '', '');
-  const b = list.find((sp) => isSightKind(sp) && sp !== a && a && !base(sp.name).includes(base(a.name)) && !base(a.name).includes(base(sp.name)));
+  // D-174: 두 번째 대표는 근거 설명이 붙은 명소를 우선(설명 없는 장소가 제목·권역 이름에 오르지 않게)
+  const cands = list.filter((sp) => isSightKind(sp) && sp !== a && a && !base(sp.name).includes(base(a.name)) && !base(a.name).includes(base(sp.name)));
+  const b = cands.find(hasDesc) ?? cands[0];
   const first = a ?? list[0];
-  const trim = (n) => (regionName && String(n).startsWith(regionName) && String(n).length > regionName.length + 1 ? String(n).slice(regionName.length).trim() : String(n));
+  // 지역 접두어는 "경주 월정교"처럼 띄어 쓴 경우만, 남는 이름이 2글자 이상일 때 뗀다("오사카 성"→"성"·"경주타워"→"타워" 방지, D-174)
+  const trim = (n) => { const rest = regionName && String(n).startsWith(`${regionName} `) ? String(n).slice(regionName.length).trim() : ''; return rest.replace(/\s+/g, '').length >= 2 ? rest : String(n); };
   const names = [trim(first.name), b ? trim(b.name) : null].filter(Boolean);
   return { name: `${names.join('·')} 일대`, short: names.join('·'), rep: first };
 }
@@ -363,7 +368,7 @@ export async function buildGroundedCourse(content, keyword) {
   for (const [sp, d] of descMap) { if (d.photo && photos.size < MAX_PHOTOS) photos.set(sp, d.photo); }
   logger.info(`[groundedCourse] ${keyword}: 근거 설명 ${descMap.size}곳 / 전체 ${tripData.spots.length}곳, 출처 문서 ${sourcesMap.size}개, 사진 ${photos.size}장`);
 
-  const dist = new Map(days.map((d) => [d, districtOf(tripData, d, byDay.get(d), region)]));
+  const dist = new Map(days.map((d) => [d, districtOf(tripData, d, byDay.get(d), region, (sp) => descMap.has(sp))]));
   const tt = new Map(days.map((d) => [d, buildTimetable(tripData, d, byDay.get(d))]));
   const ls = new Map(days.map((d) => [d, legSummary(tripData, byDay.get(d))]));
   const facOf = (d) => getFacilitySpot(tripData, d, byDay.get(d));
