@@ -1001,7 +1001,7 @@ async function monetizeBlogDraft(content) {
       const placed = placeTravelCoupang(picked, derived);
       if (blog_draft.grounded) {
         // D-172: 근거 템플릿은 준비물(쿠팡)을 "떠나기 전 체크리스트" 한 곳에 모은다 — 본문 곳곳에 흩지 않는다
-        coupangPrep.checklistHtml = `<p style="margin:0 0 14px;font-size:14px">🧳 준비물 — ${picked.map(coupangLineHtml).join(' · ')}</p>`;
+        coupangPrep.checklistHtml = `<p style="margin:0 0 14px;font-size:14px">🧳 ${picked.map(coupangLineHtml).join(' · ')}</p>`; // coupangLineHtml이 이미 "준비물 —"을 붙인다
       } else for (const [day, list] of placed.byDay) {
         const html = `<p style="margin:0 0 14px;font-size:14px">🧳 ${list.map(coupangLineHtml).join(' · ')}</p>\n`;
         placeAff.byDay.set(day, (placeAff.byDay.get(day) ?? '') + html);
@@ -1145,7 +1145,7 @@ async function monetizeBlogDraft(content) {
     sourcesHtml,                                  // 2026-09-18: 지원금/이벤트성 키워드 웹 검색 출처
     relatedPostsHtml,                             // 관련 포스트 내부 링크
     (!blog_draft.grounded && coupangPrep.count > 0) ? PARTNERS_DISCLOSURE : '', // D-144: 하단 재고지
-    tagCloudHtml,                                 // 키워드 태그 클라우드
+    blog_draft.grounded ? '' : tagCloudHtml, // 키워드 태그 클라우드 (근거 템플릿은 태그 1개짜리 블록이라 생략 — 태그는 티스토리 태그 칸으로)
     ctaBox,
     blog_draft.grounded ? '' : travelpayoutsFooterHtml, // 순위 5 §1: 푸터 배치 (근거 템플릿은 체크리스트 1회만)
     blog_draft.grounded ? '' : adsenseSlot('post_end'),

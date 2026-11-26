@@ -31,6 +31,8 @@ const ITEMS = [
   // 번호가 밀리지 않도록 맨 끝에 추가 (다른 안내문이 "메뉴 N번"을 가리킴)
   { label: '자동 발행 스케줄 등록 (매일 09:20·17:20, Windows 작업 스케줄러)', confirm: true, build: () => cmdFile('install-schedule.cmd') },
   { label: '자동 발행 스케줄 해제',                           confirm: true, build: () => cmdFile('uninstall-schedule.cmd') },
+  { label: '발행 글 휴대폰 화면 점검 — 글 주소 또는 번호 입력 (광고·사진·넘침, 비용 0)', ask: '글 주소 또는 번호 (예: 291)',
+    build: (v) => node('audit-post.js', /^\d+$/.test(v) ? `https://maeilg.com/${v}` : v) },
 ];
 
 const PRINT_ONLY = Boolean(process.env.AB_PRINT);

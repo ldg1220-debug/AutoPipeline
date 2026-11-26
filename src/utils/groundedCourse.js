@@ -180,7 +180,9 @@ async function collectDescriptions(spots, region) {
   const out = new Map();
   for (const t of targets) {
     let sentences = llm?.get(t.id)?.sentences;
-    const point = llm?.get(t.id)?.point || '';
+    let point = llm?.get(t.id)?.point || '';
+    // D-175: 핵심 포인트(요약 구절)도 같은 검증 — 근거에 없는 최상급·숫자·과장이면 버린다("현존 최고령 천문대" 실측)
+    if (point && !factcheckSentences([point], t.extract, t.name).length) point = '';
     if (!sentences?.length) {
       // D-167: 추출식 대체는 쓰지 않는다 — LLM 재작성이 없으면 이 장소는 "코스상 역할 1문장"만 붙는다.
       if (!preview || t.fact.lang !== 'ko') { logger.info(`[groundedCourse] 설명 생략(재작성 없음): ${t.name}`); continue; }
@@ -320,11 +322,20 @@ const TIME_TAG = [[/야경/, '야경'], [/일몰|노을/, '일몰'], [/새벽|�
 /** 추천 시간대는 위키 근거 문장에 해당 단어가 있을 때만. */
 function timeTag(extract) { for (const [re, tag] of TIME_TAG) if (re.test(extract ?? '')) return tag; return null; }
 
+/** 사진 작성자 표기 정리 — "Unknown author Unknown author" → "작성자 미상", 같은 구절 반복 제거 (D-175) */
+function cleanArtist(a) {
+  let t = String(a ?? '').replace(/\s+/g, ' ').trim();
+  if (/unknown author|author unknown|unknown/i.test(t) && t.replace(/unknown author|unknown/gi, '').trim().length < 3) return '작성자 미상';
+  const half = Math.floor(t.length / 2);
+  if (t.length > 6 && t.slice(0, half).trim() === t.slice(half).trim()) t = t.slice(0, half).trim();
+  return t.replace(/^by\s+/i, '');
+}
 const tipHtml = (t) => `<p style="margin:6px 0 10px;padding:8px 12px;background:#f8fafc;border-left:3px solid #94a3b8;font-size:14px;line-height:1.7">📌 ${esc(t)}</p>\n`;
 
 function isIndoorLike(sp) {
   const k = inferSpotKind(sp);
-  return k === '수족관' || k === '시장' || k === '전망대' || /박물관|미술관|museum/i.test(sp.name ?? '');
+  // D-175: 비 오는 날 후보는 실내가 분명한 수족관·박물관·미술관만(전망대·시장은 실내 여부를 데이터로 알 수 없음)
+  return k === '수족관' || /박물관|미술관|기념관|과학관|museum|aquarium/i.test(sp.name ?? '');
 }
 
 async function nextDayDistrict(content, days) {
@@ -396,17 +407,25 @@ export async function buildGroundedCourse(content, keyword) {
   const lead = `${s1} ${s2} ${s3}`;
 
   // ── 목차 + 시간표
-  const toc = `<ul class="course-toc" style="margin:0 0 16px;padding-left:20px;line-height:1.9">` +
-        days.map((d) => `<li><a href="#day${d}">${d}일차 ${dayPeriod(tt.get(d).blocks)}: ${esc(dist.get(d).short)}</a></li>`).join('') +
-    `<li><a href="#situations">상황별로 바꾸기</a></li><li><a href="#faq">자주 묻는 질문</a></li></ul>`;
-  const rowsHtml = days.flatMap((d) => tt.get(d).rows.map((r, i) => {
-    const d0 = descMap.get(r.sp);
-    const point = d0?.point || r.kind || '—';
-    return `<tr>${i === 0 ? `<td rowspan="${tt.get(d).rows.length}">${d}일차</td>` : ''}<td>${r.time}</td><td>${esc(r.sp.name)}</td><td>${straight ? '—' : esc(r.move)}</td><td>${esc(point)}</td></tr>`;
-  })).join('\n');
+  // D-175: 모바일 우선 — 목차는 밑줄 없는 칩, 시간표는 5열 표 대신 일차별 카드 목록(390px에서 줄바꿈으로 깨지던 문제)
+  const tocLink = (href, label) => `<a href="${href}" style="display:inline-block;margin:0 6px 8px 0;padding:6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:14px;text-decoration:none">${label}</a>`;
+  const toc = `<nav class="course-toc" style="margin:0 0 18px">` +
+    days.map((d) => tocLink(`#day${d}`, `${d}일차 · ${esc(dist.get(d).short)}`)).join('') +
+    tocLink('#situations', '상황별로 바꾸기') + tocLink('#faq', '자주 묻는 질문') + `</nav>`;
+  const chip = (t) => `<span style="display:inline-block;min-width:44px;padding:2px 8px;margin-right:8px;border-radius:6px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:700;text-align:center">${esc(t)}</span>`;
+  const dayCards = days.map((d) => {
+    const items = tt.get(d).rows.map((r) => {
+      const d0 = descMap.get(r.sp);
+      const point = d0?.point || (r.kind === '식사' || r.kind === '카페' ? r.kind : '');
+      return `<li style="padding:10px 0;border-top:1px solid #e2e8f0;list-style:none">${chip(r.time)}<b style="font-size:15px">${esc(r.sp.name)}</b>` +
+        (point ? `<div style="margin:2px 0 0 60px;font-size:13px;color:#64748b">${esc(point)}</div>` : '') +
+        (!straight && r.move !== '—' ? `<div style="margin:2px 0 0 60px;font-size:13px;color:#94a3b8">→ ${esc(r.move)}</div>` : '') + `</li>`;
+    }).join('');
+    return `<div style="margin:0 0 14px;padding:12px 14px 4px;border:1px solid #e2e8f0;border-radius:12px"><div style="font-weight:800;font-size:15px;margin-bottom:4px">${d}일차 <span style="font-weight:500;color:#64748b">· ${esc(dist.get(d).short)}</span></div><ul style="margin:0;padding:0">${items}</ul></div>`;
+  }).join('\n');
   const overviewHtml = toc +
-    `<p style="margin:0 0 8px;font-size:13px;color:#64748b">시간대는 식사·마지막 장소의 종류와 순서로 나눈 <b>권장 예시</b>입니다. 장소별 머무는 시간은 아래 각 장소에 종류별 일반 관람 소요 범위로 적었고, 실제 방문 상황에 따라 달라집니다.</p>\n` +
-    `<div class="timeline-table"><table>\n<thead><tr><th>일차</th><th>시간대(권장)</th><th>장소</th><th>이동</th><th>핵심 포인트</th></tr></thead>\n<tbody>\n${rowsHtml}\n</tbody>\n</table></div>\n{{ATTRIBUTION}}`;
+    `<p style="margin:0 0 10px;font-size:13px;color:#64748b">시간대는 식사·마지막 장소의 종류와 순서로 나눈 <b>권장 예시</b>입니다. 장소별 머무는 시간은 아래 각 장소에 적었고, 실제 방문 상황에 따라 달라집니다.</p>\n` +
+    `${dayCards}\n{{ATTRIBUTION}}`;
   const overviewText = days.map((d) => `${d}일차: ${tt.get(d).rows.map((r) => `${r.time} ${r.sp.name}`).join(', ')}`).join('\n');
   sections.push({ level: 2, heading: `한눈에 보는 ${keyword} 시간표`, id: 'overview', body: `${lead}\n${overviewText}`, html: overviewHtml, generated: 'code' });
 
@@ -419,7 +438,7 @@ export async function buildGroundedCourse(content, keyword) {
     const intro = fac
       ? `${d}일차는 ${fac.name}에서 하루 대부분을 보내는 날입니다.${list.length > 1 ? ` 함께 넣은 곳: ${list.filter((x) => x !== fac).map((x) => x.name).join('·')}.` : ''}`
       : [
-        `${d}일차는 ${list[0].name}에서 시작해 ${list[list.length - 1].name}에서 마칩니다. 모두 ${list.length}곳이고, 아래 장소 순서대로 이동합니다.`,
+        `${d}일차는 ${list[0].name}에서 시작해 ${list[list.length - 1].name}에서 마칩니다(${list.length}곳).`,
         // 권역 성격: 대표 장소에 위키 근거 설명(핵심 포인트)이 있을 때만, 그리고 데이터 사실 한 문장
         (descMap.get(dist.get(d).rep)?.point ? `이날의 중심은 ${dist.get(d).rep.name}(${descMap.get(dist.get(d).rep).point})입니다.` : ''),
         (() => {
@@ -439,9 +458,17 @@ export async function buildGroundedCourse(content, keyword) {
       if (kind === '식사' || kind === '카페') {
         // D-171 ⑧: 식사·카페는 순서 자리에 한 줄로 — "🍽 점심 — 우렁각시 (다음 장소까지 도보 2분)"
         const label = kind === '카페' ? '☕ 카페' : `🍽 ${r.time === '점심' || r.time === '저녁' ? r.time : '식사'}`;
-        const line = `${label} — ${sp.name}${mvText ? ` (${next.name}까지 ${mvText})` : ''}`;
-        html += `<p style="margin:14px 0 14px;padding:8px 12px;background:#f8fafc;border-radius:6px;line-height:1.7">${esc(line)}</p>\n`;
+        // D-175: 앞 장소에서 오는 이동은 이 줄에 합치고(앞 장소의 "→ 다음" 줄은 생략), 다음 이동은 일반 "→ 다음" 줄로
+        const prev = list[i - 1];
+        const inMove = prev && !straight && typeof prev.toNextMinutes === 'number' && !isBoatLeg(prev, sp) ? `${mvLabel(prev)} ${prev.toNextMinutes}분` : '';
+        const line = `${label} — ${sp.name}${inMove ? ` · ${prev.name}에서 ${inMove}` : ''}`;
+        html += `<p style="margin:14px 0 8px;padding:10px 12px;background:#f8fafc;border-radius:8px;line-height:1.7">${esc(line)}</p>\n`;
         body += `\n${line}`;
+        if (next && !['식사', '카페'].includes(inferSpotKind(next))) {
+          const nl = mvText ? `→ 다음: ${next.name} ${mvText}` : `→ 다음: ${next.name}`;
+          html += `<p style="margin:0 0 6px;font-size:14px;color:#475569">${esc(nl)}</p>\n`;
+          body += `\n${nl}`;
+        }
         return;
       }
       const desc = descMap.get(sp);
@@ -461,11 +488,11 @@ export async function buildGroundedCourse(content, keyword) {
       const ph = photos.get(sp);
       if (ph) {
         usedPhotos += 1;
-        html += `<figure style="margin:8px 0 12px"><img src="${esc(ph.url)}" alt="${esc(sp.name)}" loading="lazy" style="width:100%;height:auto;display:block;border-radius:8px" /><figcaption style="font-size:12px;color:#64748b;margin-top:4px">사진: ${esc(ph.artist)}, ${esc(ph.license)}, <a href="${esc(ph.pageUrl)}" target="_blank" rel="noopener nofollow">Wikimedia Commons</a></figcaption></figure>\n`;
+        html += `<figure style="margin:8px 0 12px"><img src="${esc(ph.url)}" alt="${esc(sp.name)}" loading="lazy" style="width:100%;height:auto;display:block;border-radius:8px" /><figcaption style="font-size:12px;color:#64748b;margin-top:4px">사진: ${esc(cleanArtist(ph.artist))}, ${esc(ph.license)}, <a href="${esc(ph.pageUrl)}" target="_blank" rel="noopener nofollow">Wikimedia Commons</a></figcaption></figure>\n`;
       }
       if (next && isBoatLeg(sp, next)) { const t = '다음 장소는 배편으로 이동합니다. 배 시간은 현지에서 확인하세요.'; html += tipHtml(t); body += `\n팁: ${t}`; }
       if (fac && sp === fac) { const t = list.length === 1 ? '이날은 이곳만 넣었습니다. 다른 일정을 더하지 않고 하루를 쓰도록 구성했습니다.' : '이날은 이곳을 중심으로 하루를 보내도록 구성했습니다.'; html += tipHtml(t); body += `\n팁: ${t}`; }
-      if (next) {
+      if (next && !['식사', '카페'].includes(inferSpotKind(next))) {
         const line = mvText ? `→ 다음: ${next.name} ${mvText}` : `→ 다음: ${next.name}`;
         html += `<p style="margin:0 0 6px;font-size:14px;color:#475569">${esc(line)}</p>\n`;
         body += `\n${line}`;
@@ -486,7 +513,7 @@ export async function buildGroundedCourse(content, keyword) {
   // ── 상황별로 바꾸기 (데이터로 쓸 수 있는 항목만)
   const sit = [];
   const indoor = tripData.spots.filter((sp) => isIndoorLike(sp) && !sp.lodging);
-  if (indoor.length) sit.push(['비 오는 날', `코스 안에서 박물관·수족관·시장·전망대로 분류된 곳은 ${indoor.map((sp) => `${sp.name}(${sp.day ?? 1}일차)`).join(', ')}입니다. 비가 오면 이곳들을 먼저 묶어 순서를 바꾸는 방법이 있습니다.`]);
+  if (indoor.length) sit.push(['비 오는 날', `코스 안에서 실내 관람 시설(박물관·수족관 등)은 ${indoor.map((sp) => `${sp.name}(${sp.day ?? 1}일차)`).join(', ')}입니다. 비가 오면 이곳들을 먼저 묶어 순서를 바꾸는 방법이 있습니다.`]);
   const kidSpots = tripData.spots.filter((sp) => ['테마파크', '수족관', '동물원', '공원'].includes(inferSpotKind(sp)));
   const longWalk = days.filter((d) => !facOf(d)).map((d) => [d, ls.get(d).legs.filter((l) => l.toNextMode === 'walk').reduce((a, l) => a + l.toNextMinutes, 0)]).filter(([, m]) => m >= 45);
   if (kidSpots.length || longWalk.length) {
@@ -537,7 +564,7 @@ export async function buildGroundedCourse(content, keyword) {
     { q: `차 없이 ${region} 코스를 다닐 수 있나요?`, a: carLegs ? `코스에 차량 이동 구간이 ${carLegs}개 있습니다. 나머지 구간은 도보나 대중교통이며, 차량 구간은 대중교통·택시로 바꿀 수 있는지 따로 확인하세요.` : '코스에 차량 이동 구간이 없어 도보·대중교통만으로 이어집니다.' },
     { q: '하루에 몇 곳을 도나요?', a: `${perDayText}이고, 가장 많은 날은 ${maxDay[0]}일차(${maxDay[1]}곳)입니다.` },
     { q: `${rep.name}${josa(rep.name, '은', '는')} 몇 일차에 가나요?`, a: `${rep.day ?? 1}일차 ${byDay.get(rep.day ?? 1).indexOf(rep) + 1}번째 일정입니다.` },
-    { q: '비가 오면 어떻게 하나요?', a: indoor.length ? `코스 안의 박물관·수족관·시장·전망대 계열(${indoor.map((sp) => sp.name).join(', ')})을 먼저 묶는 방법이 있습니다.` : '이 코스에는 실내 위주로 분류된 장소가 없어, 비 오는 날의 대안은 따로 정하지 못했습니다.' },
+    { q: '비가 오면 어떻게 하나요?', a: indoor.length ? `코스 안의 실내 관람 시설(${indoor.map((sp) => sp.name).join(', ')})을 먼저 묶는 방법이 있습니다.` : '이 코스에는 실내 관람 시설이 없어 비 오는 날에는 일정을 줄이거나 실내 장소를 따로 찾아보세요.' },
     { q: '여행 기간은 어느 정도가 적당한가요?', a: `이 코스는 ${days.length}일에 ${tripData.spots.length}곳(${perDayText})으로 구성했습니다. 더 느긋하게 보려면 ${more ? `${(tripData.days ?? days.length) + 1}일 코스(${more.name} 추가)를 살펴보세요.` : '하루 더 긴 코스를 트레쥴에서 확인해 보세요.'}` },
   ].map((f) => ({ ...f, generated: 'code' }));
 
